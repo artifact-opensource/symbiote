@@ -45,6 +45,88 @@ export interface RunResult {
 }
 
 /**
+ * Compress tool results that the LLM has already consumed (produced a response after seeing them).
+ * Keeps the last batch of tool results intact (the LLM hasn't responded to them yet).
+ * Replaces large tool results with compact summaries to free context space.
+ */
+function compressConsumedToolResults(messages: Message[]): void {
+  // Find the index of the last assistant message that has NO tool calls
+  // (meaning it's a final response, not a tool-calling turn)
+  // Everything before the last tool-calling assistant message is "consumed"
+  
+  let lastToolCallingAssistantIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant' && messages[i].tool_calls?.length) {
+      lastToolCallingAssistantIdx = i;
+      break;
+    }
+  }
+  
+  if (lastToolCallingAssistantIdx <= 0) return;
+  
+  // Compress tool results that come BEFORE the last tool-calling assistant
+  const COMPRESS_THRESHOLD = 500; // chars — don't bother compressing small results
+  
+  for (let i = 0; i < lastToolCallingAssistantIdx; i++) {
+    const msg = messages[i];
+    if (msg.role !== 'tool') continue;
+    
+    const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+    if (content.length <= COMPRESS_THRESHOLD) continue;
+    
+    // Find the tool name from the preceding assistant's tool_calls
+    let toolName = 'tool';
+    for (let j = i - 1; j >= 0; j--) {
+      if (messages[j].role === 'assistant' && messages[j].tool_calls) {
+        const tc = messages[j].tool_calls!.find((tc: any) => tc.id === msg.tool_call_id);
+        if (tc) {
+          toolName = tc.name;
+          break;
+        }
+      }
+    }
+    
+    // Generate compact summary based on tool type
+    const summary = compressToolResult(toolName, content);
+    messages[i] = { ...msg, content: summary };
+  }
+}
+
+/**
+ * Generate a compact summary of a tool result based on tool type.
+ */
+function compressToolResult(toolName: string, content: string): string {
+  const bytes = content.length;
+  const lines = content.split('\n').length;
+  
+  switch (toolName) {
+    case 'read':
+      return `[Read result: ${bytes} bytes, ${lines} lines — content consumed]`;
+    case 'exec': {
+      // Keep first and last few lines for exec
+      const execLines = content.split('\n');
+      if (execLines.length <= 10) return content;
+      const head = execLines.slice(0, 3).join('\n');
+      const tail = execLines.slice(-3).join('\n');
+      return `[Exec result: ${lines} lines]\n${head}\n...[${lines - 6} lines omitted]...\n${tail}`;
+    }
+    case 'web_fetch':
+      return `[Web fetch: ${bytes} bytes — content consumed]`;
+    case 'memory_search':
+      // Keep the search results structure but truncate individual results
+      return content.length > 1000 ? content.slice(0, 1000) + `\n...[truncated from ${bytes} bytes]` : content;
+    case 'comb_recall':
+      // Keep COMB recall intact — it's operational memory
+      return content;
+    default:
+      if (bytes > 2000) {
+        return content.slice(0, 500) + `\n...[${toolName} result: ${bytes} bytes, ${lines} lines — compressed]`;
+      }
+      return content;
+  }
+}
+
+/**
  * Run the agent loop: send messages to LLM, process tool calls, repeat until done.
  * 
  * Handles three termination modes:
@@ -332,6 +414,13 @@ export async function runAgent(
         aborted: true,
         temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined,
       };
+    }
+
+    // LAYER 2: Compress consumed tool results from PREVIOUS iterations
+    // After the LLM has seen a tool result and produced a response, 
+    // the full result is no longer needed — compress to summary
+    if (iterations > 1) {
+      compressConsumedToolResults(currentMessages);
     }
 
     // Loop — send updated messages back to LLM

@@ -58,6 +58,7 @@ import { anthropicProvider } from '../providers/anthropic.js';
 import { openaiProvider } from '../providers/openai.js';
 import { githubCopilotProvider } from '../providers/github-copilot.js';
 import { geminiProvider } from '../providers/gemini.js';
+import { ContextMonitor } from '../agent/context-monitor.js';
 import { gladiusProvider } from '../providers/gladius.js';
 import { groqProvider } from '../providers/groq.js';
 import { ollamaProvider } from '../providers/ollama.js';
@@ -921,12 +922,32 @@ export class Mach6Gateway {
       let currentSessionMessages = session.messages;
       let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
 
+      // Proactive context management — warn, compact, COMB stage before overflow
+      const contextMonitor = new ContextMonitor({
+        maxContextTokens: (this.config as any).maxContextTokens ?? 80_000,
+        warnThreshold: 0.65,
+        compactThreshold: 0.75,
+        emergencyThreshold: 0.88,
+        transcriptDir: path.join(this.config.sessionsDir ?? '.sessions', 'transcripts'),
+        onCombStage: async (content: string) => {
+          try {
+            const store = getNativeCombStore(this.config.workspace);
+            store.stage(content, 'context-monitor');
+            console.log(`  [context-monitor] Auto-staged ${content.length} chars to COMB`);
+          } catch (err) {
+            console.error(`  [context-monitor] COMB stage failed:`, err);
+          }
+        },
+      });
+
       // Build the agent runner options factory (reused for fallback)
       const makeRunOpts = (useProvider: Provider, useConfig: ProviderConfig) => ({
         provider: useProvider,
         providerConfig: useConfig,
         toolRegistry: sandboxedTools,
         sessionId,
+        contextMonitor,
+        maxContextTokens: (this.config as any).maxContextTokens ?? 80_000,
         maxIterations: this.pulseBudget.getEffectiveCap(),
         blinkController: blinkCtrl,
         abortSignal: controller.signal,

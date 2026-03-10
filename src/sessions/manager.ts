@@ -217,9 +217,12 @@ export class SessionManager {
 
     if (convMsgs.length <= keepMessages) return 0;
 
-    // Archive the old messages
+    // LAYER 3: Extract decision summary before archiving
     const toArchive = convMsgs.slice(0, convMsgs.length - keepMessages);
     const toKeep = convMsgs.slice(convMsgs.length - keepMessages);
+    const archiveSummary = this.extractArchiveSummary(toArchive);
+
+    // Archive the old messages
 
     const archiveFile = path.join(this.archiveDir(), `${id.replace(/[^a-zA-Z0-9_\-:.]/g, '_')}-${Date.now()}.json`);
     const archiveData = {
@@ -233,6 +236,15 @@ export class SessionManager {
 
     // Update active session
     session.messages = [...systemMsgs, ...toKeep];
+
+    // Inject summary of archived conversation so context retains key findings
+    if (archiveSummary) {
+      session.messages.splice(systemMsgs.length, 0, {
+        role: 'user',
+        content: archiveSummary,
+      });
+    }
+
     this.save(session);
 
     console.log(`[sessions] Archived ${toArchive.length} messages from ${id} → ${path.basename(archiveFile)}`);
@@ -260,6 +272,69 @@ export class SessionManager {
       }
     } catch { /* dir doesn't exist */ }
     return totalArchived;
+  }
+
+  /**
+   * Extract a summary of key decisions and findings from messages being archived.
+   * Keeps the LLM aware of what happened earlier without the full conversation.
+   */
+  private extractArchiveSummary(messages: any[]): string | null {
+    if (messages.length === 0) return null;
+    
+    const findings: string[] = [];
+    const toolsUsed: string[] = [];
+    const filesRead: string[] = [];
+    const filesWritten: string[] = [];
+    const commands: string[] = [];
+    
+    for (const msg of messages) {
+      // Track assistant decisions (non-tool-call text responses)
+      if (msg.role === 'assistant' && typeof msg.content === 'string' && msg.content.length > 50 && !msg.tool_calls?.length) {
+        // Extract first sentence as a finding
+        const firstSentence = msg.content.split(/[.!?\n]/)[0]?.trim();
+        if (firstSentence && firstSentence.length > 20 && firstSentence.length < 200) {
+          findings.push(firstSentence);
+        }
+      }
+      
+      // Track tool usage
+      if (msg.role === 'assistant' && msg.tool_calls) {
+        for (const tc of msg.tool_calls) {
+          if (tc.name === 'read' && tc.input?.path) {
+            filesRead.push(String(tc.input.path).split('/').pop() || String(tc.input.path));
+          } else if (tc.name === 'write' && tc.input?.path) {
+            filesWritten.push(String(tc.input.path).split('/').pop() || String(tc.input.path));
+          } else if (tc.name === 'exec' && tc.input?.command) {
+            const cmd = String(tc.input.command).slice(0, 60);
+            commands.push(cmd);
+          } else if (!['read', 'write', 'exec'].includes(tc.name)) {
+            toolsUsed.push(tc.name);
+          }
+        }
+      }
+    }
+    
+    const parts: string[] = ['[Earlier conversation archived. Key context:]'];
+    
+    if (filesRead.length > 0) {
+      parts.push(`• Read: ${[...new Set(filesRead)].slice(0, 10).join(', ')}`);
+    }
+    if (filesWritten.length > 0) {
+      parts.push(`• Wrote: ${[...new Set(filesWritten)].slice(0, 10).join(', ')}`);
+    }
+    if (commands.length > 0) {
+      parts.push(`• Commands: ${[...new Set(commands)].slice(0, 5).join('; ')}`);
+    }
+    if (toolsUsed.length > 0) {
+      parts.push(`• Tools: ${[...new Set(toolsUsed)].join(', ')}`);
+    }
+    if (findings.length > 0) {
+      parts.push(`• Findings: ${findings.slice(0, 5).join('. ')}`);
+    }
+    
+    // Only return if we have meaningful content
+    if (parts.length <= 1) return null;
+    return parts.join('\n');
   }
 
 }
