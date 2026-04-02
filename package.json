@@ -51,13 +51,13 @@
   ],
   "author": "Artifact Virtual <hello@artifactvirtual.com> (https://artifactvirtual.com)",
   "license": "MIT",
-  "homepage": "https://github.com/Artifact-Virtual/symbiote#readme",
+  "homepage": "https://github.com/artifact-opensource/symbiote#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Artifact-Virtual/symbiote.git"
+    "url": "git+https://github.com/artifact-opensource/symbiote.git"
   },
   "bugs": {
-    "url": "https://github.com/Artifact-Virtual/mach6/issues"
+    "url": "https://github.com/artifact-opensource/symbiote/issues"
   },
   "engines": {
     "node": ">=20.0.0"

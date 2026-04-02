@@ -229,7 +229,7 @@ function testContextStore() {
 
   // Seed with knowledge
   db.indexBatch([
-    { id: '', text: 'The SHARD contract is deployed at 0xE89704585FD4Dc8397CE14e0dE463B53746049F5 on Base.', source: 'identity', role: 'context', timestamp: Date.now() - 3600000 },
+    { id: '', text: 'The SHARD contract is deployed at 0x0000000000000000000000000000000000000001 on Base.', source: 'identity', role: 'context', timestamp: Date.now() - 3600000 },
     { id: '', text: 'Ali birthday is March 12. He turned 38 in 2026.', source: 'memory', role: 'context', timestamp: Date.now() - 7200000 },
     { id: '', text: 'The vault key is at ~/.vault-key with permissions 600.', source: 'tools', role: 'context', timestamp: Date.now() - 1800000 },
     { id: '', text: 'Progressive expansion grows GLADIUS: Seed→Hatchling→Drake→Wyrm→Dragon.', source: 'workflow', role: 'context', timestamp: Date.now() - 900000 },
