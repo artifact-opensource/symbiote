@@ -476,7 +476,7 @@ html, body {
 </head>
 <body>
 <div class="app">
-  <div class="overlay" id="overlay" onclick="closePanels()"></div>
+  <div class="overlay" id="overlay" onclick="closePanels('overlay')"></div>
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="brand">
@@ -623,6 +623,7 @@ html, body {
 </div>
 <script>
 var API_BASE = window.location.origin;
+var defaultTemperature = 0.7;
 var storageKeys = {
   sessions: 'symbiote_sessions',
   active: 'symbiote_active_session',
@@ -1055,9 +1056,19 @@ function toggleControlPanel(forceState) {
 }
 
 function closePanels() {
-  document.getElementById('sidebar').classList.remove('open');
-  document.getElementById('controlPanel').classList.remove('open');
-  document.getElementById('controlPanel').setAttribute('aria-hidden', 'true');
+  var mode = arguments[0];
+  if (mode === 'overlay') {
+    if (document.getElementById('controlPanel').classList.contains('open')) {
+      document.getElementById('controlPanel').classList.remove('open');
+      document.getElementById('controlPanel').setAttribute('aria-hidden', 'true');
+    } else {
+      document.getElementById('sidebar').classList.remove('open');
+    }
+  } else {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('controlPanel').classList.remove('open');
+    document.getElementById('controlPanel').setAttribute('aria-hidden', 'true');
+  }
   syncOverlay();
 }
 
@@ -1126,8 +1137,8 @@ function applyRuntimeData(configData, providers, tools, agents) {
   renderProviderOptions();
   document.getElementById('providerSelect').value = configData.provider || '';
   document.getElementById('modelInput').value = configData.model || '';
-  document.getElementById('temperatureInput').value = String(configData.temperature == null ? 0.7 : configData.temperature);
-  updateTemperatureValue(configData.temperature == null ? 0.7 : configData.temperature);
+  document.getElementById('temperatureInput').value = String(configData.temperature == null ? defaultTemperature : configData.temperature);
+  updateTemperatureValue(configData.temperature == null ? defaultTemperature : configData.temperature);
   document.getElementById('maxTokensInput').value = String(configData.maxTokens || 8192);
 
   document.getElementById('providerList').innerHTML = renderPanelList(uiState.providers, 'No providers discovered yet.', function(provider) {
