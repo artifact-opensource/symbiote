@@ -496,7 +496,7 @@ html, body {
         <span id="footerStatusText">Connecting...</span>
       </div>
       <div class="sidebar-footer-item sidebar-footer-credit">
-        Powered by <a class="text-link-muted" id="sidebarBrandLink" href="https://github.com/artifact-opensource/symbiote" target="_blank" rel="noopener">Artifact Virtual</a>
+        Powered by <a class="text-link-muted" id="sidebarBrandLink" href="https://artifactvirtual.com" target="_blank" rel="noopener">Artifact Virtual</a>
       </div>
     </div>
   </aside>
@@ -631,7 +631,7 @@ var STORAGE_KEYS = {
 var UI_DEFAULTS = {
   appName: 'Symbiote',
   brandName: 'Artifact Virtual',
-  brandUrl: 'https://github.com/artifact-opensource/symbiote',
+  brandUrl: 'https://artifactvirtual.com',
   welcomeTitle: 'How can I help you today?',
   welcomeDescription: "I'm Agent, your AI assistant powered by Symbiote. Ask me anything.",
   emptySessionsLabel: 'No conversations yet',
@@ -669,7 +669,7 @@ function setActiveId(id) { localStorage.setItem(STORAGE_KEYS.active, id); }
 function getMessages(sid) { return loadJson(getMessageKey(sid), []); }
 function saveMessages(sid, messages) { localStorage.setItem(getMessageKey(sid), JSON.stringify(messages)); }
 function getDefaultSessionTitle() { return uiState.runtime.defaultSessionTitle || UI_DEFAULTS.defaultSessionTitle; }
-function getWelcomeDescription() { return uiState.runtime.welcomeDescription || UI_DEFAULTS.welcomeDescription.replace('Agent', uiState.agentName); }
+function getWelcomeDescription() { return uiState.runtime.welcomeDescription || UI_DEFAULTS.welcomeDescription.replaceAll('Agent', uiState.agentName); }
 function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
 
 function createSession() {
@@ -816,7 +816,7 @@ function formatMarkdown(text) {
   if (!text) return '';
   text = escapeHtml(text);
   text = text.replace(/```(\w*)\n([\s\S]*?)```/g, function(match, lang, code) {
-    return '<pre><code>' + escapeHtml(code.trim()) + '</code>' + (lang ? '<span class="code-lang">' + lang + '</span>' : '') + '<button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>';
+    return '<pre><code>' + code.trim() + '</code>' + (lang ? '<span class="code-lang">' + lang + '</span>' : '') + '<button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>';
   });
   text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
   text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');

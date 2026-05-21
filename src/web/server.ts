@@ -724,9 +724,9 @@ export function startWebServer(options?: number | WebServerOptions, host = '127.
 const __filename = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename)) {
   startWebServer({
-    port: parseInt(process.env.MACH6_WEB_PORT ?? process.env.MACH6_PORT ?? '3009', 10),
+    port: parseInt(process.env.MACH6_WEB_PORT ?? '3009', 10),
     host: process.env.MACH6_WEB_HOST ?? '127.0.0.1',
-    apiPort: parseInt(process.env.MACH6_API_PORT ?? process.env.MACH6_PORT ?? '3006', 10),
+    apiPort: parseInt(process.env.MACH6_API_PORT ?? '3006', 10),
     apiHost: process.env.MACH6_API_HOST ?? '127.0.0.1',
     apiKey: process.env.MACH6_API_KEY ?? process.env.API_KEY ?? '',
   });
