@@ -623,12 +623,12 @@ html, body {
 </div>
 <script>
 var API_BASE = window.location.origin;
-var STORAGE_KEYS = {
+var storageKeys = {
   sessions: 'symbiote_sessions',
   active: 'symbiote_active_session',
   messagePrefix: 'symbiote_msg_'
 };
-var UI_DEFAULTS = {
+var uiDefaults = {
   appName: 'Symbiote',
   brandName: 'Artifact Virtual',
   brandUrl: 'https://artifactvirtual.com',
@@ -656,20 +656,20 @@ var uiState = {
   providers: [],
   tools: [],
   agents: [],
-  runtime: Object.assign({}, UI_DEFAULTS)
+  runtime: Object.assign({}, uiDefaults)
 };
 
-function getMessageKey(sid) { return STORAGE_KEYS.messagePrefix + sid; }
-function cloneDefaultUi() { return Object.assign({}, UI_DEFAULTS, { suggestionPrompts: UI_DEFAULTS.suggestionPrompts.slice() }); }
+function getMessageKey(sid) { return storageKeys.messagePrefix + sid; }
+function cloneDefaultUi() { return Object.assign({}, uiDefaults, { suggestionPrompts: uiDefaults.suggestionPrompts.slice() }); }
 function loadJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch { return fallback; } }
-function loadSessions() { return loadJson(STORAGE_KEYS.sessions, []); }
-function saveSessions(sessions) { localStorage.setItem(STORAGE_KEYS.sessions, JSON.stringify(sessions)); }
-function getActiveId() { return localStorage.getItem(STORAGE_KEYS.active) || ''; }
-function setActiveId(id) { localStorage.setItem(STORAGE_KEYS.active, id); }
+function loadSessions() { return loadJson(storageKeys.sessions, []); }
+function saveSessions(sessions) { localStorage.setItem(storageKeys.sessions, JSON.stringify(sessions)); }
+function getActiveId() { return localStorage.getItem(storageKeys.active) || ''; }
+function setActiveId(id) { localStorage.setItem(storageKeys.active, id); }
 function getMessages(sid) { return loadJson(getMessageKey(sid), []); }
 function saveMessages(sid, messages) { localStorage.setItem(getMessageKey(sid), JSON.stringify(messages)); }
-function getDefaultSessionTitle() { return uiState.runtime.defaultSessionTitle || UI_DEFAULTS.defaultSessionTitle; }
-function getWelcomeDescription() { return uiState.runtime.welcomeDescription || UI_DEFAULTS.welcomeDescription.replaceAll('Agent', uiState.agentName); }
+function getDefaultSessionTitle() { return uiState.runtime.defaultSessionTitle || uiDefaults.defaultSessionTitle; }
+function getWelcomeDescription() { return uiState.runtime.welcomeDescription || uiDefaults.welcomeDescription.replaceAll('Agent', uiState.agentName); }
 function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
 
 function createSession() {
@@ -721,7 +721,7 @@ function renderSessions() {
   var sessions = loadSessions();
   var activeId = getActiveId();
   if (sessions.length === 0) {
-    list.innerHTML = '<div class="empty-state">' + escapeHtml(uiState.runtime.emptySessionsLabel || UI_DEFAULTS.emptySessionsLabel) + '</div>';
+    list.innerHTML = '<div class="empty-state">' + escapeHtml(uiState.runtime.emptySessionsLabel || uiDefaults.emptySessionsLabel) + '</div>';
     return;
   }
   var today = [], week = [], older = [], now = Date.now(), dayMs = 86400000;
@@ -766,11 +766,11 @@ function renderChat() {
 function renderWelcome() {
   var prompts = uiState.runtime.suggestionPrompts && uiState.runtime.suggestionPrompts.length
     ? uiState.runtime.suggestionPrompts
-    : UI_DEFAULTS.suggestionPrompts;
+    : uiDefaults.suggestionPrompts;
   var icons = ['&#9758;', '&#9881;', '&#9733;', '&#128269;'];
   var runningAgents = uiState.agents.filter(function(agent) { return agent.status === 'running'; }).length;
   return '<div class="welcome"><div class="welcome-orb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>' +
-    '<h1>' + escapeHtml(uiState.runtime.welcomeTitle || UI_DEFAULTS.welcomeTitle) + '</h1>' +
+    '<h1>' + escapeHtml(uiState.runtime.welcomeTitle || uiDefaults.welcomeTitle) + '</h1>' +
     '<p>' + escapeHtml(getWelcomeDescription()) + '</p>' +
     '<div class="welcome-meta">' +
       '<div class="info-card"><span class="info-label">Provider</span><span class="info-value">' + escapeHtml(uiState.providerInfo || 'Waiting for runtime') + '</span></div>' +
@@ -1074,7 +1074,7 @@ function applyRuntimeData(configData, providers, tools, agents) {
   document.getElementById('agentAvatar').textContent = uiState.agentInitial;
   document.getElementById('agentModel').textContent = uiState.providerInfo;
   document.getElementById('versionBadge').textContent = configData.version || '';
-  document.querySelector('.brand-text').textContent = uiState.runtime.appName || UI_DEFAULTS.appName;
+  document.querySelector('.brand-text').textContent = uiState.runtime.appName || uiDefaults.appName;
   document.getElementById('footerStatus').className = 'status-dot online';
   document.getElementById('footerStatusText').textContent = uiState.agentName + ' · Online';
   document.getElementById('reconnectBar').classList.remove('visible');
@@ -1082,14 +1082,14 @@ function applyRuntimeData(configData, providers, tools, agents) {
   uiState.retryDelay = 3000;
   clearTimeout(uiState.retryTimer);
 
-  document.getElementById('messageInput').placeholder = uiState.runtime.sendPlaceholder || UI_DEFAULTS.sendPlaceholder;
-  document.getElementById('composerHintPrimaryLabel').textContent = uiState.runtime.composerHint || UI_DEFAULTS.composerHint;
-  document.getElementById('composerHintSecondaryLabel').textContent = uiState.runtime.composerHintSecondary || UI_DEFAULTS.composerHintSecondary;
-  document.getElementById('poweredByPrefix').textContent = (uiState.runtime.appName || UI_DEFAULTS.appName) + ' by';
-  document.getElementById('poweredByLink').textContent = uiState.runtime.brandName || UI_DEFAULTS.brandName;
-  document.getElementById('sidebarBrandLink').textContent = uiState.runtime.brandName || UI_DEFAULTS.brandName;
-  document.getElementById('poweredByLink').href = uiState.runtime.brandUrl || UI_DEFAULTS.brandUrl;
-  document.getElementById('sidebarBrandLink').href = uiState.runtime.brandUrl || UI_DEFAULTS.brandUrl;
+  document.getElementById('messageInput').placeholder = uiState.runtime.sendPlaceholder || uiDefaults.sendPlaceholder;
+  document.getElementById('composerHintPrimaryLabel').textContent = uiState.runtime.composerHint || uiDefaults.composerHint;
+  document.getElementById('composerHintSecondaryLabel').textContent = uiState.runtime.composerHintSecondary || uiDefaults.composerHintSecondary;
+  document.getElementById('poweredByPrefix').textContent = (uiState.runtime.appName || uiDefaults.appName) + ' by';
+  document.getElementById('poweredByLink').textContent = uiState.runtime.brandName || uiDefaults.brandName;
+  document.getElementById('sidebarBrandLink').textContent = uiState.runtime.brandName || uiDefaults.brandName;
+  document.getElementById('poweredByLink').href = uiState.runtime.brandUrl || uiDefaults.brandUrl;
+  document.getElementById('sidebarBrandLink').href = uiState.runtime.brandUrl || uiDefaults.brandUrl;
 
   document.getElementById('metricProvider').textContent = configData.provider || '—';
   document.getElementById('metricModel').textContent = configData.model || '—';
