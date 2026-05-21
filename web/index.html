@@ -496,7 +496,7 @@ html, body {
         <span id="footerStatusText">Connecting...</span>
       </div>
       <div class="sidebar-footer-item sidebar-footer-credit">
-        Powered by <a class="text-link-muted" id="sidebarBrandLink" href="https://artifactvirtual.com" target="_blank" rel="noopener">Artifact Virtual</a>
+        Powered by <a class="text-link-muted" id="sidebarBrandLink" href="#" target="_blank" rel="noopener">Brand</a>
       </div>
     </div>
   </aside>
@@ -539,7 +539,7 @@ html, body {
         </div>
         <div class="input-footer">
           <span class="input-hint"><kbd>Enter</kbd> <span id="composerHintPrimaryLabel">to send</span> · <kbd>Shift+Enter</kbd> <span id="composerHintSecondaryLabel">for new line</span></span>
-          <span class="powered-by"><span id="poweredByPrefix">Symbiote by</span> <a id="poweredByLink" href="https://artifactvirtual.com" target="_blank" rel="noopener">Artifact Virtual</a></span>
+          <span class="powered-by"><span id="poweredByPrefix">Symbiote by</span> <a id="poweredByLink" href="#" target="_blank" rel="noopener">Brand</a></span>
         </div>
       </div>
     </div>
@@ -671,6 +671,18 @@ function saveMessages(sid, messages) { localStorage.setItem(getMessageKey(sid), 
 function getDefaultSessionTitle() { return uiState.runtime.defaultSessionTitle || uiDefaults.defaultSessionTitle; }
 function getWelcomeDescription() { return uiState.runtime.welcomeDescription || uiDefaults.welcomeDescription; }
 function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
+
+function applyStaticUiDefaults() {
+  document.querySelector('.brand-text').textContent = uiDefaults.appName;
+  document.getElementById('messageInput').placeholder = uiDefaults.sendPlaceholder;
+  document.getElementById('composerHintPrimaryLabel').textContent = uiDefaults.composerHint;
+  document.getElementById('composerHintSecondaryLabel').textContent = uiDefaults.composerHintSecondary;
+  document.getElementById('poweredByPrefix').textContent = uiDefaults.appName + ' by';
+  document.getElementById('poweredByLink').textContent = uiDefaults.brandName;
+  document.getElementById('sidebarBrandLink').textContent = uiDefaults.brandName;
+  document.getElementById('poweredByLink').href = uiDefaults.brandUrl;
+  document.getElementById('sidebarBrandLink').href = uiDefaults.brandUrl;
+}
 
 function createSession() {
   var id = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
@@ -846,8 +858,6 @@ function formatMarkdown(text) {
   text = text.replace(/^# (.+)$/gm, '<h2>$1</h2>');
   text = text.replace(/\n\n/g, '</p><p>');
   text = '<p>' + text + '</p>';
-  text = text.replace(/<p>\s*<(h[234]|pre|ul|ol|table|blockquote)/g, '<$1');
-  text = text.replace(/<\/(h[234]|pre|ul|ol|table|blockquote)>\s*<\/p>/g, '</$1>');
   codeBlocks.forEach(function(block) {
     var html = '<pre><code>' + block.code + '</code>' + (block.lang ? '<span class="code-lang">' + block.lang + '</span>' : '') + '<button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>';
     text = text.replace(block.token, html);
@@ -1177,6 +1187,7 @@ function checkConnection() {
 }
 
 (function init() {
+  applyStaticUiDefaults();
   var sessions = loadSessions();
   if (sessions.length === 0) createSession();
   else if (!getActiveId()) setActiveId(sessions[0].id);

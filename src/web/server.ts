@@ -200,9 +200,17 @@ function loadPackageMetadata(): PackageMetadata {
     try {
       const raw = fs.readFileSync(packagePath, 'utf-8');
       const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const author = typeof parsed.author === 'string' ? parsed.author.split('<')[0]?.trim() : '';
+      const author = typeof parsed.author === 'string'
+        ? parsed.author.split('<')[0]?.trim()
+        : parsed.author && typeof parsed.author === 'object' && typeof (parsed.author as Record<string, unknown>).name === 'string'
+          ? (parsed.author as Record<string, string>).name
+          : '';
       const appName = typeof parsed.name === 'string' && parsed.name
-        ? parsed.name.charAt(0).toUpperCase() + parsed.name.slice(1)
+        ? parsed.name
+          .split(/[-_\s]+/)
+          .filter(Boolean)
+          .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(' ')
         : 'Symbiote';
       return {
         appName,
