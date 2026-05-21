@@ -769,7 +769,6 @@ export class SymbioteGateway {
         apiPort: (this.gatewayConfig as any).apiPort ?? 3006,
         apiHost: '127.0.0.1',
         apiKey: process.env.MACH6_API_KEY || process.env.API_KEY || '',
-        version: '2.1.0',
         agentName: (this.config as any).name || 'Agent',
         agentEmoji: (this.config as any).emoji || '🤖',
         providers: Array.from(PROVIDERS.keys()).map((id) => ({
