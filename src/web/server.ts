@@ -233,8 +233,8 @@ function createDefaultUiCopy(metadata: PackageMetadata): UiCopy {
     emptySessionsLabel: 'No conversations yet',
     defaultSessionTitle: 'New conversation',
     sendPlaceholder: 'Send a message...',
-    composerHint: 'Enter to send',
-    composerHintSecondary: 'Shift+Enter for new line',
+    composerHint: 'to send',
+    composerHintSecondary: 'for new line',
     suggestionPrompts: [
       'What can you help me with?',
       'Tell me about your capabilities',
@@ -246,10 +246,14 @@ function createDefaultUiCopy(metadata: PackageMetadata): UiCopy {
 
 function deriveProviderSummaries(loadedConfig: Partial<SymbioteConfigType>, activeProvider: string): ProviderSummary[] {
   const ids = new Set<string>();
-  if (activeProvider) ids.add(activeProvider);
-  if (loadedConfig.defaultProvider) ids.add(loadedConfig.defaultProvider);
-  for (const providerId of Object.keys(loadedConfig.providers ?? {})) ids.add(providerId);
-  for (const providerId of loadedConfig.fallbackProviders ?? []) ids.add(providerId);
+  if (activeProvider && activeProvider.trim()) ids.add(activeProvider.trim());
+  if (loadedConfig.defaultProvider && loadedConfig.defaultProvider.trim()) ids.add(loadedConfig.defaultProvider.trim());
+  for (const providerId of Object.keys(loadedConfig.providers ?? {})) {
+    if (providerId.trim()) ids.add(providerId.trim());
+  }
+  for (const providerId of loadedConfig.fallbackProviders ?? []) {
+    if (providerId && providerId.trim()) ids.add(providerId.trim());
+  }
 
   return Array.from(ids).map((id) => ({
     id,

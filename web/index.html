@@ -669,7 +669,7 @@ function setActiveId(id) { localStorage.setItem(storageKeys.active, id); }
 function getMessages(sid) { return loadJson(getMessageKey(sid), []); }
 function saveMessages(sid, messages) { localStorage.setItem(getMessageKey(sid), JSON.stringify(messages)); }
 function getDefaultSessionTitle() { return uiState.runtime.defaultSessionTitle || uiDefaults.defaultSessionTitle; }
-function getWelcomeDescription() { return uiState.runtime.welcomeDescription || uiDefaults.welcomeDescription.replaceAll('Agent', uiState.agentName); }
+function getWelcomeDescription() { return uiState.runtime.welcomeDescription || uiDefaults.welcomeDescription; }
 function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
 
 function createSession() {
@@ -814,10 +814,17 @@ function renderThinkingMessage(id) {
 
 function formatMarkdown(text) {
   if (!text) return '';
-  text = escapeHtml(text);
+  var codeBlocks = [];
   text = text.replace(/```(\w*)\n([\s\S]*?)```/g, function(match, lang, code) {
-    return '<pre><code>' + code.trim() + '</code>' + (lang ? '<span class="code-lang">' + lang + '</span>' : '') + '<button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>';
+    var token = 'SYMBIOTE_CODEBLOCK_' + codeBlocks.length;
+    codeBlocks.push({
+      token: token,
+      lang: lang,
+      code: escapeHtml(code.trim())
+    });
+    return token;
   });
+  text = escapeHtml(text);
   text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
   text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
@@ -839,6 +846,12 @@ function formatMarkdown(text) {
   text = text.replace(/^# (.+)$/gm, '<h2>$1</h2>');
   text = text.replace(/\n\n/g, '</p><p>');
   text = '<p>' + text + '</p>';
+  text = text.replace(/<p>\s*<(h[234]|pre|ul|ol|table|blockquote)/g, '<$1');
+  text = text.replace(/<\/(h[234]|pre|ul|ol|table|blockquote)>\s*<\/p>/g, '</$1>');
+  codeBlocks.forEach(function(block) {
+    var html = '<pre><code>' + block.code + '</code>' + (block.lang ? '<span class="code-lang">' + block.lang + '</span>' : '') + '<button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>';
+    text = text.replace(block.token, html);
+  });
   text = text.replace(/<p>\s*<(h[234]|pre|ul|ol|table|blockquote)/g, '<$1');
   text = text.replace(/<\/(h[234]|pre|ul|ol|table|blockquote)>\s*<\/p>/g, '</$1>');
   return text;
