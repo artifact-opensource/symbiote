@@ -763,7 +763,29 @@ export class SymbioteGateway {
     const webPort = (this.gatewayConfig as any).webPort ?? 3009;
     const webHost = (this.gatewayConfig as any).webHost ?? '127.0.0.1';
     try {
-      this.webServer = startWebServer(webPort, webHost);
+      this.webServer = startWebServer({
+        port: webPort,
+        host: webHost,
+        apiPort: (this.gatewayConfig as any).apiPort ?? 3006,
+        apiHost: '127.0.0.1',
+        apiKey: process.env.MACH6_API_KEY || process.env.API_KEY || '',
+        agentName: (this.config as any).name || 'Agent',
+        agentEmoji: (this.config as any).emoji || '🤖',
+        providers: Array.from(PROVIDERS.keys()).map((id) => ({
+          id,
+          name: id === 'github-copilot'
+            ? 'GitHub Copilot'
+            : id === 'xai'
+              ? 'xAI'
+              : id.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' '),
+          active: id === this.providerName,
+          configured: Boolean(this.config.providers?.[id]) || id === this.providerName,
+        })),
+        tools: this.toolRegistry.list().map(tool => ({
+          name: tool.name,
+          description: tool.description,
+        })),
+      });
     } catch (err) {
       console.log(warn(`Web UI failed to start — ${(err as Error).message}`));
     }

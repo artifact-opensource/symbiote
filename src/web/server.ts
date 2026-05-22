@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { palette, ok } from '../cli/brand.js';
+import { loadConfig, type SymbioteConfigType } from '../config/config.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,27 @@ interface Config {
   apiKeys: Record<string, string>;
 }
 
+interface ProviderSummary {
+  id: string;
+  name: string;
+  active?: boolean;
+  configured?: boolean;
+}
+
+interface UiCopy {
+  appName: string;
+  brandName: string;
+  brandUrl: string;
+  welcomeTitle: string;
+  welcomeTemplate: string;
+  emptySessionsLabel: string;
+  defaultSessionTitle: string;
+  sendPlaceholder: string;
+  composerHint: string;
+  composerHintSecondary: string;
+  suggestionPrompts: string[];
+}
+
 interface SubAgent {
   id: string;
   label: string;
@@ -58,19 +80,57 @@ interface SubAgent {
   startedAt: number;
 }
 
+interface WebServerOptions {
+  port?: number;
+  host?: string;
+  apiPort?: number;
+  apiHost?: string;
+  apiKey?: string;
+  version?: string;
+  agentName?: string;
+  agentEmoji?: string;
+  providers?: ProviderSummary[];
+  tools?: Array<Pick<ToolCall, 'name'> & { description?: string }>;
+  ui?: Partial<UiCopy>;
+}
+
+interface PackageMetadata {
+  appName: string;
+  version: string;
+  brandName: string;
+  brandUrl: string;
+}
+
+type RuntimeConfig = Config & Partial<SymbioteConfigType> & Record<string, unknown>;
+
 // ── State ──────────────────────────────────────────────────────────────────
 
 const startTime = Date.now();
 const sessions = new Map<string, Session>();
 const subAgents: SubAgent[] = [];
 let totalTokens = 0;
+const packageMetadata = loadPackageMetadata();
 
-let config: Config = {
+let config: RuntimeConfig = {
   provider: 'anthropic',
   model: 'claude-opus-4-6',
   temperature: 0.7,
   maxTokens: 8192,
   apiKeys: {},
+};
+
+let runtimeOptions: Required<WebServerOptions> = {
+  port: 3009,
+  host: '127.0.0.1',
+  apiPort: 3006,
+  apiHost: '127.0.0.1',
+  apiKey: process.env.MACH6_API_KEY ?? process.env.API_KEY ?? '',
+  version: packageMetadata.version,
+  agentName: 'Agent',
+  agentEmoji: '🤖',
+  providers: [],
+  tools: [],
+  ui: createDefaultUiCopy(packageMetadata),
 };
 
 // Agent identity (from mach6.json)
@@ -80,15 +140,24 @@ let agentEmoji = '🤖';
 // Load config from mach6.json if exists
 const configPath = path.resolve(process.cwd(), 'mach6.json');
 try {
-  const raw = fs.readFileSync(configPath, 'utf-8');
-  const loaded = JSON.parse(raw);
-  if (loaded.name) agentName = loaded.name;
-  if (loaded.emoji) agentEmoji = loaded.emoji;
-  // Map mach6.json fields to webchat config
-  if (loaded.defaultProvider) config.provider = loaded.defaultProvider;
-  if (loaded.defaultModel) config.model = loaded.defaultModel;
-  config = { ...config, ...loaded };
+  const loaded = loadConfig(configPath) as RuntimeConfig;
+  if (typeof loaded.name === 'string' && loaded.name) agentName = loaded.name;
+  if (typeof loaded.emoji === 'string' && loaded.emoji) agentEmoji = loaded.emoji;
+  config = {
+    ...config,
+    ...loaded,
+    provider: loaded.defaultProvider ?? config.provider,
+    model: loaded.defaultModel ?? config.model,
+  };
+  runtimeOptions = {
+    ...runtimeOptions,
+    agentName,
+    agentEmoji,
+    providers: deriveProviderSummaries(loaded, config.provider),
+  };
 } catch { /* no config file yet */ }
+
+applyRuntimeOptions({});
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -121,6 +190,118 @@ function redactKeys(keys: Record<string, string>): Record<string, string> {
   return out;
 }
 
+function loadPackageMetadata(): PackageMetadata {
+  const packagePaths = [
+    path.join(process.cwd(), 'package.json'),
+    path.join(path.resolve(import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url)), '../..'), 'package.json'),
+  ];
+
+  for (const packagePath of packagePaths) {
+    try {
+      const raw = fs.readFileSync(packagePath, 'utf-8');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const author = typeof parsed.author === 'string'
+        ? parsed.author.split('<')[0]?.trim()
+        : parsed.author && typeof parsed.author === 'object' && typeof (parsed.author as Record<string, unknown>).name === 'string'
+          ? (parsed.author as Record<string, string>).name
+          : '';
+      const appName = typeof parsed.name === 'string' && parsed.name
+        ? parsed.name
+          .split(/[-_\s]+/)
+          .filter(Boolean)
+          .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(' ')
+        : 'Symbiote';
+      return {
+        appName,
+        version: typeof parsed.version === 'string' ? parsed.version : '0.1.0',
+        brandName: author || appName,
+        brandUrl: typeof parsed.homepage === 'string' ? parsed.homepage : '',
+      };
+    } catch {
+      continue;
+    }
+  }
+
+  return {
+    appName: 'Symbiote',
+    version: '0.1.0',
+    brandName: 'Symbiote',
+    brandUrl: '',
+  };
+}
+
+function createDefaultUiCopy(metadata: PackageMetadata): UiCopy {
+  return {
+    appName: metadata.appName,
+    brandName: metadata.brandName,
+    brandUrl: metadata.brandUrl,
+    welcomeTitle: 'How can I help you today?',
+    welcomeTemplate: "I'm {{agentName}}, your AI assistant powered by {{appName}}. Ask me anything.",
+    emptySessionsLabel: 'No conversations yet',
+    defaultSessionTitle: 'New conversation',
+    sendPlaceholder: 'Send a message...',
+    composerHint: 'to send',
+    composerHintSecondary: 'for new line',
+    suggestionPrompts: [
+      'What can you help me with?',
+      'Tell me about your capabilities',
+      'What makes you different?',
+      'Help me with research',
+    ],
+  };
+}
+
+function deriveProviderSummaries(loadedConfig: Partial<SymbioteConfigType>, activeProvider: string): ProviderSummary[] {
+  const ids = new Set<string>();
+  if (activeProvider && activeProvider.trim()) ids.add(activeProvider.trim());
+  if (loadedConfig.defaultProvider && loadedConfig.defaultProvider.trim()) ids.add(loadedConfig.defaultProvider.trim());
+  for (const providerId of Object.keys(loadedConfig.providers ?? {})) {
+    if (providerId.trim()) ids.add(providerId.trim());
+  }
+  for (const providerId of loadedConfig.fallbackProviders ?? []) {
+    if (providerId && providerId.trim()) ids.add(providerId.trim());
+  }
+
+  return Array.from(ids).map((id) => ({
+    id,
+    name: formatProviderLabel(id),
+    active: id === activeProvider,
+    configured: Boolean((loadedConfig.providers ?? {})[id]) || id === activeProvider,
+  }));
+}
+
+function formatProviderLabel(providerId: string): string {
+  const specialLabels: Record<string, string> = {
+    'github-copilot': 'GitHub Copilot',
+    xai: 'xAI',
+  };
+  if (specialLabels[providerId]) return specialLabels[providerId];
+  return providerId
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function applyRuntimeOptions(overrides: WebServerOptions): void {
+  const mergedUi = {
+    ...runtimeOptions.ui,
+    ...overrides.ui,
+  };
+
+  runtimeOptions = {
+    ...runtimeOptions,
+    ...overrides,
+    ui: mergedUi,
+    providers: overrides.providers ?? runtimeOptions.providers,
+    tools: overrides.tools ?? runtimeOptions.tools,
+  };
+
+  agentName = runtimeOptions.agentName || agentName;
+  agentEmoji = runtimeOptions.agentEmoji || agentEmoji;
+}
+
 function matchRoute(pattern: string, pathname: string): Record<string, string> | null {
   const patParts = pattern.split('/');
   const urlParts = pathname.split('/');
@@ -136,26 +317,7 @@ function matchRoute(pattern: string, pathname: string): Record<string, string> |
   return params;
 }
 
-// ── Providers (simulated for now — will integrate real APIs) ───────────────
-
-const PROVIDERS = [
-  { id: 'anthropic', name: 'Anthropic', models: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-3-5-haiku-20241022'] },
-
-  { id: 'github-copilot', name: 'GitHub Copilot', models: ['claude-opus-4-6', 'claude-sonnet-4-20250514', 'gpt-4o', 'o3-mini'] },
-  { id: 'gladius', name: 'Local (Gladius)', models: ['gladius-125m', 'gladius-1b'] },
-];
-
-const TOOLS = [
-  { name: 'read', description: 'Read file contents' },
-  { name: 'write', description: 'Create or overwrite files' },
-  { name: 'edit', description: 'Make precise edits to files' },
-  { name: 'exec', description: 'Run shell commands' },
-  { name: 'web_fetch', description: 'Fetch URL content' },
-  { name: 'browser', description: 'Control web browser' },
-  { name: 'image', description: 'Analyze images' },
-];
-
-// ── Real chat streaming (proxies to HTTP API on port 3006) ─────────────────
+// ── Real chat streaming (proxies to the configured HTTP API) ────────────────
 
 async function streamChat(
   res: http.ServerResponse,
@@ -190,21 +352,18 @@ async function streamChat(
   const assistantId = uid();
 
   try {
-    // Proxy to real HTTP API (port 3006) which runs through the actual agent pipeline
-    const apiPort = parseInt(process.env.MACH6_API_PORT ?? '3006', 10);
-    const apiKey = process.env.MACH6_API_KEY ?? '';
     const payload = JSON.stringify({ sessionId, message: userMessage, senderId: 'webchat-owner', source: 'webchat' });
 
     const apiRes = await new Promise<http.IncomingMessage>((resolve, reject) => {
       const apiReq = http.request({
-        hostname: '127.0.0.1',
-        port: apiPort,
+        hostname: runtimeOptions.apiHost,
+        port: runtimeOptions.apiPort,
         path: '/api/chat',
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(payload),
-          'Authorization': `Bearer ${apiKey}`,
+          ...(runtimeOptions.apiKey ? { 'Authorization': `Bearer ${runtimeOptions.apiKey}` } : {}),
         },
         timeout: 300000, // 5 min timeout for long agent runs
       }, resolve);
@@ -329,6 +488,12 @@ function serveStatic(res: http.ServerResponse, filePath: string): void {
   }
 }
 
+function renderWelcome(agent: string): string {
+  return runtimeOptions.ui.welcomeTemplate
+    .replaceAll('{{agentName}}', agent)
+    .replaceAll('{{appName}}', runtimeOptions.ui.appName);
+}
+
 // ── Router ─────────────────────────────────────────────────────────────────
 
 const WEB_DIR = path.resolve(import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url)), '../../web');
@@ -360,25 +525,42 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       totalTokens,
       model: config.model,
       provider: config.provider,
-      version: '0.1.0',
+      version: runtimeOptions.version,
       agentName,
       agentEmoji,
+      providerCount: runtimeOptions.providers.length,
+      toolCount: runtimeOptions.tools.length,
     });
   }
 
   // GET /api/providers
   if (method === 'GET' && pathname === '/api/providers') {
-    return json(res, PROVIDERS);
+    return json(res, runtimeOptions.providers);
   }
 
   // GET /api/tools
   if (method === 'GET' && pathname === '/api/tools') {
-    return json(res, TOOLS);
+    return json(res, runtimeOptions.tools);
   }
 
   // GET /api/config
   if (method === 'GET' && pathname === '/api/config') {
-    return json(res, { ...config, apiKeys: redactKeys(config.apiKeys) });
+    return json(res, {
+      ...config,
+      apiKeys: redactKeys(config.apiKeys),
+      agentName,
+      agentEmoji,
+      version: runtimeOptions.version,
+      ui: {
+        ...runtimeOptions.ui,
+        welcomeDescription: renderWelcome(agentName),
+      },
+      stats: {
+        providerCount: runtimeOptions.providers.length,
+        toolCount: runtimeOptions.tools.length,
+        subAgentCount: subAgents.filter(agent => agent.status === 'running').length,
+      },
+    });
   }
 
   // PUT /api/config
@@ -462,7 +644,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     if (!sessions.has(sessionId)) {
       const autoSession: Session = {
         id: sessionId,
-        name: 'Web Chat',
+        name: runtimeOptions.ui.defaultSessionTitle,
         systemPrompt: '',
         messages: [],
         createdAt: Date.now(),
@@ -515,7 +697,13 @@ function formatUptime(ms: number): string {
 
 // ── Server ─────────────────────────────────────────────────────────────────
 
-export function startWebServer(port = 3006, host = '127.0.0.1'): http.Server {
+export function startWebServer(options?: number | WebServerOptions, host = '127.0.0.1'): http.Server {
+  if (typeof options === 'number') {
+    applyRuntimeOptions({ port: options, host });
+  } else {
+    applyRuntimeOptions(options ?? {});
+  }
+
   const server = http.createServer((req, res) => {
     handleRequest(req, res).catch(err => {
       console.error(`${palette.dim}  [symbiote-web]${palette.reset}`, err);
@@ -528,7 +716,7 @@ export function startWebServer(port = 3006, host = '127.0.0.1'): http.Server {
   // Create a default session
   const defaultSession: Session = {
     id: uid(),
-    name: 'Default Session',
+    name: runtimeOptions.ui.defaultSessionTitle,
     systemPrompt: '',
     messages: [],
     createdAt: Date.now(),
@@ -537,8 +725,8 @@ export function startWebServer(port = 3006, host = '127.0.0.1'): http.Server {
   };
   sessions.set(defaultSession.id, defaultSession);
 
-  server.listen(port, host, () => {
-    console.log(ok(`Web UI → ${palette.cyan}http://${host}:${port}${palette.reset}`));
+  server.listen(runtimeOptions.port, runtimeOptions.host, () => {
+    console.log(ok(`Web UI → ${palette.cyan}http://${runtimeOptions.host}:${runtimeOptions.port}${palette.reset}`));
   });
 
   return server;
@@ -547,6 +735,11 @@ export function startWebServer(port = 3006, host = '127.0.0.1'): http.Server {
 // Run directly
 const __filename = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename)) {
-  const port = parseInt(process.env.MACH6_PORT ?? '3006', 10);
-  startWebServer(port);
+  startWebServer({
+    port: parseInt(process.env.MACH6_WEB_PORT ?? '3009', 10),
+    host: process.env.MACH6_WEB_HOST ?? '127.0.0.1',
+    apiPort: parseInt(process.env.MACH6_API_PORT ?? '3006', 10),
+    apiHost: process.env.MACH6_API_HOST ?? '127.0.0.1',
+    apiKey: process.env.MACH6_API_KEY ?? process.env.API_KEY ?? '',
+  });
 }

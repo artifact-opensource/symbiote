@@ -36,6 +36,7 @@
   --radius-xs: 6px;
   --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  --panel-w: 360px;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
@@ -43,6 +44,9 @@ html, body {
   background: var(--void); color: var(--text-primary);
   -webkit-font-smoothing: antialiased; overflow: hidden;
 }
+.hidden { display: none !important; }
+.text-link-muted { color: var(--text-tertiary); text-decoration: none; transition: color var(--transition); }
+.text-link-muted:hover { color: var(--accent-bright); }
 ::selection { background: var(--accent-soft); color: var(--accent-bright); }
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -131,6 +135,7 @@ html, body {
   font-size: 12px; color: var(--text-tertiary); padding: 6px 8px;
   border-radius: var(--radius-xs);
 }
+.sidebar-footer-credit { color: var(--text-ghost); font-size: 11px; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .status-dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
 .status-dot.offline { background: var(--red); }
@@ -184,6 +189,7 @@ html, body {
 }
 .header-btn:hover { background: var(--surface-3); color: var(--text-secondary); }
 .header-btn svg { width: 18px; height: 18px; }
+.header-btn.active { background: var(--surface-3); color: var(--text-primary); }
 .latency-badge {
   font-size: 10px; font-family: 'JetBrains Mono', monospace;
   color: var(--green); background: var(--green-soft);
@@ -236,6 +242,23 @@ html, body {
   color: var(--text-primary); transform: translateY(-2px);
 }
 .suggestion-icon { font-size: 16px; margin-bottom: 6px; display: block; }
+.welcome-meta {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px; margin-top: 20px; width: 100%; max-width: 520px;
+}
+.info-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent);
+  border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
+  padding: 14px; text-align: left;
+}
+.info-label {
+  display: block; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-ghost); margin-bottom: 6px;
+}
+.info-value { display: block; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.empty-state {
+  padding: 24px 16px; text-align: center; color: var(--text-ghost); font-size: 12px;
+}
 
 .message { margin-bottom: 4px; animation: msgIn 0.3s ease-out; }
 @keyframes msgIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
@@ -253,6 +276,7 @@ html, body {
 }
 .message-body p { margin-bottom: 10px; }
 .message-body p:last-child { margin-bottom: 0; }
+.message-body.error-text { color: var(--red); }
 .message-body strong { font-weight: 600; }
 .message-body em { color: var(--text-secondary); }
 .message-body a {
@@ -356,13 +380,92 @@ html, body {
 .powered-by a { color: var(--text-tertiary); text-decoration: none; transition: color var(--transition); }
 .powered-by a:hover { color: var(--accent-bright); }
 
+/* ── Control center ── */
+.control-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(var(--panel-w), 100vw);
+  background: rgba(12, 12, 18, 0.96); backdrop-filter: blur(18px);
+  border-left: 1px solid var(--glass-border); transform: translateX(100%);
+  transition: transform var(--transition-slow); z-index: 110;
+  display: flex; flex-direction: column;
+}
+.control-panel.open { transform: translateX(0); }
+.control-panel-header {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 20px 20px 16px; border-bottom: 1px solid var(--glass-border);
+}
+.panel-eyebrow {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--text-ghost); margin-bottom: 8px;
+}
+.control-panel-header h2 { font-size: 18px; margin-bottom: 6px; }
+.panel-copy { color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.control-panel-body { overflow-y: auto; padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 16px; }
+.panel-section {
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent);
+  border: 1px solid var(--glass-border); border-radius: var(--radius);
+  padding: 16px;
+}
+.panel-title-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-bottom: 12px;
+}
+.panel-title { font-size: 13px; font-weight: 600; }
+.panel-badge {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px;
+  border-radius: 999px; font-size: 11px; background: var(--surface-2); color: var(--text-secondary);
+}
+.metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.metric-card {
+  background: var(--surface-1); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm); padding: 12px;
+}
+.metric-label {
+  display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-ghost); margin-bottom: 6px;
+}
+.metric-card strong { display: block; font-size: 13px; color: var(--text-primary); }
+.panel-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.panel-field:last-child { margin-bottom: 0; }
+.panel-field label { font-size: 12px; color: var(--text-secondary); }
+.panel-input, .panel-select {
+  width: 100%; background: var(--surface-1); color: var(--text-primary);
+  border: 1px solid var(--glass-border); border-radius: var(--radius-sm);
+  padding: 10px 12px; font: inherit;
+}
+.panel-range-row { display: flex; align-items: center; gap: 10px; }
+.panel-range-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+.panel-range-value { font-size: 12px; color: var(--accent-bright); min-width: 36px; text-align: right; }
+.panel-list { display: flex; flex-direction: column; gap: 8px; }
+.panel-list-item {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+}
+.panel-list-item strong { display: block; font-size: 12px; }
+.panel-list-item span { display: block; font-size: 11px; color: var(--text-secondary); line-height: 1.5; }
+.panel-list-meta { font-size: 10px; color: var(--text-ghost); text-transform: uppercase; letter-spacing: 0.08em; }
+.panel-empty { color: var(--text-ghost); font-size: 12px; }
+.panel-actions { display: flex; gap: 10px; }
+.secondary-btn, .primary-btn {
+  border: none; border-radius: var(--radius-sm); padding: 10px 14px;
+  font: inherit; cursor: pointer; transition: all var(--transition);
+}
+.secondary-btn { background: var(--surface-2); color: var(--text-secondary); }
+.secondary-btn:hover { background: var(--surface-3); color: var(--text-primary); }
+.primary-btn { background: var(--accent); color: white; flex: 1; }
+.primary-btn:hover { background: var(--accent-bright); }
+
 /* ── Responsive ── */
+@media (max-width: 1024px) {
+  .welcome-meta { grid-template-columns: 1fr; }
+}
 @media (max-width: 768px) {
   .sidebar { position: fixed; left: 0; top: 0; bottom: 0; transform: translateX(-100%); }
   .sidebar.open { transform: translateX(0); }
   .overlay.visible { display: block; }
   .menu-btn { display: flex; }
   .suggestions { grid-template-columns: 1fr; }
+  .welcome-meta { grid-template-columns: 1fr; }
   .chat-container { padding: 0 16px; }
   .input-area { padding: 12px 16px 16px; }
   .header { padding: 0 12px; }
@@ -373,7 +476,7 @@ html, body {
 </head>
 <body>
 <div class="app">
-  <div class="overlay" id="overlay" onclick="toggleSidebar()"></div>
+  <div class="overlay" id="overlay" onclick="closePanels('overlay')"></div>
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="brand">
@@ -392,8 +495,8 @@ html, body {
         <span class="status-dot" id="footerStatus"></span>
         <span id="footerStatusText">Connecting...</span>
       </div>
-      <div class="sidebar-footer-item" style="color:var(--text-ghost);font-size:11px;">
-        Powered by <a href="https://github.com/Artifact-Virtual/symbiote" target="_blank" style="color:var(--text-tertiary);text-decoration:none;">Artifact Virtual</a>
+      <div class="sidebar-footer-item sidebar-footer-credit">
+        Powered by <a class="text-link-muted" id="sidebarBrandLink" href="#" target="_blank" rel="noopener">Brand</a>
       </div>
     </div>
   </aside>
@@ -414,7 +517,10 @@ html, body {
         <span class="agent-model" id="agentModel"></span>
       </div>
       <div class="header-right">
-        <span class="latency-badge" id="latencyBadge" style="display:none"></span>
+        <span class="latency-badge hidden" id="latencyBadge"></span>
+        <button class="header-btn" id="controlPanelToggle" onclick="toggleControlPanel()" title="Open control center">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+        </button>
         <button class="header-btn" onclick="clearChat()" title="Clear chat">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
         </button>
@@ -432,117 +538,317 @@ html, body {
           </button>
         </div>
         <div class="input-footer">
-          <span class="input-hint"><kbd>Enter</kbd> to send · <kbd>Shift+Enter</kbd> for new line</span>
-          <span class="powered-by">Symbiote by <a href="https://artifactvirtual.com" target="_blank">Artifact Virtual</a></span>
+          <span class="input-hint"><kbd>Enter</kbd> <span id="composerHintPrimaryLabel">to send</span> · <kbd>Shift+Enter</kbd> <span id="composerHintSecondaryLabel">for new line</span></span>
+          <span class="powered-by"><span id="poweredByPrefix">Symbiote by</span> <a id="poweredByLink" href="#" target="_blank" rel="noopener">Brand</a></span>
         </div>
       </div>
     </div>
   </main>
+  <aside class="control-panel" id="controlPanel" aria-hidden="true">
+    <div class="control-panel-header">
+      <div>
+        <div class="panel-eyebrow">Control center</div>
+        <h2>Web UI runtime</h2>
+        <p class="panel-copy">Live metadata, configuration, and capability visibility for this local agent.</p>
+      </div>
+      <button class="header-btn" onclick="toggleControlPanel(false)" title="Close control center">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="control-panel-body">
+      <section class="panel-section">
+        <div class="panel-title-row">
+          <h3 class="panel-title">Runtime snapshot</h3>
+          <span class="panel-badge" id="runtimeStatusBadge">Syncing</span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric-card"><span class="metric-label">Provider</span><strong id="metricProvider">—</strong></div>
+          <div class="metric-card"><span class="metric-label">Model</span><strong id="metricModel">—</strong></div>
+          <div class="metric-card"><span class="metric-label">Tools</span><strong id="metricTools">0</strong></div>
+          <div class="metric-card"><span class="metric-label">Sub-agents</span><strong id="metricAgents">0</strong></div>
+        </div>
+      </section>
+      <section class="panel-section">
+        <div class="panel-title-row">
+          <h3 class="panel-title">Model settings</h3>
+          <span class="panel-badge" id="saveStatusBadge">Synced</span>
+        </div>
+        <div class="panel-field">
+          <label for="providerSelect">Provider</label>
+          <select class="panel-select" id="providerSelect"></select>
+        </div>
+        <div class="panel-field">
+          <label for="modelInput">Model</label>
+          <input class="panel-input" id="modelInput" type="text" placeholder="Model name">
+        </div>
+        <div class="panel-field">
+          <label for="temperatureInput">Temperature</label>
+          <div class="panel-range-row">
+            <input id="temperatureInput" type="range" min="0" max="1" step="0.1" oninput="updateTemperatureValue(this.value)">
+            <span class="panel-range-value" id="temperatureValue">0.7</span>
+          </div>
+        </div>
+        <div class="panel-field">
+          <label for="maxTokensInput">Max tokens</label>
+          <input class="panel-input" id="maxTokensInput" type="number" min="1" step="1">
+        </div>
+        <div class="panel-actions">
+          <button class="secondary-btn" onclick="toggleControlPanel(false)">Close</button>
+          <button class="primary-btn" onclick="saveRuntimeConfig()">Save changes</button>
+        </div>
+      </section>
+      <section class="panel-section">
+        <div class="panel-title-row">
+          <h3 class="panel-title">Providers</h3>
+          <span class="panel-badge" id="providerCountBadge">0 total</span>
+        </div>
+        <div class="panel-list" id="providerList"></div>
+      </section>
+      <section class="panel-section">
+        <div class="panel-title-row">
+          <h3 class="panel-title">Tools</h3>
+          <span class="panel-badge" id="toolCountBadge">0 total</span>
+        </div>
+        <div class="panel-list" id="toolList"></div>
+      </section>
+      <section class="panel-section">
+        <div class="panel-title-row">
+          <h3 class="panel-title">Sub-agents</h3>
+          <span class="panel-badge" id="agentCountBadge">0 active</span>
+        </div>
+        <div class="panel-list" id="agentList"></div>
+      </section>
+    </div>
+  </aside>
 </div>
 <script>
 var API_BASE = window.location.origin;
-var agentName = 'Agent', agentInitial = 'A', providerInfo = '';
-var isStreaming = false, retryDelay = 3000, retryTimer = null;
+var defaultTemperature = 0.7;
+var storageKeys = {
+  sessions: 'symbiote_sessions',
+  active: 'symbiote_active_session',
+  messagePrefix: 'symbiote_msg_'
+};
+var uiDefaults = {
+  appName: 'Symbiote',
+  brandName: 'Artifact Virtual',
+  brandUrl: 'https://artifactvirtual.com',
+  welcomeTitle: 'How can I help you today?',
+  welcomeDescription: "I'm Agent, your AI assistant powered by Symbiote. Ask me anything.",
+  emptySessionsLabel: 'No conversations yet',
+  defaultSessionTitle: 'New conversation',
+  sendPlaceholder: 'Send a message...',
+  composerHint: 'to send',
+  composerHintSecondary: 'for new line',
+  suggestionPrompts: [
+    'What can you help me with?',
+    'Tell me about your capabilities',
+    'What makes you different?',
+    'Help me with research'
+  ]
+};
+var uiState = {
+  agentName: 'Agent',
+  agentInitial: 'A',
+  providerInfo: '',
+  isStreaming: false,
+  retryDelay: 3000,
+  retryTimer: null,
+  providers: [],
+  tools: [],
+  agents: [],
+  runtime: Object.assign({}, uiDefaults)
+};
 
-function loadSessions() { try { return JSON.parse(localStorage.getItem('symbiote_sessions') || '[]'); } catch { return []; } }
-function saveSessions(s) { localStorage.setItem('symbiote_sessions', JSON.stringify(s)); }
-function getActiveId() { return localStorage.getItem('symbiote_active_session') || ''; }
-function setActiveId(id) { localStorage.setItem('symbiote_active_session', id); }
-function getMessages(sid) { try { return JSON.parse(localStorage.getItem('symbiote_msg_' + sid) || '[]'); } catch { return []; } }
-function saveMessages(sid, msgs) { localStorage.setItem('symbiote_msg_' + sid, JSON.stringify(msgs)); }
+function getMessageKey(sid) { return storageKeys.messagePrefix + sid; }
+function cloneDefaultUi() { return Object.assign({}, uiDefaults, { suggestionPrompts: uiDefaults.suggestionPrompts.slice() }); }
+function loadJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch { return fallback; } }
+function loadSessions() { return loadJson(storageKeys.sessions, []); }
+function saveSessions(sessions) { localStorage.setItem(storageKeys.sessions, JSON.stringify(sessions)); }
+function getActiveId() { return localStorage.getItem(storageKeys.active) || ''; }
+function setActiveId(id) { localStorage.setItem(storageKeys.active, id); }
+function getMessages(sid) { return loadJson(getMessageKey(sid), []); }
+function saveMessages(sid, messages) { localStorage.setItem(getMessageKey(sid), JSON.stringify(messages)); }
+function getDefaultSessionTitle() { return uiState.runtime.defaultSessionTitle || uiDefaults.defaultSessionTitle; }
+function getWelcomeDescription() { return uiState.runtime.welcomeDescription || uiDefaults.welcomeDescription; }
+function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
+
+function applyStaticUiDefaults() {
+  document.querySelector('.brand-text').textContent = uiDefaults.appName;
+  document.getElementById('messageInput').placeholder = uiDefaults.sendPlaceholder;
+  document.getElementById('composerHintPrimaryLabel').textContent = uiDefaults.composerHint;
+  document.getElementById('composerHintSecondaryLabel').textContent = uiDefaults.composerHintSecondary;
+  document.getElementById('poweredByPrefix').textContent = uiDefaults.appName + ' by';
+  document.getElementById('poweredByLink').textContent = uiDefaults.brandName;
+  document.getElementById('sidebarBrandLink').textContent = uiDefaults.brandName;
+  document.getElementById('poweredByLink').href = uiDefaults.brandUrl;
+  document.getElementById('sidebarBrandLink').href = uiDefaults.brandUrl;
+}
 
 function createSession() {
   var id = 'sess_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
   var sessions = loadSessions();
-  sessions.unshift({ id: id, title: 'New conversation', created: Date.now(), preview: '' });
-  saveSessions(sessions); setActiveId(id); renderSessions(); renderChat();
+  sessions.unshift({ id: id, title: getDefaultSessionTitle(), created: Date.now(), preview: '' });
+  saveSessions(sessions);
+  setActiveId(id);
+  renderSessions();
+  renderChat();
   document.getElementById('messageInput').focus();
 }
+
 function deleteSession(id, e) {
   if (e) e.stopPropagation();
-  var sessions = loadSessions().filter(function(s) { return s.id !== id; });
-  saveSessions(sessions); localStorage.removeItem('symbiote_msg_' + id);
-  if (getActiveId() === id) { if (sessions.length > 0) setActiveId(sessions[0].id); else { createSession(); return; } }
-  renderSessions(); renderChat();
+  var sessions = loadSessions().filter(function(session) { return session.id !== id; });
+  saveSessions(sessions);
+  localStorage.removeItem(getMessageKey(id));
+  if (getActiveId() === id) {
+    if (sessions.length > 0) setActiveId(sessions[0].id);
+    else { createSession(); return; }
+  }
+  renderSessions();
+  renderChat();
 }
+
 function switchSession(id) {
-  setActiveId(id); renderSessions(); renderChat();
-  if (window.innerWidth <= 768) toggleSidebar();
+  setActiveId(id);
+  renderSessions();
+  renderChat();
+  if (window.innerWidth <= 768) toggleSidebar(false);
 }
+
 function updateSessionPreview(sid, text) {
   var sessions = loadSessions();
   for (var i = 0; i < sessions.length; i++) {
     if (sessions[i].id === sid) {
       sessions[i].preview = text.substring(0, 80);
-      if (sessions[i].title === 'New conversation' && text.length > 0) sessions[i].title = text.substring(0, 50);
+      if (sessions[i].title === getDefaultSessionTitle() && text.length > 0) sessions[i].title = text.substring(0, 50);
       break;
     }
   }
-  saveSessions(sessions); renderSessions();
+  saveSessions(sessions);
+  renderSessions();
 }
 
 function renderSessions() {
   var list = document.getElementById('sessionList');
-  var sessions = loadSessions(), activeId = getActiveId();
-  if (sessions.length === 0) { list.innerHTML = '<div style="padding:24px 16px;text-align:center;color:var(--text-ghost);font-size:12px;">No conversations yet</div>'; return; }
+  var sessions = loadSessions();
+  var activeId = getActiveId();
+  if (sessions.length === 0) {
+    list.innerHTML = '<div class="empty-state">' + escapeHtml(uiState.runtime.emptySessionsLabel || uiDefaults.emptySessionsLabel) + '</div>';
+    return;
+  }
   var today = [], week = [], older = [], now = Date.now(), dayMs = 86400000;
-  sessions.forEach(function(s) { var age = now - s.created; if (age < dayMs) today.push(s); else if (age < dayMs * 7) week.push(s); else older.push(s); });
+  sessions.forEach(function(session) {
+    var age = now - session.created;
+    if (age < dayMs) today.push(session);
+    else if (age < dayMs * 7) week.push(session);
+    else older.push(session);
+  });
   function renderGroup(label, items) {
     if (items.length === 0) return '';
-    var h = '<div class="session-group-label">' + label + '</div>';
-    items.forEach(function(s) {
-      var active = s.id === activeId ? ' active' : '';
-      h += '<div class="session-item' + active + '" onclick="switchSession(\'' + s.id + '\')">';
-      h += '<div class="session-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>';
-      h += '<div class="session-info"><div class="session-title">' + escapeHtml(s.title) + '</div>';
-      if (s.preview) h += '<div class="session-preview">' + escapeHtml(s.preview) + '</div>';
-      h += '</div><button class="session-delete" onclick="deleteSession(\'' + s.id + '\', event)" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>';
+    var html = '<div class="session-group-label">' + label + '</div>';
+    items.forEach(function(session) {
+      var active = session.id === activeId ? ' active' : '';
+      html += '<div class="session-item' + active + '" onclick="switchSession(\'' + session.id + '\')">';
+      html += '<div class="session-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>';
+      html += '<div class="session-info"><div class="session-title">' + escapeHtml(session.title) + '</div>';
+      if (session.preview) html += '<div class="session-preview">' + escapeHtml(session.preview) + '</div>';
+      html += '</div><button class="session-delete" onclick="deleteSession(\'' + session.id + '\', event)" title="Delete"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>';
     });
-    return h;
+    return html;
   }
   list.innerHTML = renderGroup('Today', today) + renderGroup('This week', week) + renderGroup('Older', older);
 }
 
 function renderChat() {
-  var container = document.getElementById('chatContainer'), sid = getActiveId(), msgs = getMessages(sid);
-  if (msgs.length === 0) { container.innerHTML = renderWelcome(); return; }
+  var container = document.getElementById('chatContainer');
+  var sid = getActiveId();
+  var messages = sid ? getMessages(sid) : [];
+  if (messages.length === 0) {
+    container.innerHTML = renderWelcome();
+    return;
+  }
   var html = '';
-  msgs.forEach(function(m) { html += renderMessage(m.role, m.content, m.time); });
-  container.innerHTML = html; scrollToBottom();
+  messages.forEach(function(message) {
+    html += renderMessage(message.role, message.content, message.time);
+  });
+  container.innerHTML = html;
+  scrollToBottom();
 }
+
 function renderWelcome() {
+  var prompts = uiState.runtime.suggestionPrompts && uiState.runtime.suggestionPrompts.length
+    ? uiState.runtime.suggestionPrompts
+    : uiDefaults.suggestionPrompts;
+  var icons = ['&#9758;', '&#9881;', '&#9733;', '&#128269;'];
+  var runningAgents = uiState.agents.filter(function(agent) { return agent.status === 'running'; }).length;
   return '<div class="welcome"><div class="welcome-orb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div>' +
-    '<h1>How can I help you today?</h1><p>I\'m ' + agentName + ', your AI assistant powered by Symbiote. Ask me anything.</p>' +
+    '<h1>' + escapeHtml(uiState.runtime.welcomeTitle || uiDefaults.welcomeTitle) + '</h1>' +
+    '<p>' + escapeHtml(getWelcomeDescription()) + '</p>' +
+    '<div class="welcome-meta">' +
+      '<div class="info-card"><span class="info-label">Provider</span><span class="info-value">' + escapeHtml(uiState.providerInfo || 'Waiting for runtime') + '</span></div>' +
+      '<div class="info-card"><span class="info-label">Tools</span><span class="info-value">' + uiState.tools.length + ' available</span></div>' +
+      '<div class="info-card"><span class="info-label">Sub-agents</span><span class="info-value">' + runningAgents + ' active</span></div>' +
+    '</div>' +
     '<div class="suggestions">' +
-    '<button class="suggestion" onclick="useSuggestion(this)"><span class="suggestion-icon">&#9758;</span>What can you help me with?</button>' +
-    '<button class="suggestion" onclick="useSuggestion(this)"><span class="suggestion-icon">&#9881;</span>Tell me about your capabilities</button>' +
-    '<button class="suggestion" onclick="useSuggestion(this)"><span class="suggestion-icon">&#9733;</span>What makes you different?</button>' +
-    '<button class="suggestion" onclick="useSuggestion(this)"><span class="suggestion-icon">&#128269;</span>Help me with research</button></div></div>';
+      prompts.map(function(prompt, index) {
+        return '<button class="suggestion" data-prompt="' + escapeHtml(prompt) + '" onclick="useSuggestion(this)"><span class="suggestion-icon">' + (icons[index] || '&#10022;') + '</span>' + escapeHtml(prompt) + '</button>';
+      }).join('') +
+    '</div></div>';
 }
-function useSuggestion(el) { document.getElementById('messageInput').value = el.textContent.replace(/^[^\w]+/, '').trim(); sendMessage(); }
+
+function useSuggestion(el) {
+  var input = document.getElementById('messageInput');
+  input.value = el.getAttribute('data-prompt') || '';
+  autoResize(input);
+  sendMessage();
+}
 
 function renderMessage(role, content, time) {
-  var timeStr = time ? new Date(time).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
-  var roleName = role === 'user' ? 'You' : agentName;
+  var timeStr = time ? new Date(time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  var roleName = role === 'user' ? 'You' : uiState.agentName;
   return '<div class="message"><div class="message-wrapper"><div class="message-header">' +
     '<span class="message-role ' + role + '">' + roleName + '</span>' +
     (timeStr ? '<span class="message-time">' + timeStr + '</span>' : '') +
     '</div><div class="message-body">' + formatMarkdown(content) + '</div></div></div>';
 }
 
+function renderAssistantBody(content, isError) {
+  return '<div class="message-header"><span class="message-role assistant">' + uiState.agentName + '</span></div>' +
+    '<div class="message-body' + (isError ? ' error-text' : '') + '">' + formatMarkdown(content) + '</div>';
+}
+
+function renderThinkingMessage(id) {
+  return '<div id="' + id + '" class="message"><div class="message-wrapper">' +
+    '<div class="message-header"><span class="message-role assistant">' + uiState.agentName + '</span></div>' +
+    '<div class="streaming-indicator"><div class="streaming-dots"><span></span><span></span><span></span></div>Thinking...</div>' +
+    '</div></div>';
+}
+
 function formatMarkdown(text) {
   if (!text) return '';
-  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
-    return '<pre><code>' + escapeHtml(code.trim()) + '</code>' + (lang ? '<span class="code-lang">' + lang + '</span>' : '') + '<button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>';
+  var codeBlocks = [];
+  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, function(match, lang, code) {
+    var token = 'SYMBIOTE_CODEBLOCK_' + codeBlocks.length;
+    codeBlocks.push({
+      token: token,
+      lang: lang,
+      code: escapeHtml(code.trim())
+    });
+    return token;
   });
+  text = escapeHtml(text);
   text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
   text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
   text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  text = text.replace(/^\|(.+)\|\s*\n\|[\s\-:|]+\|\s*\n((?:\|.+\|\s*\n?)*)/gm, function(m, header, body) {
-    var ths = header.split('|').filter(Boolean).map(function(h){ return '<th>'+h.trim()+'</th>'; }).join('');
-    var rows = body.trim().split('\n').map(function(r){ var tds = r.split('|').filter(Boolean).map(function(d){ return '<td>'+d.trim()+'</td>'; }).join(''); return '<tr>'+tds+'</tr>'; }).join('');
-    return '<table><thead><tr>'+ths+'</tr></thead><tbody>'+rows+'</tbody></table>';
+  text = text.replace(/^\|(.+)\|\s*\n\|[\s\-:|]+\|\s*\n((?:\|.+\|\s*\n?)*)/gm, function(match, header, body) {
+    var ths = header.split('|').filter(Boolean).map(function(h) { return '<th>' + h.trim() + '</th>'; }).join('');
+    var rows = body.trim().split('\n').map(function(row) {
+      var tds = row.split('|').filter(Boolean).map(function(cell) { return '<td>' + cell.trim() + '</td>'; }).join('');
+      return '<tr>' + tds + '</tr>';
+    }).join('');
+    return '<table><thead><tr>' + ths + '</tr></thead><tbody>' + rows + '</tbody></table>';
   });
   text = text.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
   text = text.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
@@ -553,146 +859,352 @@ function formatMarkdown(text) {
   text = text.replace(/^# (.+)$/gm, '<h2>$1</h2>');
   text = text.replace(/\n\n/g, '</p><p>');
   text = '<p>' + text + '</p>';
+  codeBlocks.forEach(function(block) {
+    var html = '<pre><code>' + block.code + '</code>' + (block.lang ? '<span class="code-lang">' + block.lang + '</span>' : '') + '<button class="copy-btn" onclick="copyCode(this)">Copy</button></pre>';
+    text = text.replace(block.token, html);
+  });
   text = text.replace(/<p>\s*<(h[234]|pre|ul|ol|table|blockquote)/g, '<$1');
   text = text.replace(/<\/(h[234]|pre|ul|ol|table|blockquote)>\s*<\/p>/g, '</$1>');
   return text;
 }
-function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
+
 function copyCode(btn) {
   var code = btn.parentElement.querySelector('code').textContent;
-  navigator.clipboard.writeText(code).then(function() { btn.textContent = 'Copied!'; setTimeout(function() { btn.textContent = 'Copy'; }, 2000); });
+  navigator.clipboard.writeText(code).then(function() {
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = 'Copy'; }, 2000);
+  });
 }
 
 function sendMessage() {
-  var input = document.getElementById('messageInput'), text = input.value.trim();
-  if (!text || isStreaming) return;
+  var input = document.getElementById('messageInput');
+  var text = input.value.trim();
+  if (!text || uiState.isStreaming) return;
+
   var sid = getActiveId();
-  if (!sid) { createSession(); sid = getActiveId(); }
-  var msgs = getMessages(sid);
-  msgs.push({ role: 'user', content: text, time: Date.now() });
-  saveMessages(sid, msgs); updateSessionPreview(sid, text);
+  if (!sid) {
+    createSession();
+    sid = getActiveId();
+  }
+
+  var messages = getMessages(sid);
+  messages.push({ role: 'user', content: text, time: Date.now() });
+  saveMessages(sid, messages);
+  updateSessionPreview(sid, text);
+
   var container = document.getElementById('chatContainer');
-  var welcome = container.querySelector('.welcome');
-  if (welcome) container.innerHTML = '';
+  if (container.querySelector('.welcome')) container.innerHTML = '';
   container.insertAdjacentHTML('beforeend', renderMessage('user', text, Date.now()));
+
   var thinkingId = 'thinking_' + Date.now();
-  container.insertAdjacentHTML('beforeend',
-    '<div id="' + thinkingId + '" class="message"><div class="message-wrapper">' +
-    '<div class="message-header"><span class="message-role assistant">' + agentName + '</span></div>' +
-    '<div class="streaming-indicator"><div class="streaming-dots"><span></span><span></span><span></span></div>Thinking...</div></div></div>');
+  container.insertAdjacentHTML('beforeend', renderThinkingMessage(thinkingId));
   scrollToBottom();
-  input.value = ''; autoResize(input); isStreaming = true;
-  document.getElementById('sendBtn').disabled = true;
-  var startTime = Date.now();
+
+  input.value = '';
+  uiState.isStreaming = true;
+  autoResize(input);
+
+  var startedAt = Date.now();
+  var responseText = '';
+  var latencyMs = 0;
+
   fetch(API_BASE + '/api/chat', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sessionId: sid, message: text })
   }).then(function(res) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    var reader = res.body.getReader(), decoder = new TextDecoder(), buffer = '', responseText = '';
-    var thinkingEl = document.getElementById(thinkingId);
+    if (!res.body) throw new Error('Streaming unavailable');
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+    function applyAssistantText(isError) {
+      var thinkingEl = document.getElementById(thinkingId);
+      if (!thinkingEl) return;
+      thinkingEl.querySelector('.message-wrapper').innerHTML = renderAssistantBody(responseText || (isError ? 'Failed to get response.' : ''), isError);
+      scrollToBottom();
+    }
+    function processLine(data) {
+      if (!data || data === '[DONE]') return;
+      try {
+        var parsed = JSON.parse(data);
+        if (parsed.type === 'text' && typeof parsed.content === 'string') {
+          responseText += parsed.content;
+          applyAssistantText(false);
+          return;
+        }
+        if (parsed.type === 'done' && parsed.message && parsed.message.latencyMs) {
+          latencyMs = parsed.message.latencyMs;
+          return;
+        }
+        var delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
+        if (delta && delta.content) {
+          responseText += delta.content;
+          applyAssistantText(false);
+          return;
+        }
+      } catch {
+        responseText += data;
+        applyAssistantText(false);
+      }
+    }
     function processStream() {
       return reader.read().then(function(result) {
-        if (result.done) { finishResponse(sid, responseText, thinkingId, startTime); return; }
+        if (result.done) {
+          finishResponse(sid, responseText, latencyMs || (Date.now() - startedAt));
+          return;
+        }
         buffer += decoder.decode(result.value, { stream: true });
-        var lines = buffer.split('\n'); buffer = lines.pop();
+        var lines = buffer.split('\n');
+        buffer = lines.pop() || '';
         lines.forEach(function(line) {
           line = line.trim();
           if (!line || !line.startsWith('data: ')) return;
-          var data = line.substring(6);
-          if (data === '[DONE]') return;
-          try {
-            var parsed = JSON.parse(data);
-            var delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
-            if (delta && delta.content) {
-              responseText += delta.content;
-              if (thinkingEl) {
-                thinkingEl.querySelector('.message-wrapper').innerHTML =
-                  '<div class="message-header"><span class="message-role assistant">' + agentName + '</span></div>' +
-                  '<div class="message-body">' + formatMarkdown(responseText) + '</div>';
-              }
-              scrollToBottom();
-            }
-          } catch(e) {
-            if (data && data !== '[DONE]') {
-              responseText += data;
-              if (thinkingEl) {
-                thinkingEl.querySelector('.message-wrapper').innerHTML =
-                  '<div class="message-header"><span class="message-role assistant">' + agentName + '</span></div>' +
-                  '<div class="message-body">' + formatMarkdown(responseText) + '</div>';
-              }
-              scrollToBottom();
-            }
-          }
+          processLine(line.substring(6));
         });
         return processStream();
       });
     }
     return processStream();
   }).catch(function(err) {
+    responseText = 'Failed to get response. ' + err.message;
     var thinkingEl = document.getElementById(thinkingId);
-    if (thinkingEl) {
-      thinkingEl.querySelector('.message-wrapper').innerHTML =
-        '<div class="message-header"><span class="message-role assistant">' + agentName + '</span></div>' +
-        '<div class="message-body" style="color:var(--red);">Failed to get response. ' + escapeHtml(err.message) + '</div>';
-    }
-    isStreaming = false; document.getElementById('sendBtn').disabled = false;
+    if (thinkingEl) thinkingEl.querySelector('.message-wrapper').innerHTML = renderAssistantBody(responseText, true);
+    uiState.isStreaming = false;
+    updateComposerState();
   });
 }
 
-function finishResponse(sid, text, thinkingId, startTime) {
+function finishResponse(sid, text, latencyMs) {
   if (text) {
-    var msgs = getMessages(sid);
-    msgs.push({ role: 'assistant', content: text, time: Date.now() });
-    saveMessages(sid, msgs); updateSessionPreview(sid, text);
+    var messages = getMessages(sid);
+    messages.push({ role: 'assistant', content: text, time: Date.now() });
+    saveMessages(sid, messages);
+    updateSessionPreview(sid, text);
   }
-  var latency = Date.now() - startTime, badge = document.getElementById('latencyBadge');
-  if (latency > 0) { badge.textContent = (latency / 1000).toFixed(1) + 's'; badge.style.display = 'inline-flex'; setTimeout(function() { badge.style.display = 'none'; }, 5000); }
-  isStreaming = false; document.getElementById('sendBtn').disabled = false;
+  showLatency(latencyMs);
+  uiState.isStreaming = false;
+  updateComposerState();
 }
 
-function scrollToBottom() { var area = document.getElementById('chatArea'); requestAnimationFrame(function() { area.scrollTop = area.scrollHeight; }); }
-function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 160) + 'px'; document.getElementById('sendBtn').disabled = !el.value.trim() || isStreaming; }
-function handleKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+function showLatency(latencyMs) {
+  var badge = document.getElementById('latencyBadge');
+  if (!latencyMs || latencyMs <= 0) return;
+  badge.textContent = (latencyMs / 1000).toFixed(1) + 's';
+  badge.classList.remove('hidden');
+  setTimeout(function() { badge.classList.add('hidden'); }, 5000);
+}
+
+function updateComposerState() {
+  var input = document.getElementById('messageInput');
+  document.getElementById('sendBtn').disabled = !input.value.trim() || uiState.isStreaming;
+}
+
+function scrollToBottom() {
+  var area = document.getElementById('chatArea');
+  requestAnimationFrame(function() { area.scrollTop = area.scrollHeight; });
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+  updateComposerState();
+}
+
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
 function clearChat() {
-  var sid = getActiveId(); if (!sid) return;
+  var sid = getActiveId();
+  if (!sid) return;
   saveMessages(sid, []);
   var sessions = loadSessions();
-  for (var i = 0; i < sessions.length; i++) { if (sessions[i].id === sid) { sessions[i].title = 'New conversation'; sessions[i].preview = ''; } }
-  saveSessions(sessions); renderSessions(); renderChat();
+  for (var i = 0; i < sessions.length; i++) {
+    if (sessions[i].id === sid) {
+      sessions[i].title = getDefaultSessionTitle();
+      sessions[i].preview = '';
+    }
+  }
+  saveSessions(sessions);
+  renderSessions();
+  renderChat();
 }
-function toggleSidebar() { document.getElementById('sidebar').classList.toggle('open'); document.getElementById('overlay').classList.toggle('visible'); }
+
+function syncOverlay() {
+  var visible = document.getElementById('sidebar').classList.contains('open') || document.getElementById('controlPanel').classList.contains('open');
+  document.getElementById('overlay').classList.toggle('visible', visible);
+  document.getElementById('controlPanelToggle').classList.toggle('active', document.getElementById('controlPanel').classList.contains('open'));
+}
+
+function toggleSidebar(forceState) {
+  var sidebar = document.getElementById('sidebar');
+  var shouldOpen = typeof forceState === 'boolean' ? forceState : !sidebar.classList.contains('open');
+  sidebar.classList.toggle('open', shouldOpen);
+  syncOverlay();
+}
+
+function toggleControlPanel(forceState) {
+  var panel = document.getElementById('controlPanel');
+  var shouldOpen = typeof forceState === 'boolean' ? forceState : !panel.classList.contains('open');
+  panel.classList.toggle('open', shouldOpen);
+  panel.setAttribute('aria-hidden', shouldOpen ? 'false' : 'true');
+  syncOverlay();
+}
+
+function closePanels() {
+  var mode = arguments[0];
+  if (mode === 'overlay') {
+    if (document.getElementById('controlPanel').classList.contains('open')) {
+      document.getElementById('controlPanel').classList.remove('open');
+      document.getElementById('controlPanel').setAttribute('aria-hidden', 'true');
+    } else {
+      document.getElementById('sidebar').classList.remove('open');
+    }
+  } else {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('controlPanel').classList.remove('open');
+    document.getElementById('controlPanel').setAttribute('aria-hidden', 'true');
+  }
+  syncOverlay();
+}
+
+function updateTemperatureValue(value) {
+  document.getElementById('temperatureValue').textContent = Number(value).toFixed(1);
+}
+
+function fetchJson(route) {
+  return fetch(API_BASE + route).then(function(res) {
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  });
+}
+
+function renderProviderOptions() {
+  var select = document.getElementById('providerSelect');
+  select.innerHTML = uiState.providers.map(function(provider) {
+    return '<option value="' + escapeHtml(provider.id) + '">' + escapeHtml(provider.name) + '</option>';
+  }).join('');
+}
+
+function renderPanelList(items, emptyLabel, renderItem) {
+  if (!items.length) return '<div class="panel-empty">' + escapeHtml(emptyLabel) + '</div>';
+  return items.map(renderItem).join('');
+}
+
+function applyRuntimeData(configData, providers, tools, agents) {
+  uiState.agentName = configData.agentName || 'Agent';
+  uiState.agentInitial = uiState.agentName.charAt(0).toUpperCase();
+  uiState.providerInfo = (configData.provider || '') + (configData.model ? ' / ' + configData.model : '');
+  uiState.runtime = Object.assign(cloneDefaultUi(), configData.ui || {});
+  uiState.providers = providers || [];
+  uiState.tools = tools || [];
+  uiState.agents = agents || [];
+
+  document.getElementById('agentName').textContent = uiState.agentName;
+  document.getElementById('agentAvatar').textContent = uiState.agentInitial;
+  document.getElementById('agentModel').textContent = uiState.providerInfo;
+  document.getElementById('versionBadge').textContent = configData.version || '';
+  document.querySelector('.brand-text').textContent = uiState.runtime.appName || uiDefaults.appName;
+  document.getElementById('footerStatus').className = 'status-dot online';
+  document.getElementById('footerStatusText').textContent = uiState.agentName + ' · Online';
+  document.getElementById('reconnectBar').classList.remove('visible');
+  document.getElementById('runtimeStatusBadge').textContent = 'Connected';
+  uiState.retryDelay = 3000;
+  clearTimeout(uiState.retryTimer);
+
+  document.getElementById('messageInput').placeholder = uiState.runtime.sendPlaceholder || uiDefaults.sendPlaceholder;
+  document.getElementById('composerHintPrimaryLabel').textContent = uiState.runtime.composerHint || uiDefaults.composerHint;
+  document.getElementById('composerHintSecondaryLabel').textContent = uiState.runtime.composerHintSecondary || uiDefaults.composerHintSecondary;
+  document.getElementById('poweredByPrefix').textContent = (uiState.runtime.appName || uiDefaults.appName) + ' by';
+  document.getElementById('poweredByLink').textContent = uiState.runtime.brandName || uiDefaults.brandName;
+  document.getElementById('sidebarBrandLink').textContent = uiState.runtime.brandName || uiDefaults.brandName;
+  document.getElementById('poweredByLink').href = uiState.runtime.brandUrl || uiDefaults.brandUrl;
+  document.getElementById('sidebarBrandLink').href = uiState.runtime.brandUrl || uiDefaults.brandUrl;
+
+  document.getElementById('metricProvider').textContent = configData.provider || '—';
+  document.getElementById('metricModel').textContent = configData.model || '—';
+  document.getElementById('metricTools').textContent = String(uiState.tools.length);
+  document.getElementById('metricAgents').textContent = String(uiState.agents.filter(function(agent) { return agent.status === 'running'; }).length);
+
+  document.getElementById('providerCountBadge').textContent = uiState.providers.length + ' total';
+  document.getElementById('toolCountBadge').textContent = uiState.tools.length + ' total';
+  document.getElementById('agentCountBadge').textContent = uiState.agents.filter(function(agent) { return agent.status === 'running'; }).length + ' active';
+
+  renderProviderOptions();
+  document.getElementById('providerSelect').value = configData.provider || '';
+  document.getElementById('modelInput').value = configData.model || '';
+  document.getElementById('temperatureInput').value = String(configData.temperature == null ? defaultTemperature : configData.temperature);
+  updateTemperatureValue(configData.temperature == null ? defaultTemperature : configData.temperature);
+  document.getElementById('maxTokensInput').value = String(configData.maxTokens || 8192);
+
+  document.getElementById('providerList').innerHTML = renderPanelList(uiState.providers, 'No providers discovered yet.', function(provider) {
+    return '<div class="panel-list-item"><div><strong>' + escapeHtml(provider.name) + '</strong><span>' + escapeHtml(provider.id) + '</span></div><span class="panel-list-meta">' + (provider.active ? 'active' : provider.configured ? 'configured' : 'available') + '</span></div>';
+  });
+  document.getElementById('toolList').innerHTML = renderPanelList(uiState.tools, 'No tools registered.', function(tool) {
+    return '<div class="panel-list-item"><div><strong>' + escapeHtml(tool.name) + '</strong><span>' + escapeHtml(tool.description || 'Runtime tool') + '</span></div></div>';
+  });
+  document.getElementById('agentList').innerHTML = renderPanelList(uiState.agents, 'No active sub-agents.', function(agent) {
+    return '<div class="panel-list-item"><div><strong>' + escapeHtml(agent.label || agent.id) + '</strong><span>' + escapeHtml(agent.id) + '</span></div><span class="panel-list-meta">' + escapeHtml(agent.status || 'running') + '</span></div>';
+  });
+
+  if (!getActiveId() || getMessages(getActiveId()).length === 0) renderChat();
+}
+
+function saveRuntimeConfig() {
+  var badge = document.getElementById('saveStatusBadge');
+  badge.textContent = 'Saving...';
+  fetch(API_BASE + '/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: document.getElementById('providerSelect').value,
+      model: document.getElementById('modelInput').value.trim(),
+      temperature: Number(document.getElementById('temperatureInput').value),
+      maxTokens: Number(document.getElementById('maxTokensInput').value)
+    })
+  }).then(function(res) {
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    badge.textContent = 'Saved';
+    return checkConnection();
+  }).catch(function(err) {
+    badge.textContent = 'Error';
+    console.error(err);
+  });
+}
 
 function checkConnection() {
-  fetch(API_BASE + '/api/config').then(function(res) { return res.json(); }).then(function(data) {
-    agentName = data.agentName || 'Agent'; agentInitial = agentName.charAt(0).toUpperCase();
-    providerInfo = (data.provider || '') + (data.model ? ' / ' + data.model : '');
-    document.getElementById('agentName').textContent = agentName;
-    document.getElementById('agentAvatar').textContent = agentInitial;
-    document.getElementById('agentModel').textContent = providerInfo;
-    document.getElementById('versionBadge').textContent = data.version || '';
-    document.getElementById('footerStatus').className = 'status-dot online';
-    document.getElementById('footerStatusText').textContent = agentName + ' \u00B7 Online';
-    document.getElementById('reconnectBar').classList.remove('visible');
-    retryDelay = 3000; clearTimeout(retryTimer);
-    var welcome = document.querySelector('.welcome h1');
-    if (welcome) welcome.textContent = 'How can I help you today?';
-    var welcomeP = document.querySelector('.welcome p');
-    if (welcomeP) welcomeP.textContent = "I'm " + agentName + ", your AI assistant powered by Symbiote. Ask me anything.";
+  return Promise.all([
+    fetchJson('/api/config'),
+    fetchJson('/api/providers').catch(function() { return []; }),
+    fetchJson('/api/tools').catch(function() { return []; }),
+    fetchJson('/api/agents').catch(function() { return []; })
+  ]).then(function(results) {
+    applyRuntimeData(results[0], results[1], results[2], results[3]);
   }).catch(function() {
     document.getElementById('footerStatus').className = 'status-dot offline';
     document.getElementById('footerStatusText').textContent = 'Offline';
+    document.getElementById('runtimeStatusBadge').textContent = 'Offline';
     document.getElementById('reconnectBar').classList.add('visible');
-    document.getElementById('reconnectText').textContent = 'Connection lost. Retrying in ' + Math.ceil(retryDelay / 1000) + 's...';
-    retryTimer = setTimeout(function() { checkConnection(); retryDelay = Math.min(retryDelay * 1.5, 30000); }, retryDelay);
+    document.getElementById('reconnectText').textContent = 'Connection lost. Retrying in ' + Math.ceil(uiState.retryDelay / 1000) + 's...';
+    uiState.retryTimer = setTimeout(function() {
+      checkConnection();
+      uiState.retryDelay = Math.min(uiState.retryDelay * 1.5, 30000);
+    }, uiState.retryDelay);
   });
 }
 
 (function init() {
+  applyStaticUiDefaults();
   var sessions = loadSessions();
   if (sessions.length === 0) createSession();
   else if (!getActiveId()) setActiveId(sessions[0].id);
-  renderSessions(); renderChat(); checkConnection();
+  renderSessions();
+  renderChat();
+  checkConnection();
   setInterval(checkConnection, 30000);
   document.getElementById('messageInput').focus();
 })();
