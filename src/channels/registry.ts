@@ -1,5 +1,5 @@
 /**
- * Mach6 — Channel Registry
+ * Symbiote — Channel Registry
  * 
  * Manages channel adapter lifecycle. Hot-plug adapters without restart.
  * Wires adapters → router → bus → agent.
@@ -11,7 +11,7 @@ import type {
   ChannelPolicy,
   AdapterHealth,
 } from './types.js';
-import { Mach6Bus } from './bus.js';
+import { SymbioteBus } from './bus.js';
 import { InboundRouter } from './router.js';
 
 // ─── Registry Entry ────────────────────────────────────────────────────────
@@ -29,17 +29,17 @@ interface AdapterEntry {
 
 export class ChannelRegistry {
   private adapters = new Map<string, AdapterEntry>();
-  private bus: Mach6Bus;
+  private bus: SymbioteBus;
   private router: InboundRouter;
   private activeSessions = new Set<string>();
   private onAdapterHealthChange?: (adapterId: string, health: AdapterHealth) => void;
 
   constructor(options?: {
-    busOptions?: ConstructorParameters<typeof Mach6Bus>[0];
+    busOptions?: ConstructorParameters<typeof SymbioteBus>[0];
     globalOwnerIds?: string[];
     onAdapterHealthChange?: (adapterId: string, health: AdapterHealth) => void;
   }) {
-    this.bus = new Mach6Bus(options?.busOptions);
+    this.bus = new SymbioteBus(options?.busOptions);
     this.onAdapterHealthChange = options?.onAdapterHealthChange;
 
     this.router = new InboundRouter(this.bus, {
@@ -50,7 +50,7 @@ export class ChannelRegistry {
   }
 
   /** Get the message bus (for agent runner to subscribe) */
-  getBus(): Mach6Bus {
+  getBus(): SymbioteBus {
     return this.bus;
   }
 

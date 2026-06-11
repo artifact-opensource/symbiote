@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Mach6 — CLI Entry Point
+// Symbiote — CLI Entry Point
 // AI agent framework · Artifact Virtual
 import 'dotenv/config';
 
@@ -184,7 +184,7 @@ async function main() {
         ['/status',          'Session stats and usage'],
         ['/sessions',        'List all sessions'],
         ['/clear',           'Clear session history'],
-        ['/quit',            'Exit Mach6'],
+        ['/quit',            'Exit Symbiote'],
       ];
       for (const [cmd, desc] of commands) {
         const paddedCmd = cmd.padEnd(20);

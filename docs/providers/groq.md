@@ -14,7 +14,7 @@ Fastest inference available — 280-1000 tok/sec on Groq's custom LPU (Language 
 GROQ_API_KEY=gsk_...
 ```
 
-3. Configure in `mach6.json`:
+3. Configure in `symbiote.json`:
 
 ```json
 {
@@ -47,7 +47,7 @@ Any model listed on Groq's [supported models page](https://console.groq.com/docs
 
 ## Rate Limit Handling
 
-Mach6 automatically handles Groq's rate limits:
+Symbiote automatically handles Groq's rate limits:
 
 - Parses the `try again in Xs` delay from Groq's 429 error responses
 - Retries up to 3 times with the server-specified delay + 500ms buffer

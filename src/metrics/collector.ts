@@ -1,5 +1,5 @@
 /**
- * Mach6 v2.0.0 — Lightweight Metrics Collector
+ * Symbiote v2.0.0 — Lightweight Metrics Collector
  * 
  * Zero-dependency metrics collection for agent runtime observability.
  * Tracks: provider latency, token usage, tool call frequency, error rates,
@@ -265,7 +265,7 @@ export class MetricsCollector {
   private version: string;
 
   constructor(opts: { metricsDir?: string; flushIntervalMs?: number; version?: string } = {}) {
-    this.metricsDir = opts.metricsDir ?? path.join(process.cwd(), '.mach6', 'metrics');
+    this.metricsDir = opts.metricsDir ?? path.join(process.cwd(), '.symbiote', 'metrics');
     this.version = opts.version ?? '2.0.0';
     fs.mkdirSync(this.metricsDir, { recursive: true });
 

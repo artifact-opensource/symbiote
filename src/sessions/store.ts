@@ -1,4 +1,4 @@
-// Mach6 — Session persistence (JSON files) — legacy compatibility wrapper
+// Symbiote — Session persistence (JSON files) — legacy compatibility wrapper
 // Phase 2 uses SessionManager instead, but this remains for backward compat
 
 import fs from 'node:fs';
@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Session, SessionSummary, SessionMetadata } from './types.js';
 
-const DEFAULT_DIR = '.mach6/sessions';
+const DEFAULT_DIR = '.symbiote/sessions';
 
 function defaultMetadata(): SessionMetadata {
   return { messageCount: 0, tokenUsage: { input: 0, output: 0 }, toolsUsed: {}, depth: 0 };

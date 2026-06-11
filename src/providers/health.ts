@@ -1,5 +1,5 @@
 /**
- * Mach6 v2.0.0 — Provider Health Monitor
+ * Symbiote v2.0.0 — Provider Health Monitor
  * 
  * Tracks provider health over time and provides intelligent failover
  * recommendations. Works alongside the existing fallback chain in daemon.ts

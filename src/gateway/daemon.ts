@@ -1,10 +1,10 @@
 /**
- * Mach6 — Gateway Daemon
+ * Symbiote — Gateway Daemon
  * 
  * The persistent process. Manages channel lifecycle, agent sessions,
  * signal handling, graceful shutdown, and hot-reload.
  * 
- * Mach6 AI Gateway — persistent engine.
+ * Symbiote AI Gateway — persistent engine.
  */
 import 'dotenv/config';
 
@@ -52,7 +52,7 @@ import { buildSystemPrompt } from '../agent/system-prompt.js';
 import { runAgent } from '../agent/runner.js';
 import { PulseBudgetManager } from '../agent/pulse.js';
 import { BlinkController } from '../agent/blink.js';
-import { loadConfig, type Mach6Config } from '../config/config.js';
+import { loadConfig, type SymbioteConfig } from '../config/config.js';
 import type { Provider, ProviderConfig } from '../providers/types.js';
 import { anthropicProvider } from '../providers/anthropic.js';
 import { openaiProvider } from '../providers/openai.js';
@@ -85,7 +85,7 @@ interface DiscordChannelConfig {
 }
 
 interface GatewayConfig {
-  /** Path to mach6.json */
+  /** Path to symbiote.json */
   configPath?: string;
   /** Channels to enable */
   channels?: {
@@ -131,8 +131,8 @@ const PROVIDERS = new Map<string, Provider>([
 
 // ─── Gateway ───────────────────────────────────────────────────────────────
 
-export class Mach6Gateway {
-  private config: Mach6Config;
+export class SymbioteGateway {
+  private config: SymbioteConfig;
   private gatewayConfig: GatewayConfig;
   private channelRegistry: ChannelRegistry;
   private toolRegistry: ToolRegistry;
@@ -339,7 +339,7 @@ export class Mach6Gateway {
 
         await bridge.connect();
 
-        // Register all discovered tools into Mach6's registry
+        // Register all discovered tools into Symbiote's registry
         const tools = bridge.getTools();
         for (const tool of tools) {
           this.toolRegistry.register(tool);
@@ -1217,7 +1217,7 @@ export class Mach6Gateway {
    * This gives the next session lossless context of what was happening when the
    * process went down — conversations, directives, mid-task state.
    * 
-   * Global: every Mach6 instance (AVA, Aria, future) gets this automatically.
+   * Global: every Symbiote instance (AVA, Aria, future) gets this automatically.
    */
   private async flushCombOnShutdown(tailMessages = 4): Promise<void> {
     const ws = this.config.workspace;
@@ -1376,11 +1376,11 @@ export class Mach6Gateway {
 
 // ─── CLI Entry ─────────────────────────────────────────────────────────────
 
-export async function startGateway(configPath?: string): Promise<Mach6Gateway> {
-  // Load gateway config from mach6.json or env
+export async function startGateway(configPath?: string): Promise<SymbioteGateway> {
+  // Load gateway config from symbiote.json or env
   const config = loadConfig(configPath);
 
-  // Build gateway config from environment + mach6.json
+  // Build gateway config from environment + symbiote.json
   const gatewayConfig: GatewayConfig = {
     configPath,
     ownerIds: (config as any).ownerIds ?? [],
@@ -1394,7 +1394,7 @@ export async function startGateway(configPath?: string): Promise<Mach6Gateway> {
       },
       whatsapp: {
         enabled: !!(config as any).whatsapp?.enabled,
-        authDir: (config as any).whatsapp?.authDir ?? path.join(os.homedir(), '.mach6', 'whatsapp-auth'),
+        authDir: (config as any).whatsapp?.authDir ?? path.join(os.homedir(), '.symbiote', 'whatsapp-auth'),
         phoneNumber: (config as any).whatsapp?.phoneNumber,
         autoRead: (config as any).whatsapp?.autoRead ?? true,
         policy: (config as any).whatsapp?.policy,
@@ -1412,7 +1412,7 @@ export async function startGateway(configPath?: string): Promise<Mach6Gateway> {
     apiPort: (config as any).apiPort ?? 3006,
   };
 
-  const gateway = new Mach6Gateway(gatewayConfig);
+  const gateway = new SymbioteGateway(gatewayConfig);
   await gateway.start();
   return gateway;
 }

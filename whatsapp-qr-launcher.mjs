@@ -12,7 +12,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const AUTH_DIR = path.join(process.env.HOME || '/home/adam', '.mach6/credentials/whatsapp/default');
+const AUTH_DIR = path.join(process.env.HOME || '/home/adam', '.symbiote/credentials/whatsapp/default');
 
 async function main() {
     console.log('\n🔮 AVA WhatsApp QR Launcher');

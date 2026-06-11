@@ -1,4 +1,4 @@
-// Mach6 — Activity-Aware Heartbeat Scheduler (fixes Pain #11)
+// Symbiote — Activity-Aware Heartbeat Scheduler (fixes Pain #11)
 // Scales frequency based on user activity. Respects quiet hours.
 
 export interface HeartbeatConfig {

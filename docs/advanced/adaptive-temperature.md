@@ -31,7 +31,7 @@ ATM uses keyword-based detection:
 
 ## Configuration
 
-Enable and customize ATM in `mach6.json`:
+Enable and customize ATM in `symbiote.json`:
 
 ```json
 {

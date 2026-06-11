@@ -1,4 +1,4 @@
-// Mach6 — OpenAI Chat Completions streaming provider (raw HTTP)
+// Symbiote — OpenAI Chat Completions streaming provider (raw HTTP)
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
 import { fetchWithRetry } from './retry.js';

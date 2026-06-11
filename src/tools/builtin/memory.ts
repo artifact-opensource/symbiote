@@ -1,4 +1,4 @@
-// Mach6 — HEKTOR memory search tool
+// Symbiote — HEKTOR memory search tool
 
 import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -18,7 +18,7 @@ function getHektorScript(): string {
   const candidates = [
     `${ws}/enterprise/.ava-memory/ava_memory_fast.py`,
     `${ws}/.ava-memory/ava_memory_fast.py`,
-    '/opt/ava/mach6/.ava/memory/ava_memory_fast.py',
+    '/opt/ava/symbiote/.ava/memory/ava_memory_fast.py',
   ];
   return candidates.find(p => existsSync(p)) ?? candidates[0];
 }

@@ -1,5 +1,5 @@
 /**
- * Mach6 — HTTP API Channel Adapter
+ * Symbiote — HTTP API Channel Adapter
  * 
  * Exposes a REST API for external clients (web apps, CLI tools, etc.) to
  * send messages and receive responses. Routes through the same

@@ -1,4 +1,4 @@
-// Mach6 — Builtin tool: background process management
+// Symbiote — Builtin tool: background process management
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';

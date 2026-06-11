@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mach6</title>
+<title>Symbiote</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
@@ -337,7 +337,7 @@ body {
         <button class="hamburger" onclick="toggleSidebar()" title="Toggle sidebar">☰</button>
         <div class="chat-title">
           <div class="logo-icon" id="headerLogo">🤖</div>
-          <span id="headerTitle">Mach6</span>
+          <span id="headerTitle">Symbiote</span>
         </div>
       </div>
       <div class="chat-header-right">
@@ -351,7 +351,7 @@ body {
     <div class="messages" id="messages">
       <div class="empty-state" id="emptyState">
         <div class="empty-state-icon" id="emptyIcon">🤖</div>
-        <div class="empty-state-text" id="emptyText">Mach6</div>
+        <div class="empty-state-text" id="emptyText">Symbiote</div>
         <div class="empty-state-hint">Type a message to begin</div>
       </div>
     </div>
@@ -388,8 +388,8 @@ let agentName = 'Agent';
 let agentEmoji = '🤖';
 
 // ── Session Management (localStorage) ──────────────────────────
-const STORAGE_KEY = 'mach6-sessions';
-const ACTIVE_KEY = 'mach6-active';
+const STORAGE_KEY = 'symbiote-sessions';
+const ACTIVE_KEY = 'symbiote-active';
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
@@ -434,7 +434,7 @@ function newChat() {
   renderSessionList();
   // Show empty state
   const el = document.getElementById('messages');
-  el.innerHTML = '<div class="empty-state" id="emptyState"><div class="empty-state-icon">' + agentEmoji + '</div><div class="empty-state-text">' + agentName + ' — Mach6</div><div class="empty-state-hint">Type a message to begin</div></div>';
+  el.innerHTML = '<div class="empty-state" id="emptyState"><div class="empty-state-icon">' + agentEmoji + '</div><div class="empty-state-text">' + agentName + ' — Symbiote</div><div class="empty-state-hint">Type a message to begin</div></div>';
   closeSidebarMobile();
 }
 
@@ -518,7 +518,7 @@ function renderMessages() {
   const emptyState = document.getElementById('emptyState');
   if (emptyState && currentMessages.length > 0) emptyState.remove();
   if (currentMessages.length === 0) {
-    el.innerHTML = '<div class="empty-state" id="emptyState"><div class="empty-state-icon">' + agentEmoji + '</div><div class="empty-state-text">' + agentName + ' — Mach6</div><div class="empty-state-hint">Type a message to begin</div></div>';
+    el.innerHTML = '<div class="empty-state" id="emptyState"><div class="empty-state-icon">' + agentEmoji + '</div><div class="empty-state-text">' + agentName + ' — Symbiote</div><div class="empty-state-hint">Type a message to begin</div></div>';
     return;
   }
   el.innerHTML = currentMessages.map(function(msg, i) {
@@ -547,15 +547,15 @@ function updateFooter(health) {
   if (health.agentName) {
     agentName = health.agentName;
     agentEmoji = health.agentEmoji || '🤖';
-    document.title = 'Mach6 — ' + agentName;
+    document.title = 'Symbiote — ' + agentName;
     document.getElementById('sidebarLogo').textContent = agentEmoji;
     document.getElementById('sidebarTitle').textContent = agentName;
     document.getElementById('headerLogo').textContent = agentEmoji;
-    document.getElementById('headerTitle').textContent = agentName + ' — Mach6';
+    document.getElementById('headerTitle').textContent = agentName + ' — Symbiote';
     var emptyIcon = document.getElementById('emptyIcon');
     var emptyText = document.getElementById('emptyText');
     if (emptyIcon) emptyIcon.textContent = agentEmoji;
-    if (emptyText) emptyText.textContent = agentName + ' — Mach6';
+    if (emptyText) emptyText.textContent = agentName + ' — Symbiote';
     document.getElementById('chatInput').placeholder = 'Message ' + agentName + '...';
   }
   document.getElementById('footerModel').textContent = health.model || '—';

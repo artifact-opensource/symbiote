@@ -1,4 +1,4 @@
-// Mach6 — Clean Boot Sequence (fixes Pain #20)
+// Symbiote — Clean Boot Sequence (fixes Pain #20)
 // Single entry point. Each step has timeout + fallback. Never crash on partial failure.
 // 
 // Built by Artifact Virtual.
@@ -126,7 +126,7 @@ export async function runBootSequence(steps: BootStep[]): Promise<{
 }
 
 /**
- * Create standard boot steps for Mach6.
+ * Create standard boot steps for Symbiote.
  */
 export function createDefaultBootSteps(hooks: {
   loadConfig: () => Promise<void>;

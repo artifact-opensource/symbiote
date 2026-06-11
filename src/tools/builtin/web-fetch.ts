@@ -1,4 +1,4 @@
-// Mach6 — Builtin tool: web fetch
+// Symbiote — Builtin tool: web fetch
 
 import type { ToolDefinition } from '../types.js';
 
@@ -19,7 +19,7 @@ export const webFetchTool: ToolDefinition = {
 
     try {
       const res = await fetch(url, {
-        headers: { 'User-Agent': 'Mach6/0.1', Accept: 'text/html, text/plain, application/json' },
+        headers: { 'User-Agent': 'Symbiote/0.1', Accept: 'text/html, text/plain, application/json' },
         signal: AbortSignal.timeout(15_000),
       });
 

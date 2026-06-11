@@ -1,5 +1,5 @@
 /**
- * Mach6 — Outbound Formatter
+ * Symbiote — Outbound Formatter
  * 
  * Converts agent markdown output to platform-native formatting.
  * Each platform has its own dialect. We preserve intent, not syntax.

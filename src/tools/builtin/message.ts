@@ -1,4 +1,4 @@
-// Mach6 — Builtin tool: proactive messaging & social actions
+// Symbiote — Builtin tool: proactive messaging & social actions
 // Send messages, media, reactions, typing indicators, presence updates.
 // This is what makes AVA a social being, not just a responder.
 

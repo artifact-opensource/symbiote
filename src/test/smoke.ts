@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Mach6 Agent Pipeline Smoke Test
+ * Symbiote Agent Pipeline Smoke Test
  * Tests: config loading → provider auth → LLM call → tool execution → response
  * Does NOT touch any channels (Discord/WhatsApp).
  */
@@ -27,11 +27,11 @@ function assert(cond: boolean, label: string, detail?: string) {
 }
 
 async function main() {
-  console.log('\n⚡ Mach6 Agent Pipeline Smoke Test\n');
+  console.log('\n⚡ Symbiote Agent Pipeline Smoke Test\n');
 
   // 1. Config
   console.log('── Config ──');
-  const config = loadConfig('mach6.json');
+  const config = loadConfig('symbiote.json');
   assert(!!config.defaultProvider, 'Config loads');
   assert(config.defaultProvider === 'github-copilot', `Provider: ${config.defaultProvider}`);
   assert(config.defaultModel === 'claude-sonnet-4', `Model: ${config.defaultModel}`);
@@ -50,13 +50,13 @@ async function main() {
 
   // 3. Tool Execution (direct)
   console.log('\n── Tool Execution ──');
-  const readResult = await registry.execute('read', { path: 'mach6.json' });
+  const readResult = await registry.execute('read', { path: 'symbiote.json' });
   assert(readResult.includes('github-copilot'), 'read tool executes');
 
   const execResult = await registry.execute('exec', { command: 'echo MACH6_ALIVE' });
   assert(execResult.includes('MACH6_ALIVE'), 'exec tool executes');
 
-  const writeResult = await registry.execute('write', { path: path.join(os.tmpdir(), 'mach6-test.txt'), content: 'smoke test' });
+  const writeResult = await registry.execute('write', { path: path.join(os.tmpdir(), 'symbiote-test.txt'), content: 'smoke test' });
   assert(writeResult.includes('success') || writeResult.includes('wrote') || !writeResult.includes('error'), 'write tool executes');
 
   // 4. Provider Authentication (GitHub Copilot token exchange)
@@ -96,8 +96,8 @@ async function main() {
   console.log('\n── Agent Loop (tool use) ──');
   try {
     const messages: Message[] = [
-      { role: 'system', content: 'You are Mach6 smoke test. Use the read tool to read mach6.json, then respond with the defaultModel value. Be brief.' },
-      { role: 'user', content: 'Read mach6.json and tell me the defaultModel.' },
+      { role: 'system', content: 'You are Symbiote smoke test. Use the read tool to read symbiote.json, then respond with the defaultModel value. Be brief.' },
+      { role: 'user', content: 'Read symbiote.json and tell me the defaultModel.' },
     ];
     const provConfig: ProviderConfig = {
       model: config.defaultModel,
@@ -123,7 +123,7 @@ async function main() {
   }
 
   // 6. Cleanup
-  try { (await import('node:fs')).unlinkSync(path.join(os.tmpdir(), 'mach6-test.txt')); } catch {}
+  try { (await import('node:fs')).unlinkSync(path.join(os.tmpdir(), 'symbiote-test.txt')); } catch {}
 
   printSummary();
 }

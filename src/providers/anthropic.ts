@@ -1,4 +1,4 @@
-// Mach6 — Anthropic Messages API streaming provider (raw HTTP, no libraries)
+// Symbiote — Anthropic Messages API streaming provider (raw HTTP, no libraries)
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider, ContentBlock } from './types.js';
 import { fetchWithRetry } from './retry.js';

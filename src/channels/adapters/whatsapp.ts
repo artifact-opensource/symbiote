@@ -1,5 +1,5 @@
 /**
- * Mach6 — WhatsApp Channel Adapter
+ * Symbiote — WhatsApp Channel Adapter
  * 
  * Baileys (multi-device) integration. Media, reactions, read receipts,
  * groups, mentions, ephemeral messages, voice notes.
@@ -161,7 +161,7 @@ export class WhatsAppAdapter extends BaseAdapter {
         // Auto-open web UI in browser after successful connection (Windows/Mac only — not headless servers)
         if (process.platform === 'win32' || process.platform === 'darwin') {
           try {
-            const configPath = path.join(process.cwd(), 'mach6.json');
+            const configPath = path.join(process.cwd(), 'symbiote.json');
             const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
             const port = cfg.apiPort ?? 3006;
             const webUrl = `http://localhost:${port}`;
@@ -289,7 +289,7 @@ export class WhatsAppAdapter extends BaseAdapter {
 
   /** Download media from message, attach local paths to payload, then emit */
   private async downloadAndEmit(msg: WAMessage, source: ChannelSource, payload: InboundPayload): Promise<void> {
-    const mediaDir = path.join(os.tmpdir(), 'mach6-media');
+    const mediaDir = path.join(os.tmpdir(), 'symbiote-media');
     try {
       const localPath = await this.downloadMedia(msg, mediaDir);
       if (localPath && payload.media) {

@@ -1,4 +1,4 @@
-// Mach6 — Session lifecycle manager
+// Symbiote — Session lifecycle manager
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -6,7 +6,7 @@ import path from 'node:path';
 import type { Message } from '../providers/types.js';
 import type { Session, SessionSummary, SessionMetadata } from './types.js';
 
-const DEFAULT_DIR = '.mach6/sessions';
+const DEFAULT_DIR = '.symbiote/sessions';
 const DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 /**

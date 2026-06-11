@@ -1,4 +1,4 @@
-// Mach6 — Spawn sub-agent tool
+// Symbiote — Spawn sub-agent tool
 // Allows the agent to spawn sub-agents for parallel/background tasks.
 
 import type { ToolDefinition } from '../types.js';

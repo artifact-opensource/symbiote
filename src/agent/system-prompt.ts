@@ -1,4 +1,4 @@
-// Mach6 — System prompt builder
+// Symbiote — System prompt builder
 // Assembles identity, personality, and operational context from workspace .md files
 // This is the soul of the agent — workspace files ARE the configuration
 

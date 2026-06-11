@@ -1,11 +1,11 @@
 /**
- * Mach6 — Channel System Integration Test
+ * Symbiote — Channel System Integration Test
  * 
  * Tests the bus, router, and formatter together.
  * Run: npx tsx src/channels/__test__/integration.test.ts
  */
 
-import { Mach6Bus } from '../bus.js';
+import { SymbioteBus } from '../bus.js';
 import { InboundRouter } from '../router.js';
 import { formatForChannel } from '../formatter.js';
 import type { ChannelCapabilities, BusEnvelope, ChannelSource, InboundPayload } from '../types.js';
@@ -28,7 +28,7 @@ function assert(condition: boolean, msg: string): void {
 console.log('\n🔧 Message Bus');
 
 {
-  const bus = new Mach6Bus({ coalesceWindowMs: 0 }); // Disable coalesce for testing
+  const bus = new SymbioteBus({ coalesceWindowMs: 0 }); // Disable coalesce for testing
   const received: BusEnvelope[] = [];
 
   bus.subscribe('session-1', (env) => received.push(env));
@@ -49,7 +49,7 @@ console.log('\n🔧 Message Bus');
 
   // Test priority ordering
   received.length = 0;
-  const bus2 = new Mach6Bus({ coalesceWindowMs: 0 });
+  const bus2 = new SymbioteBus({ coalesceWindowMs: 0 });
   const ordered: string[] = [];
 
   // Publish low then high — high should deliver first when subscription is added
@@ -76,7 +76,7 @@ console.log('\n🔧 Message Bus');
 console.log('\n⚡ Interrupts');
 
 {
-  const bus = new Mach6Bus({ coalesceWindowMs: 0 });
+  const bus = new SymbioteBus({ coalesceWindowMs: 0 });
   const interrupts: BusEnvelope[] = [];
 
   bus.onInterrupt('s3', (env) => interrupts.push(env));
@@ -103,7 +103,7 @@ console.log('\n🔴 Backpressure');
 
 {
   let bpState = false;
-  const bus = new Mach6Bus({
+  const bus = new SymbioteBus({
     maxQueueDepth: 5,
     coalesceWindowMs: 0,
     onBackpressure: (active) => { bpState = active; },
@@ -139,7 +139,7 @@ console.log('\n🔴 Backpressure');
 console.log('\n🛡️  Router Policy');
 
 {
-  const bus = new Mach6Bus({ coalesceWindowMs: 0 });
+  const bus = new SymbioteBus({ coalesceWindowMs: 0 });
   const router = new InboundRouter(bus, {
     policies: new Map([
       ['whatsapp', {
@@ -198,7 +198,7 @@ console.log('\n🛡️  Router Policy');
 console.log('\n🔄 Deduplication');
 
 {
-  const bus = new Mach6Bus({ coalesceWindowMs: 0 });
+  const bus = new SymbioteBus({ coalesceWindowMs: 0 });
   const router = new InboundRouter(bus, {
     policies: new Map([['test', { dmPolicy: 'open', groupPolicy: 'open', ownerIds: [] }]]),
   });

@@ -1,29 +1,29 @@
 # Production Deployment
 
-Mach6 is designed to run as a persistent daemon in production. One process, no containers, no orchestration.
+Symbiote is designed to run as a persistent daemon in production. One process, no containers, no orchestration.
 
 ## Linux (systemd)
 
-Mach6 includes a systemd service file:
+Symbiote includes a systemd service file:
 
 ```bash
-sudo cp mach6-gateway.service /etc/systemd/system/
+sudo cp symbiote-gateway.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now mach6-gateway
+sudo systemctl enable --now symbiote-gateway
 ```
 
 Edit the service file to set your paths, user, and working directory:
 
 ```ini
 [Unit]
-Description=Mach6 AI Gateway
+Description=Symbiote AI Gateway
 After=network.target
 
 [Service]
 Type=simple
 User=your-user
-WorkingDirectory=/path/to/mach6
-ExecStart=/usr/bin/node dist/gateway/daemon.js --config=mach6.json
+WorkingDirectory=/path/to/symbiote
+ExecStart=/usr/bin/node dist/gateway/daemon.js --config=symbiote.json
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
@@ -43,12 +43,12 @@ kill -USR1 $(pgrep -f "gateway/daemon.js")
 ### Logs
 
 ```bash
-journalctl -u mach6-gateway -f
+journalctl -u symbiote-gateway -f
 ```
 
 ## macOS (launchd)
 
-Create `~/Library/LaunchAgents/com.mach6.gateway.plist`:
+Create `~/Library/LaunchAgents/com.symbiote.gateway.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -56,15 +56,15 @@ Create `~/Library/LaunchAgents/com.mach6.gateway.plist`:
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.mach6.gateway</string>
+    <string>com.symbiote.gateway</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/node</string>
-        <string>/path/to/mach6/dist/gateway/daemon.js</string>
-        <string>--config=mach6.json</string>
+        <string>/path/to/symbiote/dist/gateway/daemon.js</string>
+        <string>--config=symbiote.json</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/path/to/mach6</string>
+    <string>/path/to/symbiote</string>
     <key>KeepAlive</key>
     <true/>
     <key>RunAtLoad</key>
@@ -74,7 +74,7 @@ Create `~/Library/LaunchAgents/com.mach6.gateway.plist`:
 ```
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.mach6.gateway.plist
+launchctl load ~/Library/LaunchAgents/com.symbiote.gateway.plist
 ```
 
 ## Windows
@@ -82,9 +82,9 @@ launchctl load ~/Library/LaunchAgents/com.mach6.gateway.plist
 Use [NSSM](https://nssm.cc/) to run as a Windows service:
 
 ```powershell
-nssm install Mach6 "C:\Program Files\nodejs\node.exe" "dist\gateway\daemon.js --config=mach6.json"
-nssm set Mach6 AppDirectory "C:\path\to\mach6"
-nssm start Mach6
+nssm install Symbiote "C:\Program Files\nodejs\node.exe" "dist\gateway\daemon.js --config=symbiote.json"
+nssm set Symbiote AppDirectory "C:\path\to\symbiote"
+nssm start Symbiote
 ```
 
 Alternatively, use Task Scheduler for a simpler setup.
@@ -101,7 +101,7 @@ Alternatively, use Task Scheduler for a simpler setup.
 | Network | Required for cloud LLM providers | — |
 | GPU | Not required | Not required |
 
-Mach6 is CPU-only. No GPU needed. The same binary runs on a $5/month VPS or bare metal.
+Symbiote is CPU-only. No GPU needed. The same binary runs on a $5/month VPS or bare metal.
 
 ## Monitoring
 
@@ -113,13 +113,13 @@ curl http://localhost:3006/api/v1/health
 
 ### Heartbeat
 
-Mach6 includes an activity-aware heartbeat scheduler that adapts check frequency based on system load:
+Symbiote includes an activity-aware heartbeat scheduler that adapts check frequency based on system load:
 
 - **Active** — frequent checks during message processing
 - **Idle** — reduced frequency when no messages are flowing
 - **Sleeping** — minimal checks during quiet hours
 
-Configure quiet hours in `mach6.json`:
+Configure quiet hours in `symbiote.json`:
 
 ```json
 {
@@ -135,7 +135,7 @@ Configure quiet hours in `mach6.json`:
 
 ## Graceful Shutdown
 
-Mach6 handles `SIGTERM` and `SIGINT` gracefully:
+Symbiote handles `SIGTERM` and `SIGINT` gracefully:
 
 1. Stops accepting new messages
 2. Completes the active agent turn (with timeout)

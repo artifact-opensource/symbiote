@@ -12,7 +12,7 @@ Access to xAI's Grok models — strong reasoning with fast inference. OpenAI-com
 XAI_API_KEY=xai-...
 ```
 
-3. Configure in `mach6.json`:
+3. Configure in `symbiote.json`:
 
 ```json
 {

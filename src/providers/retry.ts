@@ -1,4 +1,4 @@
-// Mach6 — Simple retry wrapper for provider fetch calls
+// Symbiote — Simple retry wrapper for provider fetch calls
 
 const RETRY_DELAYS = [2000, 5000, 10000];
 

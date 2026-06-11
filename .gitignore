@@ -8,7 +8,7 @@ dist/
 
 # Secrets & local config — never commit
 .env
-mach6.json
+symbiote.json
 
 # Keep templates — these ARE committed
 !.env.example
@@ -32,8 +32,8 @@ whatsapp-auth/
 .ava/
 comb/
 hektor/
-mach6-core/
-mach6.json.bak
+symbiote-core/
+symbiote.json.bak
 
 # Agent identity files — per-instance, never commit
 IDENTITY.md

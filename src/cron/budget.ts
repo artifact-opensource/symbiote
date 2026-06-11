@@ -1,4 +1,4 @@
-// Mach6 — Cron Resource Budgets (fixes Pain #14)
+// Symbiote — Cron Resource Budgets (fixes Pain #14)
 // Jobs declare resource usage. Scheduler enforces budgets. No overlap burns.
 
 export interface ResourceDeclaration {

@@ -3,26 +3,26 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mach6 — AI Agent Framework | Build AI Agents with Discord, WhatsApp & LLMs</title>
-<meta name="description" content="Mach6 is an open-source AI agent framework. Connect Discord, WhatsApp, and any LLM (Groq, Claude, GPT-4, Grok, Ollama) into a single persistent agent — with real-time interrupts, tool calling, and session memory. No Docker. No cloud required.">
+<title>Symbiote — AI Agent Framework | Build AI Agents with Discord, WhatsApp & LLMs</title>
+<meta name="description" content="Symbiote is an open-source AI agent framework. Connect Discord, WhatsApp, and any LLM (Groq, Claude, GPT-4, Grok, Ollama) into a single persistent agent — with real-time interrupts, tool calling, and session memory. No Docker. No cloud required.">
 <meta name="keywords" content="ai agent framework, llm agent, autonomous agent, tool calling, discord bot, whatsapp bot, groq, anthropic claude, openai gpt4, grok xai, ollama, github copilot, mcp model context protocol, typescript ai, nodejs ai agent, self-hosted ai, local llm, open source ai agent, agentic ai, chatbot framework, multi-channel ai">
 <meta name="author" content="Artifact Virtual">
 <meta name="robots" content="index, follow">
-<link rel="canonical" href="https://github.com/Artifact-Virtual/mach6">
+<link rel="canonical" href="https://github.com/Artifact-Virtual/symbiote">
 
 <!-- Open Graph -->
 <meta property="og:type" content="website">
-<meta property="og:title" content="Mach6 — AI Agent Framework">
+<meta property="og:title" content="Symbiote — AI Agent Framework">
 <meta property="og:description" content="Open-source AI agent framework. Connect Discord, WhatsApp, and any LLM into a persistent agent with real-time interrupts, tool calling, and memory. No Docker. No cloud.">
-<meta property="og:url" content="https://github.com/Artifact-Virtual/mach6">
-<meta property="og:site_name" content="Mach6 by Artifact Virtual">
-<meta property="og:image" content="https://raw.githubusercontent.com/Artifact-Virtual/mach6/main/docs/og-image.png">
+<meta property="og:url" content="https://github.com/Artifact-Virtual/symbiote">
+<meta property="og:site_name" content="Symbiote by Artifact Virtual">
+<meta property="og:image" content="https://raw.githubusercontent.com/Artifact-Virtual/symbiote/main/docs/og-image.png">
 
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Mach6 — AI Agent Framework">
+<meta name="twitter:title" content="Symbiote — AI Agent Framework">
 <meta name="twitter:description" content="Open-source AI agent framework. Groq, Claude, GPT-4, Grok, Ollama. Discord + WhatsApp. Real-time interrupts. No Docker.">
-<meta name="twitter:image" content="https://raw.githubusercontent.com/Artifact-Virtual/mach6/main/docs/og-image.png">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/Artifact-Virtual/symbiote/main/docs/og-image.png">
 <meta name="twitter:site" content="@ArtifactVirtual">
 
 <meta name="theme-color" content="#0a0a0f">
@@ -570,10 +570,10 @@ body::after {
 <!-- ════════════ HERO ════════════ -->
 <div class="hero">
   <div class="hero-content">
-    <div class="logo">Mach6</div>
+    <div class="logo">Symbiote</div>
     <p class="tagline">AI agent framework. Single process. Any machine.</p>
     <div class="hero-actions">
-      <a href="https://github.com/Artifact-Virtual/mach6" class="btn btn-primary" target="_blank" rel="noopener">
+      <a href="https://github.com/Artifact-Virtual/symbiote" class="btn btn-primary" target="_blank" rel="noopener">
         &#9733; View on GitHub
       </a>
       <a href="getting-started/quick-start.html" class="btn btn-secondary">
@@ -589,7 +589,7 @@ body::after {
   <div class="section-label">Capabilities</div>
   <h2 class="section-title">Built different.</h2>
   <p class="section-desc">
-    Not another wrapper around an API. Mach6 is a persistent daemon — messaging-first,
+    Not another wrapper around an API. Symbiote is a persistent daemon — messaging-first,
     interrupt-driven, local by default.
   </p>
 
@@ -638,7 +638,7 @@ body::after {
       <span class="feature-icon">&#128274;</span>
       <div class="feature-title">Local-First</div>
       <div class="feature-desc">
-        Your machine, your data, your keys. No Docker required. No Redis. No cloud dependencies. CPU-only — if it runs Node.js 20+, it runs Mach6.
+        Your machine, your data, your keys. No Docker required. No Redis. No cloud dependencies. CPU-only — if it runs Node.js 20+, it runs Symbiote.
       </div>
     </div>
   </div>
@@ -724,21 +724,21 @@ body::after {
       <span class="quickstart-title">terminal</span>
     </div>
     <pre class="quickstart-code"><span class="comment"># Clone the repo</span>
-<span class="cmd">git</span> clone https://github.com/Artifact-Virtual/mach6.git
-<span class="cmd">cd</span> mach6
+<span class="cmd">git</span> clone https://github.com/Artifact-Virtual/symbiote.git
+<span class="cmd">cd</span> symbiote
 
 <span class="comment"># Install dependencies</span>
 <span class="cmd">npm</span> install
 
 <span class="comment"># Copy and edit the config</span>
-<span class="cmd">cp</span> mach6.example.json mach6.json
-<span class="cmd">$EDITOR</span> mach6.json  <span class="comment"># add your API keys</span>
+<span class="cmd">cp</span> symbiote.example.json symbiote.json
+<span class="cmd">$EDITOR</span> symbiote.json  <span class="comment"># add your API keys</span>
 
 <span class="comment"># Launch the daemon</span>
 <span class="cmd">npm</span> start
 
 <span class="comment"># Or run directly</span>
-<span class="cmd">npx</span> ts-node mach6-core/src/daemon.ts</pre>
+<span class="cmd">npx</span> ts-node symbiote-core/src/daemon.ts</pre>
   </div>
 </section>
 
@@ -772,7 +772,7 @@ body::after {
   <h2 class="section-title">Dive deeper.</h2>
 
   <div class="links-grid">
-    <a href="https://github.com/Artifact-Virtual/mach6" class="link-card" target="_blank" rel="noopener">
+    <a href="https://github.com/Artifact-Virtual/symbiote" class="link-card" target="_blank" rel="noopener">
       <span class="link-icon">&#128736;</span>
       <span class="link-text">GitHub</span>
     </a>

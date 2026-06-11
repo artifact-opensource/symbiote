@@ -1,5 +1,5 @@
 /**
- * Mach6 v2.0.0 — Session Hot Resume
+ * Symbiote v2.0.0 — Session Hot Resume
  * 
  * Persists active session state to disk on shutdown (or crash) and
  * restores them on startup. This means:
@@ -7,7 +7,7 @@
  * - Active sessions are automatically re-registered
  * - Pending messages are re-queued
  * 
- * State file: .mach6/sessions/hot-state.json
+ * State file: .symbiote/sessions/hot-state.json
  * Written on: graceful shutdown (SIGTERM/SIGINT), periodic checkpoint (every 60s)
  * Read on: gateway startup
  * 
@@ -43,7 +43,7 @@ export interface HotSessionState {
 export interface HotResumeState {
   /** Timestamp of state save */
   savedAt: number;
-  /** Mach6 version that saved the state */
+  /** Symbiote version that saved the state */
   version: string;
   /** Process ID that saved the state */
   pid: number;

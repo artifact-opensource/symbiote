@@ -1,4 +1,4 @@
-// Mach6 — Core Agent Runner
+// Symbiote — Core Agent Runner
 // The heart: prompt → LLM → tool calls → loop → response
 
 import type { Message, ToolCall, StreamEvent, Provider, ProviderConfig, ToolDef } from '../providers/types.js';

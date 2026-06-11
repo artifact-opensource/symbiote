@@ -1,5 +1,5 @@
 // Symbiote — OpenRouter Provider (OpenAI-compatible)
-// Ported from Sirius B (Victus) — adapted for AVA's Mach6
+// Ported from Sirius B (Victus) — adapted for AVA's Symbiote
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
 import { fetchWithRetry } from './retry.js';

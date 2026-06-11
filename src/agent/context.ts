@@ -1,4 +1,4 @@
-// Mach6 — Context window management (truncation)
+// Symbiote — Context window management (truncation)
 
 import type { Message, ContentBlock } from '../providers/types.js';
 

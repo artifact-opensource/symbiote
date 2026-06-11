@@ -1,6 +1,6 @@
 # Security
 
-Mach6 implements defense-in-depth across every layer.
+Symbiote implements defense-in-depth across every layer.
 
 ## Input Sanitization
 
@@ -50,13 +50,13 @@ Requests without a valid token receive `401 Unauthorized`.
 
 ## Secrets Management
 
-- API keys and tokens live in `.env`, never in `mach6.json`
+- API keys and tokens live in `.env`, never in `symbiote.json`
 - Config values support `${ENV_VAR}` interpolation
 - `.env` should be in `.gitignore` (the example file is `.env.example`)
 
 ## Boot Validation
 
-Mach6 validates the entire configuration at startup:
+Symbiote validates the entire configuration at startup:
 
 - Missing required fields are caught before the agent starts
 - Invalid types produce human-readable error messages
@@ -65,9 +65,9 @@ Mach6 validates the entire configuration at startup:
 
 ## Recommendations
 
-1. **Run as a dedicated user** — don't run Mach6 as root
+1. **Run as a dedicated user** — don't run Symbiote as root
 2. **Restrict workspace scope** — set `workspace` to a specific directory, not `/`
 3. **Use allowlists** — `dmPolicy: "allowlist"` is the default for a reason
 4. **Set resource budgets** — limit `exec` and `web_fetch` calls per day
 5. **Monitor logs** — injection attempts are logged with full context
-6. **Keep Node.js updated** — Mach6 pins `undici >=6.23.0` to address known CVEs
+6. **Keep Node.js updated** — Symbiote pins `undici >=6.23.0` to address known CVEs

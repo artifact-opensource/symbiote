@@ -1,4 +1,4 @@
-// Mach6 — Provider Error Diagnostics (fixes Pain #7, #8)
+// Symbiote — Provider Error Diagnostics (fixes Pain #7, #8)
 // Loud errors, redacted logs, fix suggestions, configurable timeouts
 
 export interface ProviderDiagnostic {

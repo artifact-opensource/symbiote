@@ -1,4 +1,4 @@
-// Mach6 — Groq provider (OpenAI-compatible, free tier)
+// Symbiote — Groq provider (OpenAI-compatible, free tier)
 // Models: llama-3.3-70b-versatile, qwen/qwen3-32b, openai/gpt-oss-120b
 // Speed: 280-1000 tok/sec on Groq's LPU hardware
 // Rate limit handling: auto-retry on 429 with server-specified delay

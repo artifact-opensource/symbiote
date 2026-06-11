@@ -1,4 +1,4 @@
-# Mach6 Releases
+# Symbiote Releases
 
 ## Latest: v1.6.0 (March 7, 2026)
 Native Gemini provider, 8 LLM providers, multi-user deployment. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for details.

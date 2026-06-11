@@ -1,4 +1,4 @@
-// Mach6 — Per-Channel Markdown Formatter (fixes Pain #17)
+// Symbiote — Per-Channel Markdown Formatter (fixes Pain #17)
 // Convert markdown to channel-safe formats
 
 export type OutputFormat = 'whatsapp' | 'discord' | 'plain' | 'markdown';

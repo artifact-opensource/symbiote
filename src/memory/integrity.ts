@@ -1,4 +1,4 @@
-// Mach6 — Memory Index Integrity (fixes Pain #15)
+// Symbiote — Memory Index Integrity (fixes Pain #15)
 // Validate on startup. Auto-rebuild if corrupt. Atomic writes.
 
 import fs from 'node:fs';

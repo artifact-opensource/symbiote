@@ -1,5 +1,5 @@
 [Unit]
-Description=Mach6 AI Gateway
+Description=Symbiote AI Gateway
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
@@ -12,12 +12,12 @@ WorkingDirectory=/home/adam/workspace/enterprise
 EnvironmentFile=/home/adam/workspace/enterprise/.env
 Environment=TZ=Asia/Karachi
 Environment=NODE_OPTIONS=--max-old-space-size=4096
-ExecStart=/usr/bin/node /home/adam/workspace/enterprise/.contingency/mach6-core/dist/gateway/daemon.js --config=/home/adam/workspace/enterprise/.contingency/mach6-core/mach6.json
+ExecStart=/usr/bin/node /home/adam/workspace/enterprise/.contingency/symbiote-core/dist/gateway/daemon.js --config=/home/adam/workspace/enterprise/.contingency/symbiote-core/symbiote.json
 Restart=always
 RestartSec=3
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=mach6
+SyslogIdentifier=symbiote
 
 [Install]
 WantedBy=multi-user.target

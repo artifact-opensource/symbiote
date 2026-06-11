@@ -1,4 +1,4 @@
-// Mach6 — Builtin tool: vision analysis
+// Symbiote — Builtin tool: vision analysis
 // Routes through GitHub Copilot (OpenAI-compatible proxy) for vision.
 // NO direct Anthropic/OpenAI API calls — we pay for Copilot, use Copilot.
 
@@ -21,7 +21,7 @@ interface CachedToken {
 let cachedToken: CachedToken | null = null;
 
 function tokenCachePath(): string {
-  return path.join(os.homedir(), '.mach6', 'credentials', 'github-copilot.token.json');
+  return path.join(os.homedir(), '.symbiote', 'credentials', 'github-copilot.token.json');
 }
 
 function loadCachedToken(): CachedToken | null {

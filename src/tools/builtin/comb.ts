@@ -1,4 +1,4 @@
-// Mach6 — COMB: Lossless Operational Memory
+// Symbiote — COMB: Lossless Operational Memory
 //
 // Pure Node.js implementation. Zero external dependencies.
 // Works for ANY agent on ANY platform — no Python, no venv, no flush.py.

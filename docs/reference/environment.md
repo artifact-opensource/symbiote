@@ -1,6 +1,6 @@
 # Environment Variables
 
-All environment variables used by Mach6. Set these in `.env` (auto-loaded at startup) or your shell environment.
+All environment variables used by Symbiote. Set these in `.env` (auto-loaded at startup) or your shell environment.
 
 ## LLM Providers
 
@@ -42,7 +42,7 @@ Environment variables can be set in:
 1. **`.env` file** - auto-loaded at startup via built-in dotenv loader (recommended for secrets)
 2. **Shell environment** - `export VAR=value`
 3. **systemd service** - `Environment=VAR=value`
-4. **`mach6.json`** - via `${VAR}` interpolation in string values
+4. **`symbiote.json`** - via `${VAR}` interpolation in string values
 
 `.env` values do not override existing shell environment variables.
 

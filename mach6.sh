@@ -5,5 +5,5 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # Change to the script's directory
 cd "$DIR"
 
-# Start the mach6 daemon in the background
-node dist/gateway/daemon.js --config=mach6.json &
+# Start the symbiote daemon in the background
+node dist/gateway/daemon.js --config=symbiote.json &

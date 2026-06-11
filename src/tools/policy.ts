@@ -1,4 +1,4 @@
-// Mach6 — Tool Policy Engine (fixes Pain #6, #12)
+// Symbiote — Tool Policy Engine (fixes Pain #6, #12)
 // Clean allow/deny, no phantom queues, dynamic iteration limits, resource budgets
 
 export type PolicyDecision = 'allow' | 'deny';

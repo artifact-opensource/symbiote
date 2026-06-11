@@ -1,7 +1,7 @@
-// Mach6 — Config Validation (fixes Pain #1, #9)
+// Symbiote — Config Validation (fixes Pain #1, #9)
 // Validates config BEFORE anything starts. Never crash-loop.
 
-import type { Mach6Config } from './config.js';
+import type { SymbioteConfig } from './config.js';
 
 export interface ValidationError {
   field: string;
@@ -14,7 +14,7 @@ export interface ValidationError {
  * Validate config and return all issues found.
  * Errors = fatal (must fix). Warnings = suspicious but allowed.
  */
-export function validateConfig(config: Mach6Config): ValidationError[] {
+export function validateConfig(config: SymbioteConfig): ValidationError[] {
   const issues: ValidationError[] = [];
 
   // Check provider config
@@ -95,7 +95,7 @@ export function validateConfig(config: Mach6Config): ValidationError[] {
  * Run validation and handle results. Returns true if config is usable.
  * On fatal errors: prints them and returns false (caller should exit).
  */
-export function validateAndReport(config: Mach6Config): boolean {
+export function validateAndReport(config: SymbioteConfig): boolean {
   const issues = validateConfig(config);
   const errors = issues.filter(i => i.severity === 'error');
   const warnings = issues.filter(i => i.severity === 'warning');

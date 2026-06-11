@@ -1,4 +1,4 @@
-// Mach6 Provider Types — the universal language between providers and the agent runner
+// Symbiote Provider Types — the universal language between providers and the agent runner
 
 export interface Message {
   role: 'system' | 'user' | 'assistant' | 'tool';

@@ -3,11 +3,11 @@
 ## Interactive REPL
 
 ```bash
-node dist/index.js --config=mach6.json
+node dist/index.js --config=symbiote.json
 ```
 
 ```
-Mach6 v1.5.0 | groq/llama-3.3-70b-versatile | session: default
+Symbiote v1.5.0 | groq/llama-3.3-70b-versatile | session: default
 Tools (18): read, write, edit, exec, image, web_fetch, tts, ...
 Type /help for commands
 
@@ -17,10 +17,10 @@ Type /help for commands
 ## Setup Wizard
 
 ```bash
-npx mach6 init
+npx symbiote init
 ```
 
-Interactive 6-step wizard that generates `mach6.json`, `.env`, and optionally agent identity files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md, HEARTBEAT.md). See [Wizard docs](../getting-started/wizard.md) for details.
+Interactive 6-step wizard that generates `symbiote.json`, `.env`, and optionally agent identity files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md, HEARTBEAT.md). See [Wizard docs](../getting-started/wizard.md) for details.
 
 ## One-Shot Mode
 
@@ -50,7 +50,7 @@ Runs a single turn and exits. Useful for scripting and CI/CD.
 ## Daemon Mode
 
 ```bash
-node dist/gateway/daemon.js --config=mach6.json
+node dist/gateway/daemon.js --config=symbiote.json
 ```
 
 Starts the persistent daemon with all channels (Discord, WhatsApp, HTTP API). This is the primary production mode.
@@ -59,7 +59,7 @@ Starts the persistent daemon with all channels (Discord, WhatsApp, HTTP API). Th
 
 | Flag | Description |
 |------|-------------|
-| `--config=<path>` | Path to mach6.json (default: `./mach6.json`) |
+| `--config=<path>` | Path to symbiote.json (default: `./symbiote.json`) |
 
 ### Signals (Linux/macOS)
 

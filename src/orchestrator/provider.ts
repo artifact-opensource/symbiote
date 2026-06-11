@@ -49,7 +49,7 @@ export async function initializeOrchestrator(toolRegistry: ToolRegistry): Promis
     throw new Error(`Unknown cloud provider: ${cloudProviderName}`);
   }
 
-  // Get cloud provider config from mach6.json providers section
+  // Get cloud provider config from symbiote.json providers section
   const cloudProviderConfig = config.providers[cloudProviderName as keyof typeof config.providers] ?? {};
 
   // Wrap cloud provider to inject config and force model

@@ -1,6 +1,6 @@
 # Providers Overview
 
-Mach6 supports 8 LLM providers through a unified streaming interface. Providers are hot-swappable mid-session — switch models without losing conversation context.
+Symbiote supports 8 LLM providers through a unified streaming interface. Providers are hot-swappable mid-session — switch models without losing conversation context.
 
 ## Supported Providers
 
@@ -19,7 +19,7 @@ Mach6 supports 8 LLM providers through a unified streaming interface. Providers 
 
 ## Configuration
 
-Register providers in `mach6.json`:
+Register providers in `symbiote.json`:
 
 ```json
 {
@@ -79,4 +79,4 @@ All OpenAI-compatible providers (Groq, xAI, Ollama, OpenAI) include automatic re
 
 ## Diagnostics
 
-Mach6 validates provider configuration at boot. Missing API keys, unreachable endpoints, and invalid configurations are caught during the [boot sequence](../core/boot-sequence.md) — not at runtime. Failed providers log warnings but don't prevent startup if they aren't the default.
+Symbiote validates provider configuration at boot. Missing API keys, unreachable endpoints, and invalid configurations are caught during the [boot sequence](../core/boot-sequence.md) — not at runtime. Failed providers log warnings but don't prevent startup if they aren't the default.

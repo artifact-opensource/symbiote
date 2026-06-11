@@ -1,6 +1,6 @@
 # Built-in Tools
 
-Mach6 ships with 18 built-in tools available to the agent. Tools are sandboxed per-session via the [policy engine](policy.md).
+Symbiote ships with 18 built-in tools available to the agent. Tools are sandboxed per-session via the [policy engine](policy.md).
 
 ## File System
 

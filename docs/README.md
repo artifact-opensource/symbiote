@@ -1,8 +1,8 @@
-# Mach6
+# Symbiote
 
 **AI agent framework. Single process. Any machine.**
 
-Mach6 is a persistent daemon that connects messaging platforms, LLM providers, and tool execution into a single agentic loop — with real-time interrupts, message coalescing, and sub-agent orchestration.
+Symbiote is a persistent daemon that connects messaging platforms, LLM providers, and tool execution into a single agentic loop — with real-time interrupts, message coalescing, and sub-agent orchestration.
 
 No Docker. No Redis. No cloud dependencies. **Your machine, your data, your keys.**
 
@@ -28,8 +28,8 @@ No Docker. No Redis. No cloud dependencies. **Your machine, your data, your keys
 - [Setup Wizard →](getting-started/wizard.md)
 - [Architecture →](core/architecture.md)
 - [Providers →](providers/overview.md)
-- [GitHub](https://github.com/Artifact-Virtual/mach6)
-- [npm](https://www.npmjs.com/package/mach6-core)
+- [GitHub](https://github.com/Artifact-Virtual/symbiote)
+- [npm](https://www.npmjs.com/package/symbiote-core)
 
 ## What You Can Build
 

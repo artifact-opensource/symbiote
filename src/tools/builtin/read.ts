@@ -1,4 +1,4 @@
-// Mach6 — Builtin tool: read file
+// Symbiote — Builtin tool: read file
 
 import fs from 'node:fs';
 import path from 'node:path';

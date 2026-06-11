@@ -1,5 +1,5 @@
 /**
- * Mach6 — Channel System Type Definitions
+ * Symbiote — Channel System Type Definitions
  * 
  * Core types for the message bus, channel adapters, and routing layer.
  * Zero dependencies. This file imports nothing.

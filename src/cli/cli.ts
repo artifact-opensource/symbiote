@@ -1,22 +1,22 @@
 /**
- * Mach6 — CLI Router
+ * Symbiote — CLI Router
  * 
- * Subcommand dispatcher. Routes `mach6 <command>` to the right handler.
+ * Subcommand dispatcher. Routes `symbiote <command>` to the right handler.
  * 
  * Commands:
- *   init        — Interactive setup wizard (create mach6.json + workspace)
+ *   init        — Interactive setup wizard (create symbiote.json + workspace)
  *   start       — Start the gateway daemon
  *   stop        — Stop a running daemon
  *   restart     — Restart the daemon
  *   status      — Show daemon status + session info
- *   configure   — Edit mach6.json interactively
+ *   configure   — Edit symbiote.json interactively
  *   agent       — Interactive REPL (default if no subcommand)
  *   logs        — Tail daemon logs
  *   install     — Install dependencies + validate environment
  *   version     — Show version info
  *   help        — Show this help
  * 
- * Mach6 AI Gateway — Artifact Virtual
+ * Symbiote AI Gateway — Artifact Virtual
  */
 
 import * as fs from 'node:fs';
@@ -37,20 +37,20 @@ const VERSION = '1.4.0';
 // ── Helpers ────────────────────────────────────────────────────
 
 function getPidFile(): string {
-  return path.join(process.cwd(), '.mach6.pid');
+  return path.join(process.cwd(), '.symbiote.pid');
 }
 
 function getLogFile(): string {
-  return path.join(process.cwd(), 'mach6.log');
+  return path.join(process.cwd(), 'symbiote.log');
 }
 
 function getConfigPath(): string | undefined {
   const args = process.argv.slice(3);
   const configArg = args.find(a => a.startsWith('--config='));
   if (configArg) return configArg.split('=')[1];
-  const cwd = path.join(process.cwd(), 'mach6.json');
+  const cwd = path.join(process.cwd(), 'symbiote.json');
   if (fs.existsSync(cwd)) return cwd;
-  const home = path.join(os.homedir(), '.mach6', 'config.json');
+  const home = path.join(os.homedir(), '.symbiote', 'config.json');
   if (fs.existsSync(home)) return home;
   return undefined;
 }
@@ -121,12 +121,12 @@ async function cmdHelp() {
   }
 
   console.log();
-  console.log(`  ${palette.dim}Usage:${palette.reset}  mach6 ${palette.cyan}<command>${palette.reset} ${palette.dim}[options]${palette.reset}`);
-  console.log(`  ${palette.dim}REPL:${palette.reset}   mach6 ${palette.dim}(no args — starts interactive agent)${palette.reset}`);
-  console.log(`  ${palette.dim}One-shot:${palette.reset} mach6 agent ${palette.cyan}"your question here"${palette.reset}`);
+  console.log(`  ${palette.dim}Usage:${palette.reset}  symbiote ${palette.cyan}<command>${palette.reset} ${palette.dim}[options]${palette.reset}`);
+  console.log(`  ${palette.dim}REPL:${palette.reset}   symbiote ${palette.dim}(no args — starts interactive agent)${palette.reset}`);
+  console.log(`  ${palette.dim}One-shot:${palette.reset} symbiote agent ${palette.cyan}"your question here"${palette.reset}`);
   console.log();
   console.log(`  ${palette.dim}Options:${palette.reset}`);
-  console.log(`    ${palette.cyan}--config=${palette.reset}${palette.silver}<path>${palette.reset}      Path to mach6.json`);
+  console.log(`    ${palette.cyan}--config=${palette.reset}${palette.silver}<path>${palette.reset}      Path to symbiote.json`);
   console.log(`    ${palette.cyan}--provider=${palette.reset}${palette.silver}<name>${palette.reset}    Override default provider`);
   console.log(`    ${palette.cyan}--model=${palette.reset}${palette.silver}<name>${palette.reset}       Override default model`);
   console.log(`    ${palette.cyan}--session=${palette.reset}${palette.silver}<id>${palette.reset}       Use specific session`);
@@ -209,7 +209,7 @@ async function cmdInstall() {
       console.log(info(`  Model: ${config.defaultModel ?? 'not set'}`));
     }
   } else {
-    console.log(warn('No mach6.json — run: mach6 init'));
+    console.log(warn('No symbiote.json — run: symbiote init'));
   }
 
   // 6. Workspace
@@ -218,7 +218,7 @@ async function cmdInstall() {
   if (fs.existsSync(soulFile)) {
     console.log(ok(`Workspace: ${workspace}`));
   } else {
-    console.log(info(`Workspace: ${workspace} (no SOUL.md — run mach6 init)`));
+    console.log(info(`Workspace: ${workspace} (no SOUL.md — run symbiote init)`));
   }
 
   // 7. Channels check
@@ -252,9 +252,9 @@ async function cmdInstall() {
 
   console.log();
   if (allGood) {
-    console.log(ok(`${palette.bold}Environment is ready.${palette.reset} Run ${palette.cyan}mach6 start${palette.reset} to launch.`));
+    console.log(ok(`${palette.bold}Environment is ready.${palette.reset} Run ${palette.cyan}symbiote start${palette.reset} to launch.`));
   } else {
-    console.log(warn('Some issues found. Fix them and run mach6 install again.'));
+    console.log(warn('Some issues found. Fix them and run symbiote install again.'));
   }
   console.log();
 }
@@ -265,19 +265,19 @@ async function cmdStart() {
   const { running, pid } = isRunning();
   if (running) {
     console.log(warn(`Daemon is already running (PID: ${pid})`));
-    console.log(info(`Use ${palette.cyan}mach6 restart${palette.reset} to restart.`));
+    console.log(info(`Use ${palette.cyan}symbiote restart${palette.reset} to restart.`));
     console.log();
     return;
   }
 
   const configPath = getConfigPath();
   if (!configPath) {
-    console.log(fail('No mach6.json found. Run mach6 init first.'));
+    console.log(fail('No symbiote.json found. Run symbiote init first.'));
     console.log();
     return;
   }
 
-  console.log(info('Starting Mach6 daemon...'));
+  console.log(info('Starting Symbiote daemon...'));
   
   const daemonPath = path.join(ROOT, 'gateway', 'daemon.js');
   const logFile = getLogFile();
@@ -302,10 +302,10 @@ async function cmdStart() {
   if (check.running) {
     console.log(ok(`Daemon started (PID: ${check.pid})`));
     console.log(info(`Logs: ${palette.dim}${logFile}${palette.reset}`));
-    console.log(info(`Stop: ${palette.cyan}mach6 stop${palette.reset}`));
+    console.log(info(`Stop: ${palette.cyan}symbiote stop${palette.reset}`));
   } else {
     console.log(fail('Daemon failed to start. Check logs:'));
-    console.log(info(`  ${palette.dim}mach6 logs${palette.reset}`));
+    console.log(info(`  ${palette.dim}symbiote logs${palette.reset}`));
     // Clean up stale PID file
     try { fs.unlinkSync(getPidFile()); } catch {}
   }
@@ -417,7 +417,7 @@ async function cmdConfigure() {
 
   const configPath = getConfigPath();
   if (!configPath) {
-    console.log(fail('No mach6.json found. Run mach6 init to create one.'));
+    console.log(fail('No symbiote.json found. Run symbiote init to create one.'));
     console.log();
     return;
   }
@@ -520,7 +520,7 @@ async function cmdConfigure() {
 
   const { running } = isRunning();
   if (running) {
-    console.log(info(`Daemon is running. ${palette.cyan}mach6 restart${palette.reset} to apply changes.`));
+    console.log(info(`Daemon is running. ${palette.cyan}symbiote restart${palette.reset} to apply changes.`));
   }
   console.log();
 }
@@ -530,7 +530,7 @@ async function cmdLogs() {
   if (!fs.existsSync(logFile)) {
     console.log();
     console.log(info('No log file found.'));
-    console.log(info(`Start the daemon first: ${palette.cyan}mach6 start${palette.reset}`));
+    console.log(info(`Start the daemon first: ${palette.cyan}symbiote start${palette.reset}`));
     console.log();
     return;
   }

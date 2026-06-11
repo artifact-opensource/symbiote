@@ -1,4 +1,4 @@
-// Mach6 — Tool type definitions
+// Symbiote — Tool type definitions
 
 export interface ToolParameter {
   type: string;

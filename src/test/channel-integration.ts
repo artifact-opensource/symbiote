@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Mach6 Channel Integration Test
+ * Symbiote Channel Integration Test
  * 
  * Tests the FULL path: BusEnvelope → agent turn → LLM → tools → response → send
  * Uses a mock adapter so no real Discord/WhatsApp is needed.
@@ -39,7 +39,7 @@ async function simulateAgentTurn(envelope: BusEnvelope): Promise<{
   systemPromptLength: number;
   responseText: string;
 }> {
-  const config = loadConfig('mach6.json');
+  const config = loadConfig('symbiote.json');
 
   // Tool registry (same as daemon)
   const toolRegistry = new ToolRegistry();
@@ -49,7 +49,7 @@ async function simulateAgentTurn(envelope: BusEnvelope): Promise<{
   toolRegistry.register(editTool);
 
   // Session manager
-  const sessionsDir = path.join(os.tmpdir(), 'mach6-test-sessions');
+  const sessionsDir = path.join(os.tmpdir(), 'symbiote-test-sessions');
   fs.mkdirSync(sessionsDir, { recursive: true });
   const sessionManager = new SessionManager(sessionsDir);
 
@@ -113,7 +113,7 @@ async function simulateAgentTurn(envelope: BusEnvelope): Promise<{
 }
 
 async function main() {
-  console.log('\n⚡ Mach6 Channel Integration Test\n');
+  console.log('\n⚡ Symbiote Channel Integration Test\n');
   console.log('This tests the FULL message pipeline: envelope → prompt → LLM → tools → response\n');
 
   // ── Test 1: WhatsApp DM from Ali ──

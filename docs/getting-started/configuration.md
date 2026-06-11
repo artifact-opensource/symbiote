@@ -1,8 +1,8 @@
 # Configuration
 
-Mach6 uses two files for configuration: `mach6.json` for agent settings and `.env` for secrets.
+Symbiote uses two files for configuration: `symbiote.json` for agent settings and `.env` for secrets.
 
-## mach6.json
+## symbiote.json
 
 ```jsonc
 {
@@ -47,7 +47,7 @@ Mach6 uses two files for configuration: `mach6.json` for agent settings and `.en
 
 ### Environment Variable Interpolation
 
-All string values in `mach6.json` support `${ENV_VAR}` syntax:
+All string values in `symbiote.json` support `${ENV_VAR}` syntax:
 
 ```json
 {
@@ -86,7 +86,7 @@ MACH6_API_KEY=
 MACH6_PORT=3006
 ```
 
-> Run `npx mach6 init` to generate both files interactively. See [Wizard](wizard.md).
+> Run `npx symbiote init` to generate both files interactively. See [Wizard](wizard.md).
 
 ## Key Settings
 
@@ -155,4 +155,4 @@ kill -USR1 $(pgrep -f "gateway/daemon.js")
 
 ## Validation
 
-Mach6 validates configuration at [boot](../core/boot-sequence.md) with human-readable diagnostics. Missing required fields, invalid types, and unreachable providers are caught before the agent starts — not at runtime.
+Symbiote validates configuration at [boot](../core/boot-sequence.md) with human-readable diagnostics. Missing required fields, invalid types, and unreachable providers are caught before the agent starts — not at runtime.

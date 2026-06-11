@@ -1,4 +1,4 @@
-// Mach6 — BLINK: Seamless Session Continuation
+// Symbiote — BLINK: Seamless Session Continuation
 //
 // The wall doesn't exist.
 //

@@ -1,4 +1,4 @@
-// Mach6 — Tool registry: register, lookup, dispatch, convert to provider format
+// Symbiote — Tool registry: register, lookup, dispatch, convert to provider format
 
 import type { ToolDef } from '../providers/types.js';
 import type { ToolDefinition } from './types.js';

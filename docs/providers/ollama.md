@@ -19,7 +19,7 @@ ollama pull qwen3:4b
 ollama serve
 ```
 
-4. Configure in `mach6.json`:
+4. Configure in `symbiote.json`:
 
 ```json
 {

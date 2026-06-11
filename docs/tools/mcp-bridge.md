@@ -1,13 +1,13 @@
 # MCP Bridge
 
-Mach6 includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) client bridge. Connect external MCP tool servers and their tools become native Mach6 tools.
+Symbiote includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) client bridge. Connect external MCP tool servers and their tools become native Symbiote tools.
 
 ## How It Works
 
 The MCP bridge spawns an external process (the MCP server), communicates via JSON-RPC over stdio, discovers available tools, and registers them in the tool registry.
 
 ```
-Mach6 Agent → Tool Registry → MCP Bridge → (stdio) → MCP Server
+Symbiote Agent → Tool Registry → MCP Bridge → (stdio) → MCP Server
 ```
 
 ## Configuration
@@ -45,7 +45,7 @@ Use `toolPrefix` to namespace external tools and avoid collisions with built-in 
 
 ```typescript
 // MCP server exposes "read" tool
-// With prefix "ext_", it becomes "ext_read" in Mach6
+// With prefix "ext_", it becomes "ext_read" in Symbiote
 const bridge = new McpBridge({
   command: ['node', 'my-mcp-server.js'],
   toolPrefix: 'ext_',

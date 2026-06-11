@@ -1,6 +1,6 @@
-// Mach6 — MCP Client Bridge
+// Symbiote — MCP Client Bridge
 // Connects to AVA Gateway (or any MCP server) via stdio, discovers tools,
-// and registers them as native Mach6 tools.
+// and registers them as native Symbiote tools.
 //
 // Usage:
 //   import { McpBridge } from './mcp-bridge.js';
@@ -108,7 +108,7 @@ export class McpBridge {
     const initResp = await this._request('initialize', {
       protocolVersion: '2025-03-26',
       capabilities: {},
-      clientInfo: { name: 'mach6', version: '1.0.0' },
+      clientInfo: { name: 'symbiote', version: '1.0.0' },
     }, timeout);
 
     if (initResp.error) {
@@ -140,7 +140,7 @@ export class McpBridge {
     );
   }
 
-  /** Get all discovered tools as Mach6 ToolDefinitions */
+  /** Get all discovered tools as Symbiote ToolDefinitions */
   getTools(): ToolDefinition[] {
     const prefix = this.config.toolPrefix ?? '';
     return this.discoveredTools
@@ -208,7 +208,7 @@ export class McpBridge {
     const toolName = prefix + schema.name;
     const bridge = this; // capture for closure
 
-    // Convert MCP input schema to Mach6 parameter format
+    // Convert MCP input schema to Symbiote parameter format
     const inputSchema = schema.inputSchema ?? { type: 'object', properties: {}, required: [] };
     const properties: Record<string, ToolParameter> = {};
     for (const [key, val] of Object.entries(inputSchema.properties ?? {})) {

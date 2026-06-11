@@ -1,4 +1,4 @@
-// Mach6 — xAI (Grok) provider (OpenAI-compatible)
+// Symbiote — xAI (Grok) provider (OpenAI-compatible)
 // Models: grok-3, grok-3-fast, grok-3-mini, grok-3-mini-fast
 // grok-3: strongest reasoning, grok-3-fast: lower latency
 // grok-3-mini: lightweight reasoning with think mode

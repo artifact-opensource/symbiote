@@ -1,6 +1,6 @@
 # Message Bus
 
-The message bus is Mach6's nervous system. Every inbound message flows through it. It handles priority ordering, interrupt bypass, message coalescing, and backpressure — all in-process with zero external dependencies.
+The message bus is Symbiote's nervous system. Every inbound message flows through it. It handles priority ordering, interrupt bypass, message coalescing, and backpressure — all in-process with zero external dependencies.
 
 ## Priority Levels
 

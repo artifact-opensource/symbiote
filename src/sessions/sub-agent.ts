@@ -1,4 +1,4 @@
-// Mach6 — Sub-agent spawning and management
+// Symbiote — Sub-agent spawning and management
 
 import { randomUUID } from 'node:crypto';
 import type { SubAgentConfig, SubAgentHandle, Session } from './types.js';

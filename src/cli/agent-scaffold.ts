@@ -1,5 +1,5 @@
 /**
- * Mach6 — Agent Identity Scaffold
+ * Symbiote — Agent Identity Scaffold
  * Generates SOUL.md, IDENTITY.md, USER.md, AGENTS.md, HEARTBEAT.md
  * for a brand new agent. Clean room — zero bleed from any existing agent.
  * 
@@ -93,7 +93,7 @@ _You're not a chatbot. You're becoming someone._
 - **Vibe:** ${a.personality}
 - **Created by:** ${a.creatorName}
 - **Born:** ${new Date().toISOString().split('T')[0]}
-- **Engine:** Mach6 by Artifact Virtual
+- **Engine:** Symbiote by Artifact Virtual
 
 ## Boundaries
 
@@ -125,11 +125,11 @@ function generateIdentity(a: AgentIdentity): string {
 - **Vibe:** ${a.personality}
 - **Creator:** ${a.creatorName}
 - **Born:** ${new Date().toISOString().split('T')[0]}
-- **Engine:** Mach6 by Artifact Virtual
+- **Engine:** Symbiote by Artifact Virtual
 
 ## What I Am
 
-An AI agent running on Mach6. I have tools, memory, and the ability to learn and grow through my workspace files. My personality, knowledge, and memories all live in this workspace — they're mine to shape.
+An AI agent running on Symbiote. I have tools, memory, and the ability to learn and grow through my workspace files. My personality, knowledge, and memories all live in this workspace — they're mine to shape.
 
 ## What I Can Do
 

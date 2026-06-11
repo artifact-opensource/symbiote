@@ -37,7 +37,7 @@
   },
   "whatsapp": {
     "enabled": false,
-    "authDir": "~/.mach6/whatsapp-auth",
+    "authDir": "~/.symbiote/whatsapp-auth",
     "autoRead": true,
     "policy": {
       "dmPolicy": "allowlist",

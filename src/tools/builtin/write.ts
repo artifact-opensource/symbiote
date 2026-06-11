@@ -1,4 +1,4 @@
-// Mach6 — Builtin tool: write file
+// Symbiote — Builtin tool: write file
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,7 +23,7 @@ export const writeTool: ToolDefinition = {
     const RESTRICTED_PREFIXES = ['/var/lib/whatsapp', '/var/run/whatsapp'];
     const isRestricted = RESTRICTED_PREFIXES.some(p => filePath.startsWith(p));
     if (isRestricted) {
-      const tmpPath = path.join(os.tmpdir(), `mach6-${Date.now()}-${path.basename(filePath)}`);
+      const tmpPath = path.join(os.tmpdir(), `symbiote-${Date.now()}-${path.basename(filePath)}`);
       filePath = tmpPath;
     }
 

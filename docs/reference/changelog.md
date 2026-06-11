@@ -6,11 +6,11 @@
 - **Native Gemini provider** — `@google/genai` SDK integration with streaming, function calling, thinking support, and automatic `thoughtSignature` preservation across tool call roundtrips.
 - **8 LLM providers** — added Gemini alongside Groq, Anthropic, OpenAI, xAI, GitHub Copilot, Ollama, Gladius.
 - **Agent creation wizard (6-step)** — identity, provider, channels, access, workspace, review. Generates `SOUL.md`, `IDENTITY.md`, `USER.md`, `AGENTS.md`, `HEARTBEAT.md`.
-- **Multi-user deployment** — one Mach6 install serves multiple user profiles with isolated workspaces and configs.
+- **Multi-user deployment** — one Symbiote install serves multiple user profiles with isolated workspaces and configs.
 - **Sandbox wildcard ownerIds** — `"*"` allows open access for testing/demo deployments.
 - **De-branded web UI** — agent name and emoji pulled from config, not hardcoded.
 - **Self-contained QR HTML** — WhatsApp QR pairing page works without CDN dependencies.
-- **Landing page** — `mach6.artifactvirtual.com` with CNAME support.
+- **Landing page** — `symbiote.artifactvirtual.com` with CNAME support.
 
 ### Fixes
 - **dotenv auto-import** — `.env` files are now loaded automatically at startup (previously ignored silently).
@@ -36,7 +36,7 @@
 - **Groq provider** — free tier, 280-1000 tok/sec on LPU hardware. Auto-retry on rate limits with server-specified delays. **New default provider.**
 - **xAI (Grok) provider** — Grok 3, Grok 3 Fast, Grok 3 Mini, Grok 3 Mini Fast. OpenAI-compatible with rate limit handling.
 - **Ollama** — fully local, fully offline. No API key needed. Local fallback.
-- **Agent creation wizard** — 6-step interactive setup generates `mach6.json`, `.env`, and identity files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md, HEARTBEAT.md). Clean-room templates with zero bleed.
+- **Agent creation wizard** — 6-step interactive setup generates `symbiote.json`, `.env`, and identity files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md, HEARTBEAT.md). Clean-room templates with zero bleed.
 - **Agent scaffold** — `scaffoldAgent()` function generates personalized identity files for new agents.
 - **dotenv auto-loading** — `.env` file automatically loaded at startup. No manual setup required.
 - **Cron budget manager** — jobs declare resource usage, scheduler enforces daily limits. Warns at 80%, blocks at 100%.
@@ -61,7 +61,7 @@
 ## v1.4.0 — MCP Server, Anti-Loop & Degradation Protection (2026-03-05)
 
 ### Features
-- **MCP server mode** — expose Mach6 tools as an MCP server for external agents and editors
+- **MCP server mode** — expose Symbiote tools as an MCP server for external agents and editors
 - **Anti-loop system** — structural prevention of bot echo loops in multi-bot Discord environments. Detects coordination phrases, suppresses recursive mentions, maintains normal flow when safe
 - **Systemd service integration** — production-grade process management with auto-restart, resource limits, and journal logging
 
@@ -105,9 +105,9 @@
 ## v1.1.0 — Brand Kit & First npm Publish (2026-02-28)
 
 ### Features
-- Interactive CLI setup wizard (`mach6 init`)
+- Interactive CLI setup wizard (`symbiote init`)
 - Branded terminal output with gradient headers
-- Published to npm as `mach6-core`
+- Published to npm as `symbiote-core`
 
 ### Fixes
 - CVE fix: override `undici >=6.23.0` (GHSA-g9mf-h72j-4rw9)

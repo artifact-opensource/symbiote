@@ -1,4 +1,4 @@
-// Mach6 — Ollama local provider (OpenAI-compat API, localhost:11434)
+// Symbiote — Ollama local provider (OpenAI-compat API, localhost:11434)
 // Local fallback — runs entirely on local hardware, no cloud dependency
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';

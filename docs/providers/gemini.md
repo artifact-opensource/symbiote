@@ -31,7 +31,7 @@ GEMINI_API_KEY=AIza...    # https://aistudio.google.com/apikey
 
 ### Thinking Support
 
-Gemini models with thinking enabled return `thoughtSignature` fields in their responses. Mach6 automatically preserves these signatures across tool call roundtrips — required by the Gemini API for thinking-enabled sessions.
+Gemini models with thinking enabled return `thoughtSignature` fields in their responses. Symbiote automatically preserves these signatures across tool call roundtrips — required by the Gemini API for thinking-enabled sessions.
 
 Configure thinking depth:
 
@@ -51,7 +51,7 @@ Full streaming support via the `@google/genai` SDK. Text chunks, tool calls, and
 
 ### Function Calling
 
-Native function calling support. Mach6 automatically adapts tool schemas for Gemini compatibility (strips `additionalProperties` which Gemini rejects).
+Native function calling support. Symbiote automatically adapts tool schemas for Gemini compatibility (strips `additionalProperties` which Gemini rejects).
 
 ### System Instructions
 
@@ -64,5 +64,5 @@ Set `GEMINI_API_KEY` in your `.env` file. Get a free key at [Google AI Studio](h
 ## Notes
 
 - Uses the `@google/genai` SDK directly (not an OpenAI-compatible endpoint)
-- `thoughtSignature` must be preserved in tool call roundtrips for thinking-enabled models — Mach6 handles this automatically
+- `thoughtSignature` must be preserved in tool call roundtrips for thinking-enabled models — Symbiote handles this automatically
 - Schema adaptation is automatic — no manual intervention needed

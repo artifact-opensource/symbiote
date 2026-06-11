@@ -1,17 +1,17 @@
-// Mach6 — MCP Server
-// Exposes all Mach6 tools via MCP protocol (JSON-RPC over stdio)
+// Symbiote — MCP Server
+// Exposes all Symbiote tools via MCP protocol (JSON-RPC over stdio)
 // Connect from VS Code: add to .vscode/mcp.json or global mcp.json
 //
 // Usage:
-//   node dist/tools/mcp-server.js [--config /path/to/mach6.json]
+//   node dist/tools/mcp-server.js [--config /path/to/symbiote.json]
 //
 // VS Code mcp.json:
 //   {
 //     "servers": {
-//       "mach6": {
+//       "symbiote": {
 //         "type": "stdio",
 //         "command": "node",
-//         "args": ["/path/to/mach6/dist/tools/mcp-server.js"]
+//         "args": ["/path/to/symbiote/dist/tools/mcp-server.js"]
 //       }
 //     }
 //   }
@@ -44,7 +44,7 @@ interface JsonRpcMessage {
 
 // ── Server State ───────────────────────────────────────────────────────────
 
-const SERVER_NAME = 'mach6';
+const SERVER_NAME = 'symbiote';
 const SERVER_VERSION = '1.3.0';
 const PROTOCOL_VERSION = '2025-03-26';
 
@@ -65,7 +65,7 @@ for (const tool of [
 const configArg = process.argv.indexOf('--config');
 const configPath = configArg >= 0 && process.argv[configArg + 1]
   ? process.argv[configArg + 1]
-  : path.join(process.cwd(), 'mach6.json');
+  : path.join(process.cwd(), 'symbiote.json');
 
 try {
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -251,4 +251,4 @@ process.on('SIGINT', () => {
   process.exit(0);
 });
 
-log(`Mach6 MCP Server v${SERVER_VERSION} ready — ${registry.list().length} tools`);
+log(`Symbiote MCP Server v${SERVER_VERSION} ready — ${registry.list().length} tools`);

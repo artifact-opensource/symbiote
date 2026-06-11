@@ -1,16 +1,16 @@
 # WhatsApp
 
-Mach6 uses [Baileys v7](https://github.com/WhiskeySockets/Baileys) for WhatsApp Web multi-device integration.
+Symbiote uses [Baileys v7](https://github.com/WhiskeySockets/Baileys) for WhatsApp Web multi-device integration.
 
 ## Setup
 
-1. Configure in `mach6.json`:
+1. Configure in `symbiote.json`:
 
 ```jsonc
 {
   "whatsapp": {
     "enabled": true,
-    "authDir": "~/.mach6/whatsapp-auth",
+    "authDir": "~/.symbiote/whatsapp-auth",
     "phoneNumber": "your-phone-number",
     "autoRead": true,
     "policy": {
@@ -23,7 +23,7 @@ Mach6 uses [Baileys v7](https://github.com/WhiskeySockets/Baileys) for WhatsApp 
 }
 ```
 
-2. Start Mach6 — a QR code will appear in the terminal
+2. Start Symbiote — a QR code will appear in the terminal
 3. Scan with WhatsApp on your phone (Settings → Linked Devices)
 4. Auth state persists to `authDir` — subsequent starts reconnect automatically
 
@@ -44,7 +44,7 @@ Mach6 uses [Baileys v7](https://github.com/WhiskeySockets/Baileys) for WhatsApp 
 
 Baileys v7 uses JIDs with device suffixes: `1234567890:5@s.whatsapp.net`. Config files store them without: `1234567890@s.whatsapp.net`.
 
-Mach6 normalizes automatically — you never need to worry about the device suffix in configuration or policy rules.
+Symbiote normalizes automatically — you never need to worry about the device suffix in configuration or policy rules.
 
 ## Policies
 
@@ -57,11 +57,11 @@ Same policy model as Discord:
 
 ## Auto-Read
 
-When `autoRead` is `true`, Mach6 sends read receipts (blue ticks) for messages it processes. Disable for stealth operation.
+When `autoRead` is `true`, Symbiote sends read receipts (blue ticks) for messages it processes. Disable for stealth operation.
 
 ## Reconnection
 
-Baileys handles reconnection automatically. If the WebSocket drops, Mach6 detects the disconnect reason:
+Baileys handles reconnection automatically. If the WebSocket drops, Symbiote detects the disconnect reason:
 
 - **Connection lost** → automatic reconnect
 - **Logged out** → re-prompts for QR scan

@@ -1,6 +1,6 @@
 # Sub-Agents
 
-Mach6 supports spawning sub-agents for parallel task execution. A parent agent can delegate work to child agents, each running in their own session with independent context.
+Symbiote supports spawning sub-agents for parallel task execution. A parent agent can delegate work to child agents, each running in their own session with independent context.
 
 ## Usage
 
@@ -19,7 +19,7 @@ From the CLI:
 ## How It Works
 
 1. Parent agent calls `spawn` with a task description
-2. Mach6 creates a child session with:
+2. Symbiote creates a child session with:
    - Its own message history
    - Inherited provider configuration
    - Sandboxed tool access

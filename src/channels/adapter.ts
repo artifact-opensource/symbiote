@@ -1,5 +1,5 @@
 /**
- * Mach6 — Abstract Channel Adapter Base
+ * Symbiote — Abstract Channel Adapter Base
  * 
  * Provides common infrastructure (health tracking, reconnection logic,
  * rate limiting) so concrete adapters only implement platform-specific I/O.

@@ -1,4 +1,4 @@
-// Mach6 — Google Gemini native API streaming provider
+// Symbiote — Google Gemini native API streaming provider
 // Uses the Gemini REST API directly (not OpenAI compatibility shim)
 // Supports: streaming, function calling, thinking, system instructions
 
@@ -8,7 +8,7 @@ import { fetchWithRetry } from './retry.js';
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
 /**
- * Convert Mach6 messages to Gemini Content[] format.
+ * Convert Symbiote messages to Gemini Content[] format.
  * Gemini uses { role: "user"|"model", parts: [...] } — no "assistant" or "tool" roles.
  * System instructions are handled separately via systemInstruction.
  */
@@ -90,7 +90,7 @@ function convertMessages(messages: Message[]): { contents: unknown[]; systemInst
 }
 
 /**
- * Convert Mach6 ToolDef[] to Gemini functionDeclarations format.
+ * Convert Symbiote ToolDef[] to Gemini functionDeclarations format.
  */
 function convertTools(tools: ToolDef[]): unknown[] {
   if (tools.length === 0) return [];
@@ -131,7 +131,7 @@ async function* streamGemini(
   if (config.maxTokens) generationConfig.maxOutputTokens = config.maxTokens;
   if (config.temperature !== undefined) generationConfig.temperature = config.temperature;
 
-  // Thinking config — map from Mach6's thinking budget to Gemini's thinkingLevel
+  // Thinking config — map from Symbiote's thinking budget to Gemini's thinkingLevel
   const thinkingBudget = (config as any).thinkingBudget ?? (config as any).thinking?.budget;
   if (thinkingBudget) {
     const levelMap: Record<string, string> = {

@@ -1,4 +1,4 @@
-// Mach6 — Adaptive Temperature Modulation (ATM)
+// Symbiote — Adaptive Temperature Modulation (ATM)
 // Heuristic-based task classification → dynamic per-iteration temperature control
 
 import type { Message } from '../providers/types.js';

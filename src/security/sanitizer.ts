@@ -1,4 +1,4 @@
-// Mach6 — Prompt Injection Sanitizer
+// Symbiote — Prompt Injection Sanitizer
 // Neutralizes injection attempts in tool results before they reach the LLM.
 // 
 // Attack vectors:

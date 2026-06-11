@@ -14,7 +14,7 @@ Gladius is Artifact Virtual's local AI kernel. It provides a fully local inferen
 }
 ```
 
-Start the Gladius server before launching Mach6. The provider communicates via OpenAI-compatible HTTP API.
+Start the Gladius server before launching Symbiote. The provider communicates via OpenAI-compatible HTTP API.
 
 ## Configuration Options
 

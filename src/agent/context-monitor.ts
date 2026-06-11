@@ -1,4 +1,4 @@
-// Mach6 — Proactive Context Management (fixes Pain #3)
+// Symbiote — Proactive Context Management (fixes Pain #3)
 // Track tokens in real-time. Compact before overflow. Never hit the wall.
 
 import os from 'node:os';
@@ -52,7 +52,7 @@ export class ContextMonitor {
       compactThreshold: cfg.compactThreshold ?? 0.8,
       emergencyThreshold: cfg.emergencyThreshold ?? 0.9,
     };
-    this.transcriptDir = cfg.transcriptDir ?? path.join(os.tmpdir(), 'mach6-transcripts');
+    this.transcriptDir = cfg.transcriptDir ?? path.join(os.tmpdir(), 'symbiote-transcripts');
     this.onCombStage = cfg.onCombStage;
   }
 

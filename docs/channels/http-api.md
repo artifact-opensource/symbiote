@@ -1,6 +1,6 @@
 # HTTP API
 
-Mach6 exposes a REST API for programmatic access. The same agent pipeline handles HTTP requests as Discord and WhatsApp messages.
+Symbiote exposes a REST API for programmatic access. The same agent pipeline handles HTTP requests as Discord and WhatsApp messages.
 
 ## Endpoints
 

@@ -1,4 +1,4 @@
-// Mach6 — Social Presence Manager v2
+// Symbiote — Social Presence Manager v2
 // Sustained typing + granular activity states.
 //
 // Shows what AVA is actually doing during a turn:

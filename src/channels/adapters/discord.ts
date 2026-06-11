@@ -1,5 +1,5 @@
 /**
- * Mach6 — Discord Channel Adapter
+ * Symbiote — Discord Channel Adapter
  * 
  * Full discord.js integration. Guilds, DMs, threads, embeds,
  * reactions, components, typing indicators.

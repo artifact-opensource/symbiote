@@ -44,8 +44,8 @@ function maybeIngest(db: VectorDB): void {
       path.join(ws, '..', '.sessions'),              // parent workspace
     ];
 
-    // Also check for mach6-core sessions (AVA's legacy dir)
-    const coreDir = path.join(ws, 'mach6-core', '.sessions');
+    // Also check for symbiote-core sessions (AVA's legacy dir)
+    const coreDir = path.join(ws, 'symbiote-core', '.sessions');
     if (fs.existsSync(coreDir)) sessionDirs.push(coreDir);
 
     let totalIndexed = 0;
@@ -124,7 +124,7 @@ export const vdbIngestTool: ToolDefinition = {
     // Discover all session directories
     const candidates = [
       path.join(ws, '.sessions'),
-      path.join(ws, 'mach6-core', '.sessions'),
+      path.join(ws, 'symbiote-core', '.sessions'),
     ];
 
     for (const dir of candidates) {

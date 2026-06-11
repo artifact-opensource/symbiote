@@ -1,5 +1,5 @@
 /**
- * Mach6 Web UI Server
+ * Symbiote Web UI Server
  * Zero dependencies — native Node.js http + SSE streaming
  */
 
@@ -73,18 +73,18 @@ let config: Config = {
   apiKeys: {},
 };
 
-// Agent identity (from mach6.json)
+// Agent identity (from symbiote.json)
 let agentName = 'Agent';
 let agentEmoji = '🤖';
 
-// Load config from mach6.json if exists
-const configPath = path.resolve(process.cwd(), 'mach6.json');
+// Load config from symbiote.json if exists
+const configPath = path.resolve(process.cwd(), 'symbiote.json');
 try {
   const raw = fs.readFileSync(configPath, 'utf-8');
   const loaded = JSON.parse(raw);
   if (loaded.name) agentName = loaded.name;
   if (loaded.emoji) agentEmoji = loaded.emoji;
-  // Map mach6.json fields to webchat config
+  // Map symbiote.json fields to webchat config
   if (loaded.defaultProvider) config.provider = loaded.defaultProvider;
   if (loaded.defaultModel) config.model = loaded.defaultModel;
   config = { ...config, ...loaded };
@@ -293,10 +293,10 @@ async function streamChat(
   } catch (err) {
     const latency = Date.now() - startMs;
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error(`  [mach6-web] Chat proxy error: ${errMsg}`);
+    console.error(`  [symbiote-web] Chat proxy error: ${errMsg}`);
 
     // Send error as assistant message so user sees it
-    const errorContent = `Connection to agent failed: ${errMsg}. Make sure the Mach6 agent is running.`;
+    const errorContent = `Connection to agent failed: ${errMsg}. Make sure the Symbiote agent is running.`;
     res.write(`data: ${JSON.stringify({ type: 'text', content: errorContent, id: assistantId })}\n\n`);
     res.write(`data: ${JSON.stringify({ type: 'done', message: { id: assistantId, role: 'assistant', content: errorContent, timestamp: Date.now(), latencyMs: latency } })}\n\n`);
     res.end();
@@ -546,7 +546,7 @@ function formatUptime(ms: number): string {
 export function startWebServer(port = 3006): http.Server {
   const server = http.createServer((req, res) => {
     handleRequest(req, res).catch(err => {
-      console.error(`${palette.dim}  [mach6-web]${palette.reset}`, err);
+      console.error(`${palette.dim}  [symbiote-web]${palette.reset}`, err);
       if (!res.headersSent) {
         json(res, { error: 'Internal server error' }, 500);
       }

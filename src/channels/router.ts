@@ -1,5 +1,5 @@
 /**
- * Mach6 — Inbound Router
+ * Symbiote — Inbound Router
  * 
  * Sits between channel adapters and the message bus.
  * Handles: policy enforcement, session routing, priority assignment,
@@ -33,7 +33,7 @@ import type {
   MessagePriority,
   SessionRoute,
 } from './types.js';
-import type { Mach6Bus } from './bus.js';
+import type { SymbioteBus } from './bus.js';
 
 // ─── WhatsApp JID Normalization ────────────────────────────────────────────
 
@@ -104,13 +104,13 @@ export interface RouterConfig {
 }
 
 export class InboundRouter {
-  private bus: Mach6Bus;
+  private bus: SymbioteBus;
   private config: RouterConfig;
   private dedup = new DeduplicationCache();
   private routes = new Map<string, SessionRoute>();
   private sessionCounter = 0;
 
-  constructor(bus: Mach6Bus, config: RouterConfig) {
+  constructor(bus: SymbioteBus, config: RouterConfig) {
     this.bus = bus;
     this.config = config;
   }

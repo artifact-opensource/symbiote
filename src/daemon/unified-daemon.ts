@@ -5,7 +5,7 @@ import * as path from 'path';
 import { logger } from './utils/logger';
 
 /**
- * Mach6 Unified Daemon (Symbiote 2.2)
+ * Symbiote Unified Daemon (Symbiote 2.2)
  * Manages the lifecycle of Gateway, COMB, HEKTOR, and PULSE.
  * Implements Semantic Initialization (VDB-first boot).
  */

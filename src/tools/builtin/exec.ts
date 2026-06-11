@@ -1,4 +1,4 @@
-// Mach6 — Builtin tool: exec shell commands (enhanced with background + PTY)
+// Symbiote — Builtin tool: exec shell commands (enhanced with background + PTY)
 
 import { spawn } from 'node:child_process';
 import { getProcessManager } from './process.js';
@@ -26,10 +26,10 @@ export const execTool: ToolDefinition = {
 
     // Self-kill guard: prevent AVA from stopping/restarting her own service or rewriting the ava script
     const SELF_KILL_PATTERNS = [
-      /systemctl\s+(stop|restart|disable)\s+mach6/i,
-      /kill\s+.*mach6|pkill.*mach6/i,
-      />\s*.*\bmach6\b.*$/,
-      /write.*\bmach6\b.*\bbin\b/i,
+      /systemctl\s+(stop|restart|disable)\s+symbiote/i,
+      /kill\s+.*symbiote|pkill.*symbiote/i,
+      />\s*.*\bsymbiote\b.*$/,
+      /write.*\bsymbiote\b.*\bbin\b/i,
     ];
     for (const pat of SELF_KILL_PATTERNS) {
       if (pat.test(command)) {

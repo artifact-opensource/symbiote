@@ -1,4 +1,4 @@
-// Mach6 — GLADIUS local provider (localhost:8741, OpenAI-compat API)
+// Symbiote — GLADIUS local provider (localhost:8741, OpenAI-compat API)
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
 import { openaiProvider } from './openai.js';

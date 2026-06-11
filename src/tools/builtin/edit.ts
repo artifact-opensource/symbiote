@@ -1,4 +1,4 @@
-// Mach6 — Builtin tool: surgical file editing
+// Symbiote — Builtin tool: surgical file editing
 
 import fs from 'node:fs';
 import path from 'node:path';

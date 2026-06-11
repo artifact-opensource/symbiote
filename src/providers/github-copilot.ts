@@ -1,4 +1,4 @@
-// Mach6 — GitHub Copilot proxy provider
+// Symbiote — GitHub Copilot proxy provider
 // Uses the copilot token exchange flow: GitHub PAT → copilot session token → OpenAI-compat API
 
 import fs from 'node:fs';
@@ -24,7 +24,7 @@ interface CachedToken {
 let cachedToken: CachedToken | null = null;
 
 function tokenCachePath(): string {
-  return path.join(homeDir(), '.mach6', 'credentials', 'github-copilot.token.json');
+  return path.join(homeDir(), '.symbiote', 'credentials', 'github-copilot.token.json');
 }
 
 function loadCachedToken(): CachedToken | null {

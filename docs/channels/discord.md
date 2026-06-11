@@ -1,6 +1,6 @@
 # Discord
 
-Mach6 uses [discord.js v14](https://discord.js.org/) for full-featured Discord integration.
+Symbiote uses [discord.js v14](https://discord.js.org/) for full-featured Discord integration.
 
 ## Setup
 
@@ -13,7 +13,7 @@ DISCORD_BOT_TOKEN=your-bot-token
 DISCORD_CLIENT_ID=your-bot-client-id
 ```
 
-4. Configure in `mach6.json`:
+4. Configure in `symbiote.json`:
 
 ```jsonc
 {
@@ -62,7 +62,7 @@ DISCORD_CLIENT_ID=your-bot-client-id
 
 ### Sibling Bot IDs
 
-To prevent echo loops when running multiple bots in the same server, add their IDs to `siblingBotIds`. Mach6 will ignore messages from these bots.
+To prevent echo loops when running multiple bots in the same server, add their IDs to `siblingBotIds`. Symbiote will ignore messages from these bots.
 
 ```json
 {
@@ -70,11 +70,11 @@ To prevent echo loops when running multiple bots in the same server, add their I
 }
 ```
 
-When a message @mentions a sibling bot but not this bot, Mach6 yields — it won't respond.
+When a message @mentions a sibling bot but not this bot, Symbiote yields — it won't respond.
 
 ## Message Formatting
 
-Mach6 automatically formats responses for Discord:
+Symbiote automatically formats responses for Discord:
 
 - Markdown is preserved natively
 - Code blocks use Discord's syntax highlighting

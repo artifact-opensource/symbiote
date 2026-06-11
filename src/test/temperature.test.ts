@@ -1,4 +1,4 @@
-// Mach6 — ATM (Adaptive Temperature Modulation) Tests
+// Symbiote — ATM (Adaptive Temperature Modulation) Tests
 // Heuristic classifier + temperature resolution tests
 
 import { classifyTask, getTemperature, DEFAULT_TEMP_PROFILE } from '../agent/temperature.js';

@@ -1,4 +1,4 @@
-// Mach6 — Session types (enhanced with metadata, sub-agents)
+// Symbiote — Session types (enhanced with metadata, sub-agents)
 
 import type { Message } from '../providers/types.js';
 

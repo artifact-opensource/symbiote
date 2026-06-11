@@ -1,15 +1,15 @@
 <div align="center">
 
-# ⚡ Mach6
+# ⚡ Symbiote
 
 **Build AI agents that actually work. Single process. Any machine.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![npm](https://img.shields.io/badge/npm-mach6--core-red.svg)](https://www.npmjs.com/package/mach6-core)
+[![npm](https://img.shields.io/badge/npm-symbiote--core-red.svg)](https://www.npmjs.com/package/symbiote-core)
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
-[![v1.6.0](https://img.shields.io/badge/version-1.6.0-orange.svg)](https://github.com/Artifact-Virtual/mach6/releases/tag/v1.6.0)
+[![v1.6.0](https://img.shields.io/badge/version-1.6.0-orange.svg)](https://github.com/Artifact-Virtual/symbiote/releases/tag/v1.6.0)
 
 A persistent daemon that connects messaging platforms, LLM providers, and tool execution into a single agentic loop. Real-time interrupts. Seamless continuation. Session-to-session memory. No Docker. No Redis. No cloud dependencies.
 
@@ -25,30 +25,30 @@ A persistent daemon that connects messaging platforms, LLM providers, and tool e
 
 ```bash
 # Install
-npm install -g mach6-core
+npm install -g symbiote-core
 
-# Interactive setup — generates mach6.json + .env
-mach6 init
+# Interactive setup — generates symbiote.json + .env
+symbiote init
 
 # Start the daemon
-mach6 start
+symbiote start
 ```
 
 Or from source:
 
 ```bash
-git clone https://github.com/Artifact-Virtual/mach6.git
-cd mach6 && npm install && npm run build
-node dist/gateway/daemon.js --config=mach6.json
+git clone https://github.com/Artifact-Virtual/symbiote.git
+cd symbiote && npm install && npm run build
+node dist/gateway/daemon.js --config=symbiote.json
 ```
 
-> **Windows:** Fully supported. Use `.\mach6.ps1` or `node dist/gateway/daemon.js --config=mach6.json`.
+> **Windows:** Fully supported. Use `.\symbiote.ps1` or `node dist/gateway/daemon.js --config=symbiote.json`.
 
 <details>
 <summary><strong>Manual setup (skip the wizard)</strong></summary>
 
 ```bash
-cp mach6.example.json mach6.json
+cp symbiote.example.json symbiote.json
 cp .env.example .env
 # Edit both files — set API keys, channel tokens, workspace path, ownerIds
 ```
@@ -80,13 +80,13 @@ HTTP API             Interrupts
 
 ---
 
-## 🔥 What Makes Mach6 Different
+## 🔥 What Makes Symbiote Different
 
 ### Real-Time Interrupts
 
 Most agent frameworks are request-response. You send a message, you wait, you get a reply. Your new message queues silently while the agent is mid-turn. You can't stop it. You can't redirect it.
 
-Mach6 doesn't work that way. Every message is priority-classified in real time:
+Symbiote doesn't work that way. Every message is priority-classified in real time:
 
 ```
 interrupt  →  Bypasses queue. Cancels active turn immediately.
@@ -118,7 +118,7 @@ If a Python COMB stack exists (enterprise deployments), the native version deleg
 
 ### Message Coalescing
 
-Three messages in rapid succession? Mach6 buffers and merges them:
+Three messages in rapid succession? Symbiote buffers and merges them:
 
 ```
 "hey"              → buffered
@@ -130,13 +130,13 @@ One request, one turn, no wasted tokens.
 
 ### One Process, Full Stack
 
-One Node.js daemon runs everything — channels, routing, sessions, tools, providers, web UI. No Docker. No Redis. No Kubernetes. Runs on a $5 VPS or a bare-metal server. CPU-only. If it runs Node.js 20+, it runs Mach6.
+One Node.js daemon runs everything — channels, routing, sessions, tools, providers, web UI. No Docker. No Redis. No Kubernetes. Runs on a $5 VPS or a bare-metal server. CPU-only. If it runs Node.js 20+, it runs Symbiote.
 
 ---
 
 ## ⚙ Configuration
 
-### `mach6.json` — Agent configuration
+### `symbiote.json` — Agent configuration
 
 ```jsonc
 {
@@ -178,7 +178,7 @@ One Node.js daemon runs everything — channels, routing, sessions, tools, provi
 
   "whatsapp": {
     "enabled": true,
-    "authDir": "~/.mach6/whatsapp-auth",
+    "authDir": "~/.symbiote/whatsapp-auth",
     "phoneNumber": "your-phone-number",
     "policy": {
       "dmPolicy": "allowlist",
@@ -261,7 +261,7 @@ Providers are hot-swappable mid-session via `/provider` and `/model` commands.
 | Gemini 2.0 Flash | `gemini-2.0-flash` | Fast, general purpose |
 | Gemini 1.5 Pro | `gemini-1.5-pro` | Long context (1M tokens) |
 
-> **Gemini thinking support:** Models with thinking enabled return `thoughtSignature` fields. Mach6 preserves these across tool call roundtrips automatically — required by the Gemini API for thinking-enabled sessions.
+> **Gemini thinking support:** Models with thinking enabled return `thoughtSignature` fields. Symbiote preserves these across tool call roundtrips automatically — required by the Gemini API for thinking-enabled sessions.
 
 ### GitHub Copilot token resolution
 
@@ -353,9 +353,9 @@ No build step. One static HTML file.
 ### Interactive REPL
 
 ```bash
-mach6 repl
+symbiote repl
 # or
-node dist/index.js --config=mach6.json
+node dist/index.js --config=symbiote.json
 ```
 
 ### Commands
@@ -385,8 +385,8 @@ node dist/index.js "Summarize the README in this directory"
 ### Linux (systemd)
 
 ```bash
-sudo cp mach6-gateway.service /etc/systemd/system/
-sudo systemctl enable --now mach6-gateway
+sudo cp symbiote-gateway.service /etc/systemd/system/
+sudo systemctl enable --now symbiote-gateway
 
 # Hot-reload config without restarting:
 kill -USR1 $(pgrep -f "gateway/daemon.js")
@@ -398,14 +398,14 @@ LaunchAgent pointing to `node dist/gateway/daemon.js`.
 
 ### Windows
 
-NSSM or Task Scheduler with `node dist/gateway/daemon.js --config=mach6.json`.
+NSSM or Task Scheduler with `node dist/gateway/daemon.js --config=symbiote.json`.
 
 ---
 
 ## 📁 Project Structure
 
 ```
-mach6/
+symbiote/
 ├── src/
 │   ├── agent/          # Runner, context manager, system prompt builder
 │   ├── boot/           # Boot sequence & validation
@@ -425,9 +425,9 @@ mach6/
 │   ├── tools/          # 18+ built-in tools, policy engine, MCP bridge
 │   └── web/            # Web UI server (SSE streaming)
 ├── web/                # Web UI (single HTML file)
-├── mach6.example.json
+├── symbiote.example.json
 ├── .env.example
-└── mach6-gateway.service
+└── symbiote-gateway.service
 ```
 
 ---
@@ -451,7 +451,7 @@ mach6/
 | **Memory index integrity** | Validates HEKTOR indices at startup, auto-rebuilds if corrupt |
 | **Abort propagation** | Agent runner → LLM stream → tool execution |
 | **MCP bridge** | Connect external tool servers |
-| **MCP server mode** | Expose Mach6 tools to external agents and editors |
+| **MCP server mode** | Expose Symbiote tools to external agents and editors |
 | **Sibling bot yield** | @mention one bot, only that one responds |
 | **Anti-loop system** | Structural echo loop prevention in multi-bot environments |
 

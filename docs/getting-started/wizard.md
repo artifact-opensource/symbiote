@@ -5,7 +5,7 @@ Interactive CLI wizard for first-time setup. Generates all configuration and ide
 ## Usage
 
 ```bash
-npx mach6 init
+npx symbiote init
 ```
 
 Or from source:
@@ -22,7 +22,7 @@ The wizard creates two configuration files and (optionally) five identity files:
 
 | File | Purpose |
 |------|---------|
-| `mach6.json` | Agent configuration — provider, model, channels, policies |
+| `symbiote.json` | Agent configuration — provider, model, channels, policies |
 | `.env` | Secrets — API keys, bot tokens, API secret |
 
 ### Identity Files (optional)

@@ -70,7 +70,7 @@ const HEADER_TIMESTAMP = 'x-ipc-timestamp';
 const HEADER_SIGNATURE = 'x-ipc-signature';
 
 const DEFAULT_REPLAY_WINDOW_MS = 30_000; // 30 seconds
-const DEFAULT_KEYRING_PATH = '/etc/mach6/ipc-keyring.json';
+const DEFAULT_KEYRING_PATH = '/etc/symbiote/ipc-keyring.json';
 
 // ── IPC Identity Manager ───────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 // Symbiote Dual-LLM Orchestrator
 // Cloud planner + local specialist execution with DAG parallelism
-// Ported from Sirius B (Victus) — adapted for AVA's Mach6 provider ecosystem
+// Ported from Sirius B (Victus) — adapted for AVA's Symbiote provider ecosystem
 
 import type { Message, ToolDef, StreamEvent, Provider, ProviderConfig, ToolCall } from '../providers/types.js';
 import { ToolRegistry } from '../tools/registry.js';

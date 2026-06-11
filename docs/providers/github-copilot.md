@@ -10,7 +10,7 @@ No API key required if the GitHub CLI is installed and authenticated:
 gh auth login
 ```
 
-That's it. Mach6 resolves the token automatically.
+That's it. Symbiote resolves the token automatically.
 
 ## Token Resolution Order
 

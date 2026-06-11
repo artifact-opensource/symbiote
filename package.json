@@ -1,23 +1,23 @@
 {
-  "name": "mach6-core",
+  "name": "symbiote-core",
   "version": "2.2.0",
-  "description": "Mach6 — Multi-channel AI agent framework. Persistent daemon, real-time interrupts, tool execution. Runs on a laptop.",
+  "description": "Symbiote — Multi-channel AI agent framework. Persistent daemon, real-time interrupts, tool execution. Runs on a laptop.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "mach6": "dist/index.js"
+    "symbiote": "dist/index.js"
   },
   "files": [
     "dist",
     "web",
     "README.md",
     "LICENSE",
-    "mach6.example.json",
+    "symbiote.example.json",
     ".env.example"
   ],
   "scripts": {
     "build": "tsc",
-    "start": "node dist/gateway/daemon.js --config=mach6.json",
+    "start": "node dist/gateway/daemon.js --config=symbiote.json",
     "dev": "tsc && node dist/index.js",
     "init": "tsc && node dist/cli/wizard.js"
   },
@@ -50,13 +50,13 @@
   ],
   "author": "Artifact Virtual <hello@artifactvirtual.com> (https://artifactvirtual.com)",
   "license": "MIT",
-  "homepage": "https://github.com/Artifact-Virtual/mach6#readme",
+  "homepage": "https://github.com/Artifact-Virtual/symbiote#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Artifact-Virtual/mach6.git"
+    "url": "git+https://github.com/Artifact-Virtual/symbiote.git"
   },
   "bugs": {
-    "url": "https://github.com/Artifact-Virtual/mach6/issues"
+    "url": "https://github.com/Artifact-Virtual/symbiote/issues"
   },
   "engines": {
     "node": ">=20.0.0"

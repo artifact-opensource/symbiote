@@ -1,4 +1,4 @@
-// Mach6 — Message Queue (fixes Pain #5)
+// Symbiote — Message Queue (fixes Pain #5)
 // Every message queued. Never dropped. Ever.
 
 export interface QueuedMessage {

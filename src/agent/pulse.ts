@@ -1,4 +1,4 @@
-// Mach6 — PULSE: Adaptive Iteration Budget Manager
+// Symbiote — PULSE: Adaptive Iteration Budget Manager
 // 
 // Default cap: 20 iterations per turn
 // If a turn hits 18 iterations → runner auto-expands to 100 (within that turn)
