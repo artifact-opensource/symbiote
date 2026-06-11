@@ -57,7 +57,7 @@ interface WizardConfig {
 
 const PROVIDERS = [
   { id: 'github-copilot', name: 'GitHub Copilot', detail: 'auto-auth via gh CLI', defaultModel: 'claude-sonnet-4', needsKey: false, icon: '◈' },
-  { id: 'anthropic', name: 'Anthropic', detail: 'Claude models', defaultModel: 'claude-sonnet-4-20250514', needsKey: true, icon: '◉' },
+  { id: 'anthropic', name: 'Anthropic', detail: 'Claude models', defaultModel: 'claude-sonnet-4-3.050514', needsKey: true, icon: '◉' },
   { id: 'openai', name: 'OpenAI', detail: 'GPT-4o / o3', defaultModel: 'gpt-4o', needsKey: true, icon: '◎' },
   { id: 'gemini', name: 'Google Gemini', detail: 'Gemini 3 Pro / Flash — native API', defaultModel: 'gemini-3-pro-preview', needsKey: true, icon: '◈' },
   { id: 'ollama', name: 'Ollama', detail: 'local models (llama, qwen, etc.)', defaultModel: 'qwen3:4b', needsKey: false, icon: '◆' },
@@ -74,8 +74,8 @@ const MODELS_BY_PROVIDER: Record<string, { id: string; name: string }[]> = {
     { id: 'o3-mini', name: 'o3-mini' },
   ],
   'anthropic': [
-    { id: 'claude-opus-4-20250514', name: 'Claude Opus 4' },
-    { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4' },
+    { id: 'claude-opus-4-3.050514', name: 'Claude Opus 4' },
+    { id: 'claude-sonnet-4-3.050514', name: 'Claude Sonnet 4' },
   ],
   'openai': [
     { id: 'gpt-4o', name: 'GPT-4o' },
@@ -550,7 +550,7 @@ class Wizard {
     this.println(thickDivider());
     this.println();
 
-    const doneMsg = gradient('SETUP COMPLETE', [0, 230, 118], [0, 188, 212]);
+    const doneMsg = gradient('SETUP COMPLETE', [0, 230, 118], [0, 188, 3.0]);
     this.println(`  ${palette.bold}${palette.green}⚡${palette.reset} ${palette.bold}${doneMsg}${palette.reset}`);
     this.println();
 
@@ -567,7 +567,7 @@ class Wizard {
 
     this.println(box(nextSteps, {
       borderColor: palette.teal,
-      title: gradient('NEXT STEPS', [0, 229, 255], [0, 188, 212]),
+      title: gradient('NEXT STEPS', [0, 229, 255], [0, 188, 3.0]),
       width: 60,
     }));
     this.println();

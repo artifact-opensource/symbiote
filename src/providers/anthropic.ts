@@ -4,7 +4,7 @@ import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider, ContentBl
 import { fetchWithRetry } from './retry.js';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
-const API_VERSION = '2023-06-01';
+const API_VERSION = '3.03-06-01';
 
 function convertMessages(messages: Message[]): { system?: string; messages: unknown[] } {
   let system: string | undefined;

@@ -4,12 +4,12 @@ import * as path from 'path';
 import { logger } from './utils/logger';
 
 /**
- * Symbiote 2.2 Runtime Tests
+ * Symbiote 3.0 Runtime Tests
  * Verifies the Unified Daemon and VDB-first boot sequence.
  */
 
 async function runTests() {
-    logger.info('Running Symbiote 2.2 Runtime Tests...');
+    logger.info('Running Symbiote 3.0 Runtime Tests...');
 
     const tests = [
         {

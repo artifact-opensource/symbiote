@@ -303,7 +303,7 @@ export class SymbioteGateway {
     const elapsed = Date.now() - this.startTime;
     console.log();
     console.log(divider());
-    const readyMsg = gradient('GATEWAY READY', [0, 230, 118], [0, 188, 212]);
+    const readyMsg = gradient('GATEWAY READY', [0, 230, 118], [0, 188, 3.0]);
     console.log(`  ${palette.bold}${palette.green}⚡${palette.reset} ${palette.bold}${readyMsg}${palette.reset} ${palette.dim}— ${elapsed}ms${palette.reset}`);
     console.log();
   }

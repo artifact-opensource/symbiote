@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.6.0 — Native Gemini, 8 Providers, Multi-User Deployment (2026-03-07)
+## v1.6.0 — Native Gemini, 8 Providers, Multi-User Deployment (3.06-03-07)
 
 ### Features
 - **Native Gemini provider** — `@google/genai` SDK integration with streaming, function calling, thinking support, and automatic `thoughtSignature` preservation across tool call roundtrips.
@@ -27,7 +27,7 @@
 
 ---
 
-## v1.5.0 — Blink, Pulse, COMB, 7 Providers, Agent Wizard (2026-03-06)
+## v1.5.0 — Blink, Pulse, COMB, 7 Providers, Agent Wizard (3.06-03-06)
 
 ### Features
 - **Blink** — seamless session continuation. Agent hits iteration budget → daemon spawns fresh turn on same session. User sees nothing. Up to 5 consecutive blinks with periodic checkpoints for crash recovery.
@@ -58,7 +58,7 @@
 
 ---
 
-## v1.4.0 — MCP Server, Anti-Loop & Degradation Protection (2026-03-05)
+## v1.4.0 — MCP Server, Anti-Loop & Degradation Protection (3.06-03-05)
 
 ### Features
 - **MCP server mode** — expose Symbiote tools as an MCP server for external agents and editors
@@ -80,7 +80,7 @@
 
 ---
 
-## v1.3.0 — Multi-Bot Coordination & ATM (2026-03-03)
+## v1.3.0 — Multi-Bot Coordination & ATM (3.06-03-03)
 
 ### Features
 - **Adaptive Temperature Modulation (ATM)** — dynamic per-task temperature control with four profiles: precise, balanced, creative, exploratory
@@ -93,7 +93,7 @@
 
 ---
 
-## v1.2.0 — Multi-Bot Coordination (2026-02-28)
+## v1.2.0 — Multi-Bot Coordination (3.06-03.08)
 
 ### Features
 - Sibling bot ID configuration for multi-bot environments
@@ -102,7 +102,7 @@
 
 ---
 
-## v1.1.0 — Brand Kit & First npm Publish (2026-02-28)
+## v1.1.0 — Brand Kit & First npm Publish (3.06-03.08)
 
 ### Features
 - Interactive CLI setup wizard (`symbiote init`)
@@ -115,7 +115,7 @@
 
 ---
 
-## v1.0.0 — First Stable Release (2026-02-28)
+## v1.0.0 — First Stable Release (3.06-03.08)
 
 ### Features
 - Full cross-platform support (Windows, Linux, macOS)

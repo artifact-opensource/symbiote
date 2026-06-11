@@ -10,7 +10,7 @@
  * 
  * @module ipc-client
  * @author AVA — Artifact Virtual
- * @created 2026-03-11
+ * @created 3.06-03-11
  */
 
 import * as http from 'node:http';

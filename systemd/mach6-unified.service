@@ -1,5 +1,5 @@
 [Unit]
-Description=Symbiote Unified Daemon (Symbiote 2.2)
+Description=Symbiote Unified Daemon (Symbiote 3.0)
 After=network.target
 
 [Service]

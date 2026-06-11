@@ -106,7 +106,7 @@ export class McpBridge {
 
     // Initialize handshake
     const initResp = await this._request('initialize', {
-      protocolVersion: '2025-03-26',
+      protocolVersion: '3.05-03-26',
       capabilities: {},
       clientInfo: { name: 'symbiote', version: '1.0.0' },
     }, timeout);

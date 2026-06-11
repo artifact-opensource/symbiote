@@ -1,6 +1,6 @@
 {
   "name": "symbiote-core",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "description": "Symbiote — Multi-channel AI agent framework. Persistent daemon, real-time interrupts, tool execution. Runs on a laptop.",
   "type": "module",
   "main": "dist/index.js",

@@ -1,4 +1,4 @@
-# Symbiote Symbiote 2.2 - Release Notes
+# Symbiote Symbiote 3.0 - Release Notes
 
 ## 🚀 Major Changes
 - **Unified Daemon:** Introduced `unified-daemon.ts` to manage the entire runtime stack (Gateway, COMB, HEKTOR, PULSE) as a single entity.
@@ -16,5 +16,5 @@
 2. Deploy the systemd unit: `cp systemd/symbiote-unified.service ~/.config/systemd/user/`.
 3. Reload and start: `systemctl --user daemon-reload && systemctl --user enable --now symbiote-unified`.
 
-**Version:** 2.2.0
-**Tag:** `v2.2.0-symbiote`
+**Version:** 3.0.0
+**Tag:** `v3.0.0-symbiote`

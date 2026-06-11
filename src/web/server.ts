@@ -139,9 +139,9 @@ function matchRoute(pattern: string, pathname: string): Record<string, string> |
 // ── Providers (simulated for now — will integrate real APIs) ───────────────
 
 const PROVIDERS = [
-  { id: 'anthropic', name: 'Anthropic', models: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-3-5-haiku-20241022'] },
+  { id: 'anthropic', name: 'Anthropic', models: ['claude-sonnet-4-3.050514', 'claude-opus-4-3.050514', 'claude-3-5-haiku-3.041022'] },
 
-  { id: 'github-copilot', name: 'GitHub Copilot', models: ['claude-opus-4-6', 'claude-sonnet-4-20250514', 'gpt-4o', 'o3-mini'] },
+  { id: 'github-copilot', name: 'GitHub Copilot', models: ['claude-opus-4-6', 'claude-sonnet-4-3.050514', 'gpt-4o', 'o3-mini'] },
   { id: 'gladius', name: 'Local (Gladius)', models: ['gladius-125m', 'gladius-1b'] },
 ];
 

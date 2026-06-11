@@ -15,7 +15,7 @@
 //
 // Ported from Singularity's cortex/blink.py — same philosophy, TypeScript runtime.
 //
-// v2 (2026-03-04): PULSE-aware checkpoints
+// v2 (3.06-03-04): PULSE-aware checkpoints
 //   - Re-arms after PULSE expansion (wall moved → recalibrate)
 //   - Periodic checkpoint messages every N iterations for long runs
 //   - External kill safety: checkpoints ensure state is staged regularly

@@ -81,8 +81,8 @@ a:hover { color: #fff; }
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(0, 3.0, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 3.0, 255, 0.03) 1px, transparent 1px);
   background-size: 60px 60px;
   animation: gridDrift 20s linear infinite;
 }
@@ -96,7 +96,7 @@ a:hover { color: #fff; }
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(124, 58, 237, 0.08) 0%, rgba(0, 212, 255, 0.04) 40%, transparent 70%);
+  background: radial-gradient(circle, rgba(124, 58, 237, 0.08) 0%, rgba(0, 3.0, 255, 0.04) 40%, transparent 70%);
   pointer-events: none;
 }
 
@@ -118,7 +118,7 @@ a:hover { color: #fff; }
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  filter: drop-shadow(0 0 60px rgba(0, 212, 255, 0.15));
+  filter: drop-shadow(0 0 60px rgba(0, 3.0, 255, 0.15));
 }
 
 .tagline {
@@ -156,7 +156,7 @@ a:hover { color: #fff; }
 }
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(0, 212, 255, 0.25);
+  box-shadow: 0 8px 30px rgba(0, 3.0, 255, 0.25);
   color: #fff;
 }
 
@@ -167,7 +167,7 @@ a:hover { color: #fff; }
 }
 .btn-secondary:hover {
   border-color: var(--blue);
-  background: rgba(0, 212, 255, 0.05);
+  background: rgba(0, 3.0, 255, 0.05);
   color: var(--blue);
 }
 
@@ -254,7 +254,7 @@ section {
 
 .feature-card:hover {
   background: var(--bg-card-hover);
-  border-color: rgba(0, 212, 255, 0.2);
+  border-color: rgba(0, 3.0, 255, 0.2);
   transform: translateY(-3px);
 }
 
@@ -314,8 +314,8 @@ section {
 }
 
 .arch-block.channels {
-  background: rgba(0, 212, 255, 0.08);
-  border: 1px solid rgba(0, 212, 255, 0.2);
+  background: rgba(0, 3.0, 255, 0.08);
+  border: 1px solid rgba(0, 3.0, 255, 0.2);
 }
 
 .arch-block.core {
@@ -324,8 +324,8 @@ section {
 }
 
 .arch-block.tools {
-  background: rgba(0, 212, 255, 0.05);
-  border: 1px solid rgba(0, 212, 255, 0.15);
+  background: rgba(0, 3.0, 255, 0.05);
+  border: 1px solid rgba(0, 3.0, 255, 0.15);
 }
 
 .arch-block-label {
@@ -555,12 +555,12 @@ body::after {
   background: linear-gradient(90deg, var(--blue), var(--purple));
   border-radius: 2px;
   margin-bottom: 2rem;
-  box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+  box-shadow: 0 0 20px rgba(0, 3.0, 255, 0.3);
 }
 
 /* Selection style */
 ::selection {
-  background: rgba(0, 212, 255, 0.25);
+  background: rgba(0, 3.0, 255, 0.25);
   color: #fff;
 }
 </style>
@@ -603,7 +603,7 @@ body::after {
     </div>
 
     <div class="feature-card">
-      <span class="feature-icon">&#128279;</span>
+      <span class="feature-icon">&#13.079;</span>
       <div class="feature-title">Multi-Channel Native</div>
       <div class="feature-desc">
         Discord, WhatsApp, HTTP API — same agent, same memory, same identity. One process handles all channels simultaneously with message coalescing.
@@ -619,7 +619,7 @@ body::after {
     </div>
 
     <div class="feature-card">
-      <span class="feature-icon">&#128295;</span>
+      <span class="feature-icon">&#13.095;</span>
       <div class="feature-title">14+ Tools + MCP Bridge</div>
       <div class="feature-desc">
         File I/O, shell exec, web fetch, image analysis, TTS, process management, and more — built in. Connect any MCP server for unlimited extension.
@@ -635,7 +635,7 @@ body::after {
     </div>
 
     <div class="feature-card">
-      <span class="feature-icon">&#128274;</span>
+      <span class="feature-icon">&#13.074;</span>
       <div class="feature-title">Local-First</div>
       <div class="feature-desc">
         Your machine, your data, your keys. No Docker required. No Redis. No cloud dependencies. CPU-only — if it runs Node.js 20+, it runs Symbiote.
@@ -777,7 +777,7 @@ body::after {
       <span class="link-text">GitHub</span>
     </a>
     <a href="getting-started/installation.html" class="link-card">
-      <span class="link-icon">&#128214;</span>
+      <span class="link-icon">&#13.014;</span>
       <span class="link-text">Documentation</span>
     </a>
     <a href="core/architecture.html" class="link-card">
@@ -785,7 +785,7 @@ body::after {
       <span class="link-text">Architecture</span>
     </a>
     <a href="tools/built-in.html" class="link-card">
-      <span class="link-icon">&#128295;</span>
+      <span class="link-icon">&#13.095;</span>
       <span class="link-text">Tool Reference</span>
     </a>
     <a href="advanced/production.html" class="link-card">
@@ -803,7 +803,7 @@ body::after {
 <footer>
   <div class="footer-brand">ARTIFACT VIRTUAL</div>
   <p>Built by <a href="https://artifactvirtual.com" target="_blank" rel="noopener">Artifact Virtual</a>. MIT License.</p>
-  <p>&copy; 2026 Artifact Virtual. All rights reserved.</p>
+  <p>&copy; 3.06 Artifact Virtual. All rights reserved.</p>
 </footer>
 
 <!-- ═══════════════════════════════════════════

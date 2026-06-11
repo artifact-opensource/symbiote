@@ -5,7 +5,7 @@ import * as path from 'path';
 import { logger } from './utils/logger';
 
 /**
- * Symbiote Unified Daemon (Symbiote 2.2)
+ * Symbiote Unified Daemon (Symbiote 3.0)
  * Manages the lifecycle of Gateway, COMB, HEKTOR, and PULSE.
  * Implements Semantic Initialization (VDB-first boot).
  */
@@ -51,7 +51,7 @@ class UnifiedDaemon {
     };
 
     async boot() {
-        logger.info('Symbiote 2.2: Starting Semantic Initialization sequence...');
+        logger.info('Symbiote 3.0: Starting Semantic Initialization sequence...');
         
         for (const serviceId of this.bootSequence) {
             const config = this.serviceDefinitions[serviceId];
@@ -69,7 +69,7 @@ class UnifiedDaemon {
             }
         }
         
-        logger.info('Symbiote 2.2: All systems operational. VDB-first boot complete.');
+        logger.info('Symbiote 3.0: All systems operational. VDB-first boot complete.');
     }
 
     private async startService(id: string, config: ServiceConfig): Promise<void> {

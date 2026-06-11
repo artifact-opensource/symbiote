@@ -29,8 +29,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 Any model available through the Anthropic API, including:
 
-- `claude-opus-4-20250514`
-- `claude-sonnet-4-20250514`
-- `claude-haiku-3-20250307`
+- `claude-opus-4-3.050514`
+- `claude-sonnet-4-3.050514`
+- `claude-haiku-3-3.050307`
 
 Specify the model in `defaultModel` or switch mid-session with `/model`.

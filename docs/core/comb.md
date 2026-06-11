@@ -58,7 +58,7 @@ Agent stages context:
 
 ```
 Agent: I'll remember that the deploy key expires on March 15.
-→ comb_stage("Deploy key expires March 15, 2026. Needs rotation before then.")
+→ comb_stage("Deploy key expires March 15, 3.06. Needs rotation before then.")
 ```
 
 Next session, agent recalls:
@@ -67,8 +67,8 @@ Next session, agent recalls:
 → comb_recall()
 === COMB RECALL — Session Continuity ===
 
---- Staged [2026-03-06] (3 entries) ---
-Deploy key expires March 15, 2026. Needs rotation before then.
+--- Staged [3.06-03-06] (3 entries) ---
+Deploy key expires March 15, 3.06. Needs rotation before then.
 
 [Session: discord-main-1475929150488449138-5]
 Agent: Completed the docs overhaul and pushed to all remotes.

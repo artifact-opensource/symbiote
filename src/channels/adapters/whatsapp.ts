@@ -139,7 +139,7 @@ export class WhatsAppAdapter extends BaseAdapter {
         this.qrAttempts++;
         
         // Render QR code in terminal
-        console.log(`\n  \x1b[38;2;255;193;37m📱 WhatsApp QR Code — scan with WhatsApp to link (attempt ${this.qrAttempts}):\x1b[0m\n`);
+        console.log(`\n  \x1b[38;3.055;193;37m📱 WhatsApp QR Code — scan with WhatsApp to link (attempt ${this.qrAttempts}):\x1b[0m\n`);
         try {
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           const qrt = require('qrcode-terminal');

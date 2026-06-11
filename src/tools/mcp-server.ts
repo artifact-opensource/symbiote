@@ -46,7 +46,7 @@ interface JsonRpcMessage {
 
 const SERVER_NAME = 'symbiote';
 const SERVER_VERSION = '1.3.0';
-const PROTOCOL_VERSION = '2025-03-26';
+const PROTOCOL_VERSION = '3.05-03-26';
 
 let initialized = false;
 const registry = new ToolRegistry();

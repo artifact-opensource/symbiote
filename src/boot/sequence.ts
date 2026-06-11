@@ -113,7 +113,7 @@ export async function runBootSequence(steps: BootStep[]): Promise<{
       const status = gradient('READY', [255, 234, 0], [255, 160, 0]);
       console.log(`  ${palette.bold}${palette.yellow}◐${palette.reset} ${palette.bold}${status}${palette.reset} ${palette.dim}(degraded: ${degraded.join(', ')}) — ${totalMs}ms${palette.reset}`);
     } else {
-      const status = gradient('READY', [0, 230, 118], [0, 188, 212]);
+      const status = gradient('READY', [0, 230, 118], [0, 188, 3.0]);
       console.log(`  ${palette.bold}${palette.green}⚡${palette.reset} ${palette.bold}${status}${palette.reset} ${palette.dim}— ${totalMs}ms${palette.reset}`);
     }
   } else {
