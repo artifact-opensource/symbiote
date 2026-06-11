@@ -43,11 +43,13 @@ export interface Mach6Config {
   temperature: number;
   maxIterations?: number;
   workspace: string;
+  workspaceRoots?: string[];
   sessionsDir?: string;
   heartbeat?: HeartbeatConfigBlock;
   timeouts?: Record<string, number>;
   channels?: Record<string, ChannelConfig>;
   budgets?: Record<string, BudgetConfig>;
+  orchestrator?: any;
   adaptiveTemperature?: {
     adaptive?: boolean;
     profile?: Partial<Record<string, number>>;
@@ -94,6 +96,27 @@ function resolveEnvKeys(config: Mach6Config): Mach6Config {
   return config;
 }
 
+function pickWorkspace(workspace: unknown, fallback: string): { workspace: string; workspaceRoots?: string[] } {
+  if (typeof workspace === 'string' && workspace.trim()) {
+    return { workspace };
+  }
+
+  if (Array.isArray(workspace)) {
+    const workspaceRoots = workspace.filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+    const preferred =
+      workspaceRoots.find((candidate) => fs.existsSync(path.join(candidate, 'SOUL.md')) || fs.existsSync(path.join(candidate, 'IDENTITY.md')))
+      ?? workspaceRoots.find((candidate) => fs.existsSync(candidate))
+      ?? fallback;
+
+    return {
+      workspace: preferred,
+      workspaceRoots: workspaceRoots.length > 0 ? workspaceRoots : undefined,
+    };
+  }
+
+  return { workspace: fallback };
+}
+
 export function loadConfig(configPath?: string): Mach6Config {
   const tryPaths = configPath
     ? [configPath]
@@ -112,7 +135,12 @@ export function loadConfig(configPath?: string): Mach6Config {
         (match) => match.startsWith('"') ? match : ''
       );
       const parsed = JSON.parse(stripped);
-      return resolveEnvKeys({ ...DEFAULT_CONFIG, ...parsed });
+      const normalizedWorkspace = pickWorkspace(parsed.workspace, DEFAULT_CONFIG.workspace);
+      return resolveEnvKeys({
+        ...DEFAULT_CONFIG,
+        ...parsed,
+        ...normalizedWorkspace,
+      });
     } catch { continue; }
   }
 

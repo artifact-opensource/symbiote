@@ -1,6 +1,6 @@
 {
   "name": "mach6-core",
-  "version": "1.6.0",
+  "version": "2.2.0",
   "description": "Mach6 — Multi-channel AI agent framework. Persistent daemon, real-time interrupts, tool execution. Runs on a laptop.",
   "type": "module",
   "main": "dist/index.js",

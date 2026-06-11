@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Vision Lab — Symbiote</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --void: #08080c;
+  --accent: #7c6aff;
+  --accent-soft: rgba(124, 106, 255, 0.12);
+  --accent-glow: rgba(124, 106, 255, 0.25);
+  --accent-bright: #9d8fff;
+  --green: #34d399;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --cyan: #22d3ee;
+  --text-primary: #e8e8ef;
+  --text-secondary: #9898a8;
+  --text-tertiary: #68687a;
+  --text-ghost: #484858;
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --radius-sm: 8px;
+  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:'Inter',-apple-system,sans-serif;background:var(--void);color:var(--text-primary);overflow:hidden;-webkit-font-smoothing:antialiased}
+
+.viewport{position:relative;width:100%;height:100%}
+#camVideo{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
+#particleCanvas{position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1);z-index:2}
+#overlay{position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1);z-index:10}
+
+.hdr{position:fixed;top:0;left:0;right:0;height:48px;background:rgba(8,8,12,0.8);backdrop-filter:blur(16px);border-bottom:1px solid var(--glass-border);display:flex;align-items:center;justify-content:space-between;padding:0 20px;z-index:100}
+.hdr-left{display:flex;align-items:center;gap:10px}
+.hdr-brand{display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--text-primary)}
+.hdr-mark{width:22px;height:22px;border-radius:5px;background:linear-gradient(135deg,var(--accent),#4f46e5);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:9px;color:#fff;box-shadow:0 0 12px var(--accent-glow)}
+.hdr-title{font-weight:600;font-size:13px;letter-spacing:0.3px}
+.hdr-sep{color:var(--text-ghost);font-weight:300;font-size:12px}
+.hdr-sub{color:var(--text-secondary);font-size:12px;font-weight:400}
+.back-link{display:flex;align-items:center;gap:4px;color:var(--text-tertiary);text-decoration:none;font-size:11px;transition:color var(--transition)}
+.back-link:hover{color:var(--text-primary)}
+
+.hud{position:fixed;top:58px;left:14px;z-index:90;display:flex;flex-direction:column;gap:4px;font-family:'JetBrains Mono',monospace;font-size:10px;pointer-events:none}
+.hud-row{display:flex;align-items:center;gap:6px;padding:3px 8px;background:rgba(8,8,12,0.7);backdrop-filter:blur(6px);border:1px solid var(--glass-border);border-radius:6px;white-space:nowrap}
+.hud-label{color:var(--text-ghost);text-transform:uppercase;font-size:8px;letter-spacing:0.8px;min-width:48px}
+.hud-val{color:var(--text-secondary);font-weight:500}
+.hud-val.good{color:var(--green)}
+.hud-val.warn{color:var(--amber)}
+
+.controls{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:6px;z-index:90;flex-wrap:wrap;justify-content:center}
+.ctrl-btn{padding:6px 14px;background:rgba(8,8,12,0.75);backdrop-filter:blur(6px);border:1px solid var(--glass-border);border-radius:6px;color:var(--text-tertiary);font-family:'Inter',sans-serif;font-size:11px;font-weight:500;cursor:pointer;transition:all var(--transition);user-select:none}
+.ctrl-btn:hover{border-color:rgba(124,106,255,0.25);color:var(--text-secondary)}
+.ctrl-btn.active{border-color:rgba(124,106,255,0.4);color:var(--accent-bright);background:var(--accent-soft)}
+
+.loading{position:fixed;top:0;left:0;right:0;bottom:0;background:var(--void);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:200;transition:opacity 0.6s}
+.loading.hidden{opacity:0;pointer-events:none}
+.loading-spinner{width:32px;height:32px;border:2px solid rgba(124,106,255,0.15);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite}
+.loading-text{margin-top:14px;color:var(--text-secondary);font-size:12px}
+.loading-sub{margin-top:4px;color:var(--text-ghost);font-size:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="viewport">
+  <video id="camVideo" autoplay playsinline muted></video>
+  <canvas id="particleCanvas"></canvas>
+  <canvas id="overlay"></canvas>
+</div>
+
+<div class="hdr">
+  <div class="hdr-left">
+    <a href="/" class="hdr-brand"><div class="hdr-mark">◆</div><span class="hdr-title">Symbiote</span></a>
+    <span class="hdr-sep">/</span>
+    <span class="hdr-sub">Vision Lab</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <a href="/graph" class="back-link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>Graph</a>
+    <a href="/" class="back-link"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>Chat</a>
+  </div>
+</div>
+
+<div class="hud" id="hud">
+  <div class="hud-row"><span class="hud-label">FPS</span><span class="hud-val" id="hudFps">—</span></div>
+  <div class="hud-row"><span class="hud-label">Particles</span><span class="hud-val" id="hudCount">0</span></div>
+  <div class="hud-row"><span class="hud-label">Hands</span><span class="hud-val" id="hudHands">0</span></div>
+</div>
+
+<div class="controls">
+  <button class="ctrl-btn active" id="btnParticles" onclick="toggle('particles')">Particles</button>
+  <button class="ctrl-btn active" id="btnSkeleton" onclick="toggle('skeleton')">Skeleton</button>
+  <button class="ctrl-btn" id="btnCamera" onclick="flipCam()">Flip</button>
+</div>
+
+<div class="loading" id="loading">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">Vision Lab</div>
+  <div class="loading-sub" id="loadingSub">Loading MediaPipe...</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.min.js" crossorigin="anonymous"></script>
+
+<script>
+// ─────────────────────────────────────────────────────
+//  CONFIG
+// ─────────────────────────────────────────────────────
+
+const MAX_PARTICLES = 12000;
+const SPAWN_RATE    = 80;       // per frame when hand present
+const IDLE_SPAWN    = 8;        // ambient when no hand
+const BASE_LIFE     = 180;      // frames
+const GRAVITY       = 0.008;    // slight downward drift
+const DAMPING       = 0.985;
+const POINT_ATTRACT  = 0.00035; // fingertip attraction strength
+const PALM_REPEL     = 0.08;    // palm center repulsion
+const PINCH_VORTEX   = 0.0015;  // rotational force on pinch
+const CURL_STRENGTH  = 0.0004;  // velocity-dependent curl noise
+
+// Finger tip indices
+const TIPS = [4, 8, 12, 16, 20];
+const FINGER_NAMES = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+
+// Palette — soft, cohesive
+const PAL = [
+  [124, 106, 255],  // violet
+  [99, 140, 255],   // blue
+  [72, 199, 220],   // teal
+  [52, 211, 153],   // green
+  [190, 140, 255],  // lavender
+];
+
+// ─────────────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────────────
+
+let W, H, DPR;
+let pCanvas, pCtx, oCanvas, oCtx;
+let showParticles = true, showSkeleton = true;
+let facingMode = 'user';
+let hands, mpCamera, lastResults = null;
+let fpsFrames = 0, fpsLast = performance.now(), fps = 0;
+
+// Particle pool — struct-of-arrays for cache performance
+const px   = new Float32Array(MAX_PARTICLES);
+const py   = new Float32Array(MAX_PARTICLES);
+const pvx  = new Float32Array(MAX_PARTICLES);
+const pvy  = new Float32Array(MAX_PARTICLES);
+const life = new Float32Array(MAX_PARTICLES);
+const maxL = new Float32Array(MAX_PARTICLES);
+const pr   = new Uint8Array(MAX_PARTICLES);
+const pg   = new Uint8Array(MAX_PARTICLES);
+const pb   = new Uint8Array(MAX_PARTICLES);
+const psz  = new Float32Array(MAX_PARTICLES); // base size
+let alive = 0;
+
+// Hand state (pixel coords, updated each frame)
+let handActive = false;
+let tips = [];        // [{x,y}] for each fingertip
+let palm = {x:0,y:0}; // palm center
+let palmVx = 0, palmVy = 0; // palm velocity
+let pinchDist = 1;    // thumb-index distance (normalized)
+let handSpread = 0;   // avg distance of fingers from palm
+
+// ─────────────────────────────────────────────────────
+//  PARTICLE SYSTEM
+// ─────────────────────────────────────────────────────
+
+function spawnParticle(x, y, vx, vy, lifespan, r, g, b, size) {
+  if (alive >= MAX_PARTICLES) return;
+  const i = alive++;
+  px[i] = x;
+  py[i] = y;
+  pvx[i] = vx;
+  pvy[i] = vy;
+  life[i] = lifespan;
+  maxL[i] = lifespan;
+  pr[i] = r;
+  pg[i] = g;
+  pb[i] = b;
+  psz[i] = size;
+}
+
+function spawnAmbient() {
+  // Gentle ambient particles rising from bottom
+  const count = handActive ? 0 : IDLE_SPAWN;
+  for (let i = 0; i < count; i++) {
+    const x = Math.random() * W;
+    const y = H + Math.random() * 20;
+    const c = PAL[Math.floor(Math.random() * PAL.length)];
+    spawnParticle(
+      x, y,
+      (Math.random() - 0.5) * 0.3,
+      -0.2 - Math.random() * 0.4,
+      BASE_LIFE + Math.random() * 80,
+      c[0], c[1], c[2],
+      0.6 + Math.random() * 0.6
+    );
+  }
+}
+
+function spawnFromHand() {
+  if (!handActive) return;
+
+  const count = SPAWN_RATE;
+  for (let i = 0; i < count; i++) {
+    // Pick a random point along the hand — between fingertips and palm
+    const tipIdx = Math.floor(Math.random() * tips.length);
+    const tip = tips[tipIdx];
+    const t = Math.random(); // 0=palm, 1=tip
+    const sx = palm.x * (1 - t) + tip.x * t + (Math.random() - 0.5) * 8;
+    const sy = palm.y * (1 - t) + tip.y * t + (Math.random() - 0.5) * 8;
+
+    // Inherit some palm velocity + random
+    const vx = palmVx * 0.3 * (Math.random() * 0.5 + 0.5) + (Math.random() - 0.5) * 0.6;
+    const vy = palmVy * 0.3 * (Math.random() * 0.5 + 0.5) + (Math.random() - 0.5) * 0.6;
+
+    // Color: blend palette based on position along hand
+    const ci = tipIdx / (tips.length - 1); // 0..1
+    const c0 = PAL[Math.floor(ci * (PAL.length - 1))];
+    const c1 = PAL[Math.min(PAL.length - 1, Math.floor(ci * (PAL.length - 1)) + 1)];
+    const cf = (ci * (PAL.length - 1)) % 1;
+    const cr = Math.round(c0[0] * (1 - cf) + c1[0] * cf);
+    const cg = Math.round(c0[1] * (1 - cf) + c1[1] * cf);
+    const cb = Math.round(c0[2] * (1 - cf) + c1[2] * cf);
+
+    const sz = 0.5 + Math.random() * 1.2 + (1 - pinchDist) * 0.8;
+
+    spawnParticle(sx, sy, vx, vy, BASE_LIFE + Math.random() * 60, cr, cg, cb, sz);
+  }
+}
+
+function simulate() {
+  let writeIdx = 0;
+
+  for (let i = 0; i < alive; i++) {
+    life[i]--;
+    if (life[i] <= 0) continue;
+
+    let ax = 0, ay = GRAVITY;
+
+    if (handActive) {
+      // ── Fingertip attraction ──
+      // Each tip pulls particles gently toward it
+      for (const tip of tips) {
+        const dx = tip.x - px[i];
+        const dy = tip.y - py[i];
+        const d2 = dx * dx + dy * dy + 100;
+        const d = Math.sqrt(d2);
+        // Attraction falls off with distance, capped at close range
+        const f = POINT_ATTRACT * Math.min(800, 40000 / d2);
+        ax += (dx / d) * f;
+        ay += (dy / d) * f;
+      }
+
+      // ── Palm repulsion ──
+      // Pushes particles outward from palm center
+      {
+        const dx = px[i] - palm.x;
+        const dy = py[i] - palm.y;
+        const d2 = dx * dx + dy * dy + 200;
+        const d = Math.sqrt(d2);
+        const spread = handSpread * 1.5 + 30;
+        if (d < spread) {
+          const f = PALM_REPEL * (1 - d / spread);
+          ax += (dx / d) * f;
+          ay += (dy / d) * f;
+        }
+      }
+
+      // ── Pinch vortex ──
+      // When thumb and index are close, spin particles around midpoint
+      if (pinchDist < 0.12) {
+        const vortexStrength = (1 - pinchDist / 0.12) * PINCH_VORTEX;
+        const cx = (tips[0].x + tips[1].x) / 2;
+        const cy = (tips[0].y + tips[1].y) / 2;
+        const dx = px[i] - cx;
+        const dy = py[i] - cy;
+        const d2 = dx * dx + dy * dy + 50;
+        const d = Math.sqrt(d2);
+        if (d < 200) {
+          // Tangential force (perpendicular to radial)
+          const scale = vortexStrength * (200 - d) / d;
+          ax += -dy * scale;
+          ay += dx * scale;
+          // Slight inward pull
+          ax -= dx * scale * 0.15;
+          ay -= dy * scale * 0.15;
+        }
+      }
+
+      // ── Curl noise from palm velocity ──
+      // Hand movement creates swirling turbulence
+      {
+        const speed = Math.sqrt(palmVx * palmVx + palmVy * palmVy);
+        if (speed > 0.5) {
+          const dx = px[i] - palm.x;
+          const dy = py[i] - palm.y;
+          const d = Math.sqrt(dx * dx + dy * dy) + 1;
+          if (d < 300) {
+            const curl = CURL_STRENGTH * speed * (300 - d) / 300;
+            // Perpendicular to velocity direction
+            ax += -palmVy * curl / speed;
+            ay += palmVx * curl / speed;
+          }
+        }
+      }
+    }
+
+    // Integrate
+    pvx[i] = (pvx[i] + ax) * DAMPING;
+    pvy[i] = (pvy[i] + ay) * DAMPING;
+    px[i] += pvx[i];
+    py[i] += pvy[i];
+
+    // Soft boundary wrap
+    if (px[i] < -40) px[i] = W + 40;
+    else if (px[i] > W + 40) px[i] = -40;
+    if (py[i] < -40) py[i] = H + 40;
+    else if (py[i] > H + 40) py[i] = -40;
+
+    // Compact (remove dead)
+    if (writeIdx !== i) {
+      px[writeIdx] = px[i]; py[writeIdx] = py[i];
+      pvx[writeIdx] = pvx[i]; pvy[writeIdx] = pvy[i];
+      life[writeIdx] = life[i]; maxL[writeIdx] = maxL[i];
+      pr[writeIdx] = pr[i]; pg[writeIdx] = pg[i]; pb[writeIdx] = pb[i];
+      psz[writeIdx] = psz[i];
+    }
+    writeIdx++;
+  }
+  alive = writeIdx;
+}
+
+function render() {
+  const w = pCanvas.width, h = pCanvas.height;
+  const img = pCtx.createImageData(w, h);
+  const data = img.data;
+
+  for (let i = 0; i < alive; i++) {
+    const lr = life[i] / maxL[i];
+    // Fade: quick in, slow out
+    const alpha = lr > 0.85 ? (1 - lr) / 0.15 : Math.min(1, lr / 0.1);
+    if (alpha <= 0.01) continue;
+
+    const ix = Math.round(px[i]);
+    const iy = Math.round(py[i]);
+
+    // Velocity glow: faster = brighter, larger
+    const speed = Math.sqrt(pvx[i] * pvx[i] + pvy[i] * pvy[i]);
+    const speedBoost = Math.min(1, speed * 0.3);
+    const a = Math.round(alpha * (140 + speedBoost * 80));
+    const size = psz[i] * (0.6 + lr * 0.4) + speedBoost * 0.8;
+
+    const cr = Math.min(255, pr[i] + Math.round(speedBoost * 40));
+    const cg = Math.min(255, pg[i] + Math.round(speedBoost * 30));
+    const cb = Math.min(255, pb[i] + Math.round(speedBoost * 50));
+
+    if (size < 1.3) {
+      // Single pixel
+      if (ix >= 0 && ix < w && iy >= 0 && iy < h) {
+        const off = (iy * w + ix) << 2;
+        data[off]     = Math.min(255, data[off]     + ((cr * a) >> 8));
+        data[off + 1] = Math.min(255, data[off + 1] + ((cg * a) >> 8));
+        data[off + 2] = Math.min(255, data[off + 2] + ((cb * a) >> 8));
+        data[off + 3] = Math.min(255, data[off + 3] + a);
+      }
+    } else {
+      // Soft circle
+      const r = Math.ceil(size);
+      const r2inv = 1 / (r * r);
+      const xmin = Math.max(0, ix - r), xmax = Math.min(w - 1, ix + r);
+      const ymin = Math.max(0, iy - r), ymax = Math.min(h - 1, iy + r);
+      for (let py2 = ymin; py2 <= ymax; py2++) {
+        const dy2 = (py2 - iy) * (py2 - iy);
+        const rowOff = py2 * w;
+        for (let px2 = xmin; px2 <= xmax; px2++) {
+          const d2 = (px2 - ix) * (px2 - ix) + dy2;
+          if (d2 > r * r) continue;
+          const falloff = 1 - d2 * r2inv;
+          const fa = (a * falloff * falloff) | 0;
+          if (fa <= 0) continue;
+          const off = (rowOff + px2) << 2;
+          data[off]     = Math.min(255, data[off]     + ((cr * fa) >> 8));
+          data[off + 1] = Math.min(255, data[off + 1] + ((cg * fa) >> 8));
+          data[off + 2] = Math.min(255, data[off + 2] + ((cb * fa) >> 8));
+          data[off + 3] = Math.min(255, data[off + 3] + fa);
+        }
+      }
+    }
+  }
+
+  pCtx.putImageData(img, 0, 0);
+}
+
+
+// ─────────────────────────────────────────────────────
+//  HAND DRAWING
+// ─────────────────────────────────────────────────────
+
+const CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [0,9],[9,10],[10,11],[11,12],
+  [0,13],[13,14],[14,15],[15,16],
+  [0,17],[17,18],[18,19],[19,20],
+  [5,9],[9,13],[13,17]
+];
+
+function drawHand(lm) {
+  if (!showSkeleton) return;
+
+  oCtx.lineWidth = 2;
+  oCtx.lineCap = 'round';
+
+  for (const [a, b] of CONNECTIONS) {
+    const ax = lm[a].x * W, ay = lm[a].y * H;
+    const bx = lm[b].x * W, by = lm[b].y * H;
+    oCtx.beginPath();
+    oCtx.moveTo(ax, ay);
+    oCtx.lineTo(bx, by);
+    oCtx.strokeStyle = 'rgba(124, 106, 255, 0.35)';
+    oCtx.stroke();
+  }
+
+  for (let i = 0; i < 21; i++) {
+    const x = lm[i].x * W, y = lm[i].y * H;
+    const isTip = TIPS.includes(i);
+    oCtx.beginPath();
+    oCtx.arc(x, y, isTip ? 4 : 2.5, 0, Math.PI * 2);
+    oCtx.fillStyle = isTip ? 'rgba(124, 106, 255, 0.8)' : 'rgba(124, 106, 255, 0.4)';
+    oCtx.fill();
+    if (isTip) {
+      oCtx.beginPath();
+      oCtx.arc(x, y, 1, 0, Math.PI * 2);
+      oCtx.fillStyle = '#fff';
+      oCtx.fill();
+    }
+  }
+
+  // Pinch indicator
+  if (pinchDist < 0.12) {
+    const p = 1 - pinchDist / 0.12;
+    const cx = (lm[4].x + lm[8].x) / 2 * W;
+    const cy = (lm[4].y + lm[8].y) / 2 * H;
+    const glow = oCtx.createRadialGradient(cx, cy, 0, cx, cy, 30 * p);
+    glow.addColorStop(0, `rgba(124, 106, 255, ${p * 0.6})`);
+    glow.addColorStop(1, 'rgba(124, 106, 255, 0)');
+    oCtx.beginPath();
+    oCtx.arc(cx, cy, 30 * p, 0, Math.PI * 2);
+    oCtx.fillStyle = glow;
+    oCtx.fill();
+  }
+}
+
+
+// ─────────────────────────────────────────────────────
+//  FRAME LOOP
+// ─────────────────────────────────────────────────────
+
+let prevPalm = { x: 0, y: 0 };
+
+function onResults(results) {
+  lastResults = results;
+  oCtx.clearRect(0, 0, W, H);
+
+  const hasHands = results.multiHandLandmarks && results.multiHandLandmarks.length > 0;
+
+  if (hasHands) {
+    const lm = results.multiHandLandmarks[0];
+
+    // Extract hand geometry
+    tips = TIPS.map(i => ({ x: lm[i].x * W, y: lm[i].y * H }));
+    const wrist = { x: lm[0].x * W, y: lm[0].y * H };
+    const mmcp = { x: lm[9].x * W, y: lm[9].y * H };
+    palm = { x: (wrist.x + mmcp.x) / 2, y: (wrist.y + mmcp.y) / 2 };
+
+    palmVx = palm.x - prevPalm.x;
+    palmVy = palm.y - prevPalm.y;
+    prevPalm = { ...palm };
+
+    // Pinch: thumb-index distance (normalized)
+    const dx = lm[4].x - lm[8].x, dy = lm[4].y - lm[8].y;
+    pinchDist = Math.sqrt(dx * dx + dy * dy);
+
+    // Hand spread: avg fingertip distance from palm (pixels)
+    let totalDist = 0;
+    for (const tip of tips) {
+      const dx2 = tip.x - palm.x, dy2 = tip.y - palm.y;
+      totalDist += Math.sqrt(dx2 * dx2 + dy2 * dy2);
+    }
+    handSpread = totalDist / tips.length;
+    handActive = true;
+
+    drawHand(lm);
+  } else {
+    handActive = false;
+    palmVx *= 0.9;
+    palmVy *= 0.9;
+  }
+
+  if (showParticles) {
+    spawnFromHand();
+    spawnAmbient();
+    simulate();
+    render();
+  }
+
+  // HUD
+  fpsFrames++;
+  const now = performance.now();
+  if (now - fpsLast > 500) {
+    fps = Math.round(fpsFrames / ((now - fpsLast) / 1000));
+    fpsFrames = 0; fpsLast = now;
+  }
+  const fpsEl = document.getElementById('hudFps');
+  fpsEl.textContent = fps;
+  fpsEl.className = 'hud-val ' + (fps >= 24 ? 'good' : fps >= 15 ? 'warn' : '');
+  document.getElementById('hudCount').textContent = alive;
+  document.getElementById('hudHands').textContent = hasHands ? results.multiHandLandmarks.length : 0;
+}
+
+function idleLoop() {
+  if (!lastResults || !lastResults.multiHandLandmarks || lastResults.multiHandLandmarks.length === 0) {
+    if (showParticles) {
+      spawnAmbient();
+      simulate();
+      render();
+    }
+  }
+  requestAnimationFrame(idleLoop);
+}
+
+
+// ─────────────────────────────────────────────────────
+//  CONTROLS
+// ─────────────────────────────────────────────────────
+
+function toggle(what) {
+  if (what === 'particles') {
+    showParticles = !showParticles;
+    document.getElementById('btnParticles').classList.toggle('active', showParticles);
+    if (!showParticles) { alive = 0; pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height); }
+  } else if (what === 'skeleton') {
+    showSkeleton = !showSkeleton;
+    document.getElementById('btnSkeleton').classList.toggle('active', showSkeleton);
+  }
+}
+
+function flipCam() {
+  facingMode = facingMode === 'user' ? 'environment' : 'user';
+  if (mpCamera) mpCamera.stop();
+  startCam();
+}
+
+
+// ─────────────────────────────────────────────────────
+//  INIT
+// ─────────────────────────────────────────────────────
+
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  oCanvas.width = W; oCanvas.height = H;
+  pCanvas.width = W; pCanvas.height = H;
+}
+
+function startCam() {
+  const video = document.getElementById('camVideo');
+  mpCamera = new Camera(video, {
+    onFrame: async () => {
+      const t0 = performance.now();
+      await hands.send({ image: video });
+    },
+    width: 1280, height: 720,
+    facingMode
+  });
+  mpCamera.start();
+}
+
+async function init() {
+  oCanvas = document.getElementById('overlay');
+  oCtx = oCanvas.getContext('2d');
+  pCanvas = document.getElementById('particleCanvas');
+  pCtx = pCanvas.getContext('2d');
+
+  resize();
+  window.addEventListener('resize', resize);
+
+  document.getElementById('loadingSub').textContent = 'Loading hand model...';
+
+  hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}`
+  });
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.5
+  });
+  hands.onResults(onResults);
+
+  document.getElementById('loadingSub').textContent = 'Starting camera...';
+
+  try {
+    startCam();
+    setTimeout(() => document.getElementById('loading').classList.add('hidden'), 1500);
+  } catch (e) {
+    document.getElementById('loadingSub').textContent = 'Camera denied: ' + e.message;
+  }
+
+  idleLoop();
+}
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

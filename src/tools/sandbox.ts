@@ -33,6 +33,7 @@ export interface SessionContext {
   channelType: string;      // 'discord' | 'whatsapp'
   chatType: 'direct' | 'group';
   senderId: string;
+  chatId: string;
   isOwner: boolean;
 }
 

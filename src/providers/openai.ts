@@ -7,12 +7,19 @@ const DEFAULT_BASE_URL = 'https://api.openai.com';
 
 function convertMessages(messages: Message[]): unknown[] {
   const out: unknown[] = [];
+  let pendingToolCallIds = new Set<string>();
   for (const msg of messages) {
     if (msg.role === 'system') {
+      pendingToolCallIds.clear();
       out.push({ role: 'system', content: typeof msg.content === 'string' ? msg.content : msg.content.map(b => b.text ?? '').join('') });
       continue;
     }
     if (msg.role === 'tool') {
+      if (!msg.tool_call_id || !pendingToolCallIds.has(msg.tool_call_id)) {
+        console.warn(`[openai] Skipping non-contiguous or orphaned tool result: ${msg.tool_call_id ?? 'missing-id'}`);
+        continue;
+      }
+      pendingToolCallIds.delete(msg.tool_call_id);
       out.push({ role: 'tool', tool_call_id: msg.tool_call_id, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) });
       continue;
     }
@@ -20,10 +27,14 @@ function convertMessages(messages: Message[]): unknown[] {
       // Always use empty string for content (not null) — some backends
       // interpret null content on assistant messages as prefill attempts
       const content = typeof msg.content === 'string' && msg.content.trim() ? msg.content : '';
+      const validToolCalls = msg.tool_calls
+        .filter(tc => tc.name && /^[a-zA-Z0-9_.\-]+$/.test(tc.name));
+      pendingToolCallIds = new Set(validToolCalls.map(tc => tc.id));
       out.push({
         role: 'assistant',
         content,
-        tool_calls: msg.tool_calls.map(tc => {
+        tool_calls: validToolCalls
+        .map(tc => {
           const call: Record<string, unknown> = {
             id: tc.id,
             type: 'function',
@@ -36,6 +47,7 @@ function convertMessages(messages: Message[]): unknown[] {
       });
       continue;
     }
+    pendingToolCallIds.clear();
     out.push({ role: msg.role, content: typeof msg.content === 'string' ? msg.content : msg.content.map(b => b.text ?? '').join('') });
   }
   return out;
@@ -61,7 +73,10 @@ async function* streamOpenAI(
     stream_options: { include_usage: true },
     messages: convertMessages(messages),
   };
-  if (config.maxTokens) body.max_tokens = config.maxTokens;
+  if (config.maxTokens) {
+    if (config.model.startsWith('gpt-5')) body.max_completion_tokens = config.maxTokens;
+    else body.max_tokens = config.maxTokens;
+  }
   if (config.temperature !== undefined) body.temperature = config.temperature;
   if (tools.length > 0) body.tools = convertTools(tools);
 
@@ -94,6 +109,8 @@ async function* streamOpenAI(
   // Track active tool calls by index
   const activeTools = new Map<number, string>(); // index → id
   const toolExtras = new Map<string, Record<string, unknown>>(); // id → extra metadata (e.g. thought_signature)
+  const toolNames = new Map<number, string>(); // index → accumulated name
+  const toolStartEmitted = new Set<number>(); // which indexes have emitted tool_use_start
 
   while (true) {
     const { done, value } = await reader.read();
@@ -151,7 +168,23 @@ async function* streamOpenAI(
             if (tc.extra_content) {
               toolExtras.set(tc.id, { extra_content: tc.extra_content });
             }
-            yield { type: 'tool_use_start', id: tc.id, name: (fn?.name as string) ?? '', extra: toolExtras.get(tc.id) };
+          }
+
+          // Accumulate function name across deltas (some backends stream name separately from id)
+          if (fn?.name && typeof fn.name === 'string' && fn.name) {
+            toolNames.set(idx, (toolNames.get(idx) ?? '') + fn.name);
+          }
+
+          // Emit tool_use_start once we have both id and a valid name
+          const id = activeTools.get(idx);
+          if (id && !toolStartEmitted.has(idx)) {
+            const name = toolNames.get(idx) ?? '';
+            // Emit when we have a name, or when arguments start arriving (name won't come later)
+            const hasArgs = !!(fn?.arguments && typeof fn.arguments === 'string');
+            if (name || hasArgs) {
+              toolStartEmitted.add(idx);
+              yield { type: 'tool_use_start', id, name: name || 'unknown_tool', extra: toolExtras.get(id) };
+            }
           }
 
           if (fn?.arguments && typeof fn.arguments === 'string') {
@@ -168,8 +201,8 @@ async function* streamOpenAI(
         for (const [, id] of activeTools) {
           yield { type: 'tool_use_end', id };
         }
-        activeTools.clear();
-        if (finishReason === 'stop' || finishReason === 'length') {
+        activeTools.clear();        toolNames.clear();
+        toolStartEmitted.clear();        if (finishReason === 'stop' || finishReason === 'length') {
           yield { type: 'done', stopReason: finishReason === 'stop' ? 'end_turn' : 'max_tokens' };
         }
         // tool_calls finish reason — don't yield done, [DONE] SSE will follow

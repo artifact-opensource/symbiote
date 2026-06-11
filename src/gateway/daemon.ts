@@ -63,6 +63,7 @@ import { gladiusProvider } from '../providers/gladius.js';
 import { groqProvider } from '../providers/groq.js';
 import { ollamaProvider } from '../providers/ollama.js';
 import { xaiProvider } from '../providers/xai.js';
+import { openrouterProvider } from '../providers/openrouter.js';
 import type { BusEnvelope, ChannelPolicy, OutboundMessage } from '../channels/types.js';
 import { formatForChannel } from '../channels/formatter.js';
 import { createSandboxedRegistry, type SessionContext } from '../tools/sandbox.js';
@@ -125,6 +126,7 @@ const PROVIDERS = new Map<string, Provider>([
   ['groq', groqProvider],
   ['ollama', ollamaProvider],
   ['xai', xaiProvider],
+  ['openrouter', openrouterProvider],
 ]);
 
 // ─── Gateway ───────────────────────────────────────────────────────────────
@@ -539,6 +541,7 @@ export class Mach6Gateway {
           channel: 'http',
           chatType: 'direct',
           senderId: request.senderId ?? 'http-user',
+          chatId: request.chatId ?? (request.senderId ?? "http-user"),
         });
 
         if (session.messages.length > 0 && session.messages[0].role === 'system') {
@@ -554,15 +557,17 @@ export class Mach6Gateway {
 
         session.messages.push({ role: 'user', content: userContent });
 
-        // Sandbox context — HTTP API users get 'standard' tier (not admin)
+        // Sandbox context — owner HTTP/webchat sessions get admin tool access
         const ownerIds = this.gatewayConfig.ownerIds ?? [];
-        const isOwner = request.senderId ? (ownerIds.includes('*') || ownerIds.includes(request.senderId)) : false;
+        const normalize = (x: string) => x.trim().toLowerCase();
+        const isOwner = request.senderId ? (ownerIds.map(normalize).includes('*') || ownerIds.map(normalize).includes(normalize(request.senderId))) : false;
         const sandboxCtx: SessionContext = {
           sessionId,
           adapterId: 'http-api',
           channelType: 'http',
           chatType: 'direct',
           senderId: request.senderId ?? 'http-user',
+          chatId: request.chatId ?? (request.senderId ?? "http-user"),
           isOwner,
         };
         const sandboxedTools = createSandboxedRegistry(this.toolRegistry, sandboxCtx);
@@ -582,7 +587,8 @@ export class Mach6Gateway {
         // Run agent with BLINK continuation
         console.log(`${palette.dim}  [http]${palette.reset} Agent turn for ${palette.violet}${sessionId}${palette.reset}`);
         const startMs = Date.now();
-        const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
+        const maxIterations = Math.max(this.config.maxIterations ?? 25, this.pulseBudget.getEffectiveCap());
+        const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 10, prepareAt: 3, cooldownMs: 1000 });
 
         let currentSessionMessages = session.messages;
         let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
@@ -593,7 +599,7 @@ export class Mach6Gateway {
             providerConfig: provConfig,
             toolRegistry: sandboxedTools,
             sessionId,
-            maxIterations: this.pulseBudget.getEffectiveCap(),
+            maxIterations,
             blinkController: blinkCtrl,
             abortSignal: controller.signal,
             onEvent: (ev) => {
@@ -818,7 +824,8 @@ export class Mach6Gateway {
 
     // Build sandbox context for this session
     const ownerIds = this.gatewayConfig.ownerIds ?? [];
-    const isOwner = ownerIds.includes('*') || ownerIds.includes(envelope.source.senderId);
+    const normalize = (x: string) => x.trim().toLowerCase();
+    const isOwner = ownerIds.map(normalize).includes(normalize(envelope.source.senderId));
     const chatType = (envelope.source.chatType === 'channel' || envelope.source.chatType === 'thread' || envelope.source.chatType === 'group' || envelope.source.chatId.includes('@g.') || envelope.metadata.guildId) ? 'group' as const : 'direct' as const;
     const sandboxCtx: SessionContext = {
       sessionId,
@@ -826,6 +833,7 @@ export class Mach6Gateway {
       channelType: envelope.source.channelType,
       chatType,
       senderId: envelope.source.senderId,
+      chatId: envelope.source.chatId,
       isOwner,
     };
     const sandboxedTools = createSandboxedRegistry(this.toolRegistry, sandboxCtx);
@@ -870,6 +878,7 @@ export class Mach6Gateway {
         channel: envelope.source.channelType,
         chatType: envelope.source.chatType === 'channel' || envelope.source.chatType === 'thread' || envelope.source.chatType === 'group' || envelope.source.chatId.includes('@g.') ? 'group' : 'direct',
         senderId: envelope.source.senderId,
+        chatId: envelope.source.chatId,
         workspaceFiles: adapterFiles,
       });
       // Replace or insert system prompt (always fresh — workspace files may have changed)
@@ -917,7 +926,8 @@ export class Mach6Gateway {
       // Run agent with BLINK continuation
       console.log(`\n${palette.dim}  [turn]${palette.reset} ${palette.violet}${sessionId}${palette.reset} ${palette.dim}via${palette.reset} ${envelope.source.channelType}${palette.dim}/${palette.reset}${envelope.source.chatId}`);
       const turnStartTime = Date.now();
-      const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
+      const maxIterations = Math.max(this.config.maxIterations ?? 25, this.pulseBudget.getEffectiveCap());
+      const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 10, prepareAt: 3, cooldownMs: 1000 });
 
       let currentSessionMessages = session.messages;
       let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
@@ -948,7 +958,7 @@ export class Mach6Gateway {
         sessionId,
         contextMonitor,
         maxContextTokens: (this.config as any).maxContextTokens ?? 80_000,
-        maxIterations: this.pulseBudget.getEffectiveCap(),
+        maxIterations,
         blinkController: blinkCtrl,
         abortSignal: controller.signal,
         onEvent: (ev: any) => {

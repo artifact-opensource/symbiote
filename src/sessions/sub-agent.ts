@@ -64,6 +64,7 @@ export class SubAgentManager {
       channelType: 'internal',
       chatType: 'direct',
       senderId: config.parentSessionId,
+      chatId: config.parentSessionId,
       isOwner: true, // Treated as owner but adapter='subagent' → standard tier
     };
     const sandboxedTools = createSandboxedRegistry(toolRegistry, subagentCtx);

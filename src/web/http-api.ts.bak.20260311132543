@@ -35,8 +35,6 @@ export interface HttpApiConfig {
   onRelay?: (target: string, text: string) => Promise<{ success: boolean; error?: string }>;
   /** Get gateway status */
   onHealth?: () => Record<string, unknown>;
-  /** Get VDB instance for graph API */
-  vdb?: () => Promise<import('../memory/vdb.js').VectorDB>;
 }
 
 export interface ChatRequest {
@@ -50,10 +48,7 @@ export interface ChatRequest {
   senderName?: string;
   /** Source identifier (e.g., "gladius-page") */
   source?: string;
-  chatId?: string;
 }
-
-const WEBCHAT_OWNER_ID = 'webchat-owner';
 
 export interface ChatResponse {
   text: string;
@@ -157,65 +152,6 @@ export class HttpApiServer {
       }
     }
 
-    // Serve graph page (no auth — local only)
-    if (method === 'GET' && pathname === '/graph') {
-      const webPaths = [
-        path.join(__http_dirname, '..', '..', 'web', 'graph.html'),
-        path.join(__http_dirname, '..', 'web', 'graph.html'),
-        path.join(process.cwd(), 'web', 'graph.html'),
-      ];
-      for (const webPath of webPaths) {
-        try {
-          const html = fs.readFileSync(webPath, 'utf-8');
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-          res.end(html);
-          return;
-        } catch { /* try next */ }
-      }
-      return this.json(res, { error: 'graph.html not found' }, 404);
-    }
-
-    // Graph API endpoints (no auth — local only)
-    if (method === 'GET' && pathname === '/api/graph') {
-      if (!this.config.vdb) return this.json(res, { error: 'VDB not configured' }, 501);
-      try {
-        const vdb = await this.config.vdb();
-        const data = vdb.graph();
-        return this.json(res, data);
-      } catch (err) {
-        return this.json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
-
-    if (method === 'GET' && pathname === '/api/graph/sessions') {
-      if (!this.config.vdb) return this.json(res, { error: 'VDB not configured' }, 501);
-      try {
-        const vdb = await this.config.vdb();
-        const data = vdb.sessionGraph();
-        return this.json(res, data);
-      } catch (err) {
-        return this.json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
-
-    if (method === 'GET' && pathname === '/api/graph/stats') {
-      if (!this.config.vdb) return this.json(res, { error: 'VDB not configured' }, 501);
-      try {
-        const vdb = await this.config.vdb();
-        const graph = vdb.graph();
-        const stats = vdb.stats();
-        return this.json(res, {
-          nodes: graph.nodes.length,
-          edges: graph.edges.length,
-          clusters: graph.clusters,
-          generated: graph.generated,
-          documentCount: stats.documentCount,
-        });
-      } catch (err) {
-        return this.json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
-
     // Auth check — skip for web UI chat path (local-only, served from same origin)
     const isWebUIPath = pathname === '/api/chat';
     if (!isWebUIPath && !this.authenticate(req)) {
@@ -255,12 +191,6 @@ export class HttpApiServer {
 
     if (!parsed.text || typeof parsed.text !== 'string' || !parsed.text.trim()) {
       return this.json(res, { error: 'text field is required' }, 400);
-    }
-
-    if (sse && !parsed.senderId) {
-      parsed.senderId = WEBCHAT_OWNER_ID;
-      parsed.chatId = parsed.chatId ?? WEBCHAT_OWNER_ID;
-      parsed.source = parsed.source ?? 'webchat';
     }
 
     // Default session ID based on source

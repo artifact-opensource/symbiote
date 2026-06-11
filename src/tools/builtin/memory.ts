@@ -9,9 +9,42 @@ function getWorkspace(): string {
   return process.env.MACH6_WORKSPACE ?? process.cwd();
 }
 
+function getHektorStateDir(): string {
+  return process.env.HEKTOR_STATE_DIR ?? `${getWorkspace()}/enterprise/.hektor-live`;
+}
+
+function getHektorScript(): string {
+  const ws = getWorkspace();
+  const candidates = [
+    `${ws}/enterprise/.ava-memory/ava_memory_fast.py`,
+    `${ws}/.ava-memory/ava_memory_fast.py`,
+    '/opt/ava/mach6/.ava/memory/ava_memory_fast.py',
+  ];
+  return candidates.find(p => existsSync(p)) ?? candidates[0];
+}
+
+function fallbackWorkspaceSearch(query: string, ws: string): string {
+  try {
+    const escaped = query.replace(/'/g, `'"'"'`);
+    const cmd = [
+      `rg -n -F --hidden --follow --max-count 20 '${escaped}' '${ws}'`,
+      `--glob '!**/.git/**'`,
+      `--glob '!**/node_modules/**'`,
+      `--glob '!**/.hektor-env/**'`,
+      `--glob '!**/dist/**'`,
+      `| head -50`,
+    ].join(' ');
+    const out = execSync(cmd, { encoding: 'utf-8', timeout: 15000, shell: '/bin/bash' }).trim();
+    if (!out) return 'HEKTOR daemon unavailable and fallback search found no matches.';
+    return `HEKTOR daemon unavailable — fallback workspace search results:\n${out}`;
+  } catch {
+    return 'HEKTOR daemon unavailable and fallback workspace search failed.';
+  }
+}
+
 // Quick health check — if the daemon socket doesn't exist, HEKTOR is down
 function hektorAlive(): boolean {
-  const sockPath = `${getWorkspace()}/.ava-memory/ava_daemon.sock`;
+  const sockPath = `${getHektorStateDir()}/ava_daemon.sock`;
   return existsSync(sockPath);
 }
 
@@ -35,22 +68,21 @@ export const memorySearchTool: ToolDefinition = {
 
     // Pre-flight: check daemon is running before wasting 15s on a timeout
     if (!hektorAlive()) {
-      return 'HEKTOR search unavailable — daemon is not running. Use `exec` to run: source ' +
-        `${ws}/.hektor-env/bin/activate && python3 ${ws}/.ava-memory/ava_memory_fast.py daemon start`;
+      return fallbackWorkspaceSearch(query, ws);
     }
 
     try {
       const venv = `source ${ws}/.hektor-env/bin/activate`;
-      const script = `python3 ${ws}/.ava-memory/ava_memory_fast.py`;
+      const script = `HEKTOR_STATE_DIR=${getHektorStateDir()} python3 ${getHektorScript()}`;
       const cmd = `${venv} && ${script} search "${query.replace(/"/g, '\\"')}" --mode ${mode} -k ${k}`;
       const out = execSync(cmd, { encoding: 'utf-8', timeout: 15000, shell: '/bin/bash' });
       return out.trim() || 'No results found.';
     } catch (err) {
       // Detect timeout specifically (Node sets err.killed = true and err.signal = 'SIGTERM' on timeout)
       if (err instanceof Error && 'killed' in err && (err as any).killed) {
-        return 'HEKTOR search timed out — daemon may be overloaded';
+        return fallbackWorkspaceSearch(query, ws);
       }
-      return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+      return fallbackWorkspaceSearch(query, ws);
     }
   },
 };

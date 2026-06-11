@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Knowledge Graph — Symbiote</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --void: #08080c;
+  --surface-0: #0c0c12;
+  --surface-1: #12121a;
+  --surface-2: #1a1a24;
+  --surface-3: #22222e;
+  --surface-4: #2a2a38;
+  --text-primary: #e8e8ef;
+  --text-secondary: #9898a8;
+  --text-tertiary: #68687a;
+  --text-ghost: #484858;
+  --accent: #7c6aff;
+  --accent-soft: rgba(124, 106, 255, 0.12);
+  --accent-glow: rgba(124, 106, 255, 0.25);
+  --accent-bright: #9d8fff;
+  --green: #34d399;
+  --amber: #fbbf24;
+  --red: #f87171;
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:'Inter',-apple-system,sans-serif;background:var(--void);color:var(--text-primary);overflow:hidden;-webkit-font-smoothing:antialiased}
+::selection{background:var(--accent-soft);color:var(--accent-bright)}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--surface-4);border-radius:4px}
+
+/* Camera background */
+#camVideo{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:-1;opacity:0;transition:opacity 0.8s ease}
+#camVideo.live{opacity:1}
+body.cam-active{background:transparent}
+
+canvas{display:block;position:absolute;top:0;left:0;width:100%;height:100%;cursor:grab;touch-action:none}
+canvas:active{cursor:grabbing}
+
+/* Camera toggle button */
+.cam-toggle{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:90;background:var(--surface-1);border:1px solid var(--glass-border);border-radius:20px;padding:6px 16px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-tertiary);cursor:pointer;transition:all var(--transition);display:flex;align-items:center;gap:6px}
+.cam-toggle:hover{background:var(--surface-3);color:var(--text-secondary)}
+.cam-toggle.active{background:rgba(124,106,255,0.15);border-color:rgba(124,106,255,0.3);color:var(--accent-bright)}
+.cam-dot{width:6px;height:6px;border-radius:50%;background:var(--text-ghost)}
+.cam-toggle.active .cam-dot{background:var(--green);box-shadow:0 0 6px var(--green)}
+
+/* Header */
+.hdr{position:fixed;top:0;left:0;right:0;height:52px;background:rgba(12,12,18,0.85);backdrop-filter:blur(16px);border-bottom:1px solid var(--glass-border);display:flex;align-items:center;justify-content:space-between;padding:0 20px;z-index:100}
+.hdr-left{display:flex;align-items:center;gap:12px}
+.hdr-brand{display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--text-primary)}
+.hdr-mark{width:24px;height:24px;border-radius:6px;background:linear-gradient(135deg,var(--accent),#4f46e5);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:10px;color:#fff;box-shadow:0 0 16px var(--accent-glow)}
+.hdr-title{font-weight:600;font-size:14px;letter-spacing:0.3px}
+.hdr-sep{color:var(--text-ghost);font-weight:300}
+.hdr-sub{font-size:13px;color:var(--text-secondary);font-weight:500}
+
+/* Tabs */
+.tabs{display:flex;gap:2px;background:var(--surface-1);border-radius:var(--radius-sm);padding:2px;border:1px solid var(--glass-border)}
+.tab{padding:6px 16px;font-size:12px;font-weight:500;border-radius:6px;border:none;background:transparent;color:var(--text-tertiary);cursor:pointer;transition:all var(--transition);font-family:inherit}
+.tab.active{background:var(--accent-soft);color:var(--accent-bright)}
+.tab:hover:not(.active){color:var(--text-secondary)}
+
+.hdr-right{display:flex;align-items:center;gap:12px}
+.search-box{background:var(--surface-1);border:1px solid var(--glass-border);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text-primary);font-family:inherit;width:200px;outline:none;transition:border-color var(--transition)}
+.search-box:focus{border-color:rgba(124,106,255,0.4)}
+.search-box::placeholder{color:var(--text-ghost)}
+.badge{font-size:10px;font-family:'JetBrains Mono',monospace;color:var(--text-tertiary);background:var(--surface-2);padding:3px 8px;border-radius:4px;white-space:nowrap}
+.back-link{font-size:12px;color:var(--text-tertiary);text-decoration:none;display:flex;align-items:center;gap:4px;transition:color var(--transition)}
+.back-link:hover{color:var(--accent-bright)}
+
+/* Info Panel */
+.panel{position:fixed;top:52px;right:0;bottom:0;width:340px;background:var(--surface-0);border-left:1px solid var(--glass-border);transform:translateX(100%);transition:transform 0.3s cubic-bezier(0.4,0,0.2,1);z-index:90;overflow-y:auto;padding:20px}
+.panel.open{transform:translateX(0)}
+.panel-close{position:absolute;top:12px;right:12px;background:none;border:none;color:var(--text-tertiary);cursor:pointer;padding:6px;border-radius:6px;transition:all var(--transition)}
+.panel-close:hover{background:var(--surface-3);color:var(--text-primary)}
+.panel-title{font-size:14px;font-weight:600;line-height:1.5;margin-bottom:12px;padding-right:32px;color:var(--text-primary)}
+.panel-meta{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
+.panel-badge{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:500;display:flex;align-items:center;gap:5px}
+.panel-badge .dot{width:6px;height:6px;border-radius:50%}
+.panel-section{margin-top:16px}
+.panel-section-title{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--text-ghost);margin-bottom:8px}
+.panel-conn{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--glass-border);font-size:12px;cursor:pointer;transition:background var(--transition);border-radius:4px;padding:6px 8px;margin:0 -8px}
+.panel-conn:hover{background:var(--surface-2)}
+.panel-conn-label{color:var(--text-secondary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:8px}
+.panel-conn-score{color:var(--accent-bright);font-family:'JetBrains Mono',monospace;font-size:11px;flex-shrink:0}
+.panel-btn{width:100%;margin-top:16px;padding:10px;background:var(--accent-soft);border:1px solid rgba(124,106,255,0.2);border-radius:var(--radius-sm);color:var(--accent-bright);font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;transition:all var(--transition)}
+.panel-btn:hover{background:rgba(124,106,255,0.18);border-color:rgba(124,106,255,0.35)}
+
+/* Stats bar */
+.stats{position:fixed;bottom:16px;left:20px;font-size:11px;color:var(--text-ghost);font-family:'JetBrains Mono',monospace;z-index:80;transition:color var(--transition)}
+.stats:hover{color:var(--text-tertiary)}
+
+/* Minimap */
+.minimap{position:fixed;bottom:16px;right:16px;width:160px;height:120px;background:rgba(12,12,18,0.8);border:1px solid var(--glass-border);border-radius:var(--radius-sm);z-index:80;overflow:hidden;cursor:pointer}
+.minimap canvas{width:100%;height:100%}
+
+/* Loading */
+.loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;z-index:50}
+.loading-spinner{width:32px;height:32px;border:2px solid var(--surface-3);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 12px}
+.loading-text{font-size:13px;color:var(--text-tertiary)}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Empty state */
+.empty{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;z-index:50}
+.empty-icon{font-size:40px;margin-bottom:12px;opacity:0.3}
+.empty-title{font-size:16px;font-weight:600;color:var(--text-secondary);margin-bottom:6px}
+.empty-text{font-size:13px;color:var(--text-ghost);max-width:300px}
+
+@media(max-width:768px){
+  .search-box{width:120px}
+  .panel{width:100%}
+  .minimap{display:none}
+  .hdr-sub{display:none}
+}
+</style>
+</head>
+<body>
+
+<video id="camVideo" autoplay playsinline muted></video>
+
+<div class="hdr">
+  <div class="hdr-left">
+    <a href="/" class="hdr-brand"><div class="hdr-mark">◆</div><span class="hdr-title">Symbiote</span></a>
+    <span class="hdr-sep">/</span>
+    <span class="hdr-sub">Knowledge Graph</span>
+  </div>
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-mode="knowledge" onclick="switchMode('knowledge')">Knowledge</button>
+    <button class="tab" data-mode="sessions" onclick="switchMode('sessions')">Sessions</button>
+  </div>
+  <div class="hdr-right">
+    <input type="text" class="search-box" id="searchBox" placeholder="Search nodes..." oninput="onSearch(this.value)" onkeydown="if(event.key==='Enter')zoomToMatch()">
+    <span class="badge" id="countBadge">—</span>
+    <button onclick="resetLayout()" title="Reset layout" style="background:none;border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:rgba(255,255,255,0.5);cursor:pointer;padding:4px 8px;font-size:11px;font-family:inherit;transition:all 0.2s" onmouseover="this.style.borderColor='rgba(124,106,255,0.5)';this.style.color='rgba(255,255,255,0.8)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.15)';this.style.color='rgba(255,255,255,0.5)'">⟲ Reset</button>
+    <a href="/" class="back-link">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      Chat
+    </a>
+  </div>
+</div>
+
+<canvas id="c"></canvas>
+
+<div class="panel" id="panel">
+  <button class="panel-close" onclick="deselectNode()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  <div class="panel-title" id="panelTitle"></div>
+  <div class="panel-meta" id="panelMeta"></div>
+  <div class="panel-section">
+    <div class="panel-section-title">Connected Nodes</div>
+    <div id="panelConns"></div>
+  </div>
+  <button class="panel-btn" id="panelBtn" onclick="openSession()" style="display:none">Open Session →</button>
+</div>
+
+<div class="minimap" id="minimapWrap"><canvas id="minimap"></canvas></div>
+<div class="stats" id="statsBar">Loading...</div>
+<button class="cam-toggle" id="camToggle" onclick="toggleCamera()"><span class="cam-dot"></span>Camera</button>
+<div class="loading" id="loadingEl"><div class="loading-spinner"></div><div class="loading-text">Loading graph...</div></div>
+<div class="empty" id="emptyEl" style="display:none"><div class="empty-icon">◇</div><div class="empty-title">No data yet</div><div class="empty-text">Start chatting to build your knowledge graph. Nodes appear as conversations are indexed.</div></div>
+
+<script>
+'use strict';
+
+// ── Camera ──────────────────────────────────────────────────
+let cameraStream = null;
+let cameraActive = false;
+
+async function toggleCamera() {
+  const btn = document.getElementById('camToggle');
+  const video = document.getElementById('camVideo');
+
+  if (cameraActive) {
+    // Turn off
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      cameraStream = null;
+    }
+    video.srcObject = null;
+    video.classList.remove('live');
+    document.body.classList.remove('cam-active');
+    btn.classList.remove('active');
+    cameraActive = false;
+    return;
+  }
+
+  try {
+    // Prefer environment (rear) camera on mobile, user (front) on desktop
+    const isMobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: isMobile ? 'environment' : 'user', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    video.srcObject = cameraStream;
+    video.classList.add('live');
+    document.body.classList.add('cam-active');
+    btn.classList.add('active');
+    cameraActive = true;
+  } catch (e) {
+    console.error('Camera access denied:', e);
+    btn.textContent = 'Camera denied';
+    setTimeout(() => { btn.innerHTML = '<span class="cam-dot"></span>Camera'; }, 2000);
+  }
+}
+
+// Expose
+window.toggleCamera = toggleCamera;
+
+// ── Config ──────────────────────────────────────────────────
+const PALETTE = [
+  '#7c6aff','#34d399','#f472b6','#fbbf24','#60a5fa',
+  '#f87171','#a78bfa','#2dd4bf','#fb923c','#c084fc',
+  '#818cf8','#4ade80','#fb7185','#facc15','#38bdf8',
+  '#e879f9','#22d3ee','#a3e635','#f97316','#6366f1'
+];
+const SOURCE_COLORS = { whatsapp:'#34d399', discord:'#60a5fa', comb:'#fbbf24', webchat:'#a78bfa', manual:'#9898a8' };
+const API = window.location.origin;
+const POLL_MS = 30000;
+const SAVE_MS = 5000; // save positions every 5s during simulation
+const STORAGE_KEY = 'symbiote-graph-v2';
+const NODE_R_MIN = 2.5, NODE_R_MAX = 7;
+const BASE_REPULSION = 800, SPRING_K = 0.04, BASE_SPRING_LEN = 80, CENTER_FORCE = 0.01, DAMPING = 0.85;
+// Adaptive: scale repulsion and spring length based on node count
+function getRepulsion() { return BASE_REPULSION * Math.max(1, nodes.length / 100); }
+function getSpringLen() { return BASE_SPRING_LEN * Math.max(1, Math.sqrt(nodes.length / 50)); }
+const ZOOM_MIN = 0.05, ZOOM_MAX = 8;
+const LABEL_ZOOM_THRESHOLD = 1.8;
+
+// ── State ───────────────────────────────────────────────────
+let canvas, ctx, mmCanvas, mmCtx;
+let W, H;
+let mode = 'knowledge';
+let nodes = [], edges = [], edgeMap = {}, nodeMap = {};
+let cam = { x: 0, y: 0, zoom: 1, rot: 0 };
+let hovered = null, selected = null, dragging = null;
+let searchQuery = '';
+let simRunning = false, simAlpha = 0;
+let lastFetch = 0, lastSave = 0;
+let pointers = new Map();
+let pinchDist0 = 0, pinchZoom0 = 1, pinchAngle0 = 0, pinchRot0 = 0;
+let panStart = null, panCam0 = null;
+let rotStart = null, rotAngle0 = 0;
+let animFrame = null;
+let dpr = 1;
+// Color cache: id → color (deterministic, persisted)
+let colorMap = {};
+
+// ── Deterministic color from string ─────────────────────────
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return h >>> 0; // unsigned
+}
+
+function nodeColor(id) {
+  if (colorMap[id]) return colorMap[id];
+  const col = PALETTE[hashStr(id) % PALETTE.length];
+  colorMap[id] = col;
+  return col;
+}
+
+// ── Persistence ─────────────────────────────────────────────
+function saveLayout() {
+  if (nodes.length === 0) return;
+  const positions = {};
+  for (const n of nodes) {
+    positions[n.id] = { x: n.x, y: n.y };
+  }
+  const data = {
+    mode: mode,
+    positions: positions,
+    colors: colorMap,
+    camera: { x: cam.x, y: cam.y, zoom: cam.zoom, rot: cam.rot },
+    ts: Date.now()
+  };
+  try {
+    localStorage.setItem(STORAGE_KEY + '-' + mode, JSON.stringify(data));
+  } catch (e) { /* quota exceeded — ignore */ }
+}
+
+function loadLayout() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY + '-' + mode);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+}
+
+// ── Init ────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  canvas = document.getElementById('c');
+  ctx = canvas.getContext('2d');
+  mmCanvas = document.getElementById('minimap');
+  mmCtx = mmCanvas.getContext('2d');
+  dpr = window.devicePixelRatio || 1;
+
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Restore color map from saved layout
+  const saved = loadLayout();
+  if (saved && saved.colors) colorMap = saved.colors;
+
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+  canvas.addEventListener('dblclick', onDblClick);
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  document.addEventListener('keydown', onKey);
+  document.getElementById('minimapWrap').addEventListener('click', onMinimapClick);
+
+  // Save on page unload
+  window.addEventListener('beforeunload', saveLayout);
+
+  fetchGraph();
+  setInterval(fetchGraph, POLL_MS);
+});
+
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  mmCanvas.width = 160 * dpr;
+  mmCanvas.height = 120 * dpr;
+  mmCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+// ── Data Fetch ──────────────────────────────────────────────
+async function fetchGraph() {
+  const endpoint = mode === 'sessions' ? '/api/graph/sessions?threshold=0.2' : '/api/graph?threshold=0.2&maxNodes=200';
+  try {
+    const res = await fetch(API + endpoint);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+
+    if (!data.nodes || data.nodes.length === 0) {
+      showEmpty(true);
+      showLoading(false);
+      nodes = []; edges = [];
+      updateStats();
+      return;
+    }
+
+    showEmpty(false);
+    showLoading(false);
+    mergeGraph(data);
+    lastFetch = Date.now();
+    updateStats();
+
+    if (!animFrame) tick();
+  } catch (e) {
+    console.error('Graph fetch error:', e);
+    showLoading(false);
+    if (nodes.length === 0) showEmpty(true);
+  }
+}
+
+function mergeGraph(data) {
+  const isFirstLoad = nodes.length === 0;
+  const saved = isFirstLoad ? loadLayout() : null;
+  const savedPositions = saved ? saved.positions || {} : {};
+  const savedCamera = saved ? saved.camera : null;
+
+  // Restore persisted colors
+  if (saved && saved.colors) {
+    for (const id in saved.colors) {
+      if (!colorMap[id]) colorMap[id] = saved.colors[id];
+    }
+  }
+
+  // Build map of current node positions
+  const oldMap = {};
+  for (const n of nodes) oldMap[n.id] = n;
+
+  let newCount = 0;
+  const newNodes = data.nodes.map(d => {
+    const old = oldMap[d.id];
+    const sp = savedPositions[d.id]; // persisted position from localStorage
+
+    // Assign deterministic color now (before anything else)
+    nodeColor(d.id);
+
+    if (old) {
+      // Existing node — update metadata only, keep position & velocity
+      old.label = d.label;
+      old.source = d.source;
+      old.sessionId = d.sessionId;
+      old.timestamp = d.timestamp;
+      old.cluster = d.cluster;
+      old.connections = d.connections;
+      return old;
+    }
+
+    // New node
+    newCount++;
+    const hasPosition = sp && sp.x !== undefined;
+    return {
+      id: d.id,
+      label: d.label,
+      source: d.source,
+      sessionId: d.sessionId,
+      timestamp: d.timestamp,
+      cluster: d.cluster,
+      connections: d.connections,
+      // Position: saved > random
+      x: hasPosition ? sp.x : (Math.random() - 0.5) * 400,
+      y: hasPosition ? sp.y : (Math.random() - 0.5) * 400,
+      vx: 0,
+      vy: 0,
+      r: NODE_R_MIN,
+      targetR: NODE_R_MIN,
+      alpha: hasPosition ? 1 : 0,
+      targetAlpha: 1,
+      pinned: hasPosition, // nodes with saved positions are pinned (won't move)
+    };
+  });
+
+  nodes = newNodes;
+  edges = data.edges;
+  edgeMap = {};
+  nodeMap = {};
+  for (const n of nodes) nodeMap[n.id] = n;
+  for (const e of edges) {
+    if (!edgeMap[e.source]) edgeMap[e.source] = [];
+    if (!edgeMap[e.target]) edgeMap[e.target] = [];
+    edgeMap[e.source].push(e);
+    edgeMap[e.target].push(e);
+  }
+
+  // Compute radii
+  let maxConn = 1;
+  for (const n of nodes) if (n.connections > maxConn) maxConn = n.connections;
+  for (const n of nodes) {
+    n.targetR = NODE_R_MIN + (NODE_R_MAX - NODE_R_MIN) * (n.connections / maxConn);
+  }
+
+  if (isFirstLoad) {
+    // Check how many nodes had saved positions
+    const savedCount = nodes.filter(n => n.pinned).length;
+    const totalCount = nodes.length;
+
+    if (savedCount > totalCount * 0.7) {
+      // Most nodes have saved positions — restore camera, minimal simulation
+      if (savedCamera) {
+        cam.x = savedCamera.x;
+        cam.y = savedCamera.y;
+        cam.zoom = savedCamera.zoom;
+        cam.rot = savedCamera.rot || 0;
+      }
+      // Only simulate unsaved (new) nodes
+      if (savedCount < totalCount) {
+        simAlpha = 0.3;
+        simRunning = true;
+      }
+      // No simulation needed if everything was saved
+    } else {
+      // Fresh layout — no saved data, run full simulation
+      for (const n of nodes) n.pinned = false; // unpin all for fresh layout
+      simAlpha = 1.0;
+      simRunning = true;
+      for (let i = 0; i < 300; i++) {
+        simulate(simAlpha);
+        simAlpha *= 0.997;
+      }
+      // Pin everything after initial layout
+      for (const n of nodes) n.pinned = true;
+      fitAll();
+    }
+    // Save immediately after first layout
+    saveLayout();
+  } else if (newCount > 0) {
+    // Incremental: only new nodes need settling, existing stay pinned
+    simAlpha = Math.max(simAlpha, 0.3);
+    simRunning = true;
+  }
+}
+
+// ── Force Simulation ────────────────────────────────────────
+function simulate(alpha) {
+  const n = nodes.length;
+  if (n === 0) return;
+
+  const REPULSION = getRepulsion();
+  const SPRING_LEN = getSpringLen();
+
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      let dx = nodes[j].x - nodes[i].x;
+      let dy = nodes[j].y - nodes[i].y;
+      let d2 = dx * dx + dy * dy;
+      if (d2 < 1) d2 = 1;
+      const f = REPULSION * alpha / d2;
+      const dist = Math.sqrt(d2);
+      const fx = dx / dist * f;
+      const fy = dy / dist * f;
+      // Pinned nodes receive almost no force
+      const wi = nodes[i].pinned ? 0.02 : 1;
+      const wj = nodes[j].pinned ? 0.02 : 1;
+      nodes[i].vx -= fx * wi;
+      nodes[i].vy -= fy * wi;
+      nodes[j].vx += fx * wj;
+      nodes[j].vy += fy * wj;
+    }
+  }
+
+  for (const e of edges) {
+    const a = nodeMap[e.source];
+    const b = nodeMap[e.target];
+    if (!a || !b) continue;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const f = SPRING_K * (dist - SPRING_LEN) * alpha * (0.5 + e.weight * 0.5);
+    const fx = (dx / dist) * f;
+    const fy = (dy / dist) * f;
+    const wa = a.pinned ? 0.02 : 1;
+    const wb = b.pinned ? 0.02 : 1;
+    a.vx += fx * wa; a.vy += fy * wa;
+    b.vx -= fx * wb; b.vy -= fy * wb;
+  }
+
+  for (const nd of nodes) {
+    if (nd.pinned) continue; // pinned nodes don't get center pull
+    nd.vx -= nd.x * CENTER_FORCE * alpha;
+    nd.vy -= nd.y * CENTER_FORCE * alpha;
+  }
+
+  let totalV = 0;
+  let unpinnedCount = 0;
+  for (const nd of nodes) {
+    if (nd === dragging) { nd.vx = 0; nd.vy = 0; continue; }
+    const damp = nd.pinned ? 0.3 : DAMPING;
+    nd.vx *= damp;
+    nd.vy *= damp;
+    nd.x += nd.vx;
+    nd.y += nd.vy;
+    if (!nd.pinned) {
+      totalV += Math.abs(nd.vx) + Math.abs(nd.vy);
+      unpinnedCount++;
+    }
+    nd.r += (nd.targetR - nd.r) * 0.15;
+    nd.alpha += (nd.targetAlpha - nd.alpha) * 0.1;
+  }
+
+  simAlpha *= 0.995;
+
+  // Stop when unpinned nodes settle
+  const avg = unpinnedCount > 0 ? totalV / unpinnedCount : 0;
+  if (avg < 0.05 || simAlpha < 0.001) {
+    simRunning = false;
+    // Pin newly settled nodes
+    for (const nd of nodes) nd.pinned = true;
+    saveLayout();
+  }
+
+  // Periodic save during simulation
+  if (Date.now() - lastSave > SAVE_MS) {
+    saveLayout();
+    lastSave = Date.now();
+  }
+}
+
+// ── Render ──────────────────────────────────────────────────
+function tick() {
+  if (simRunning) simulate(simAlpha);
+  render();
+  renderMinimap();
+  animFrame = requestAnimationFrame(tick);
+}
+
+function render() {
+  ctx.save();
+  ctx.clearRect(0, 0, W, H);
+
+  // Dark overlay when camera is active (so nodes remain visible)
+  if (cameraActive) {
+    ctx.fillStyle = 'rgba(8, 8, 12, 0.55)';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  ctx.translate(W / 2, H / 2);
+  ctx.rotate(cam.rot);
+  ctx.scale(cam.zoom, cam.zoom);
+  ctx.translate(-cam.x, -cam.y);
+
+  const searchLower = searchQuery.toLowerCase();
+  const hasSearch = searchLower.length > 0;
+
+  // Edges
+  for (const e of edges) {
+    const a = nodeMap[e.source];
+    const b = nodeMap[e.target];
+    if (!a || !b) continue;
+
+    let isHighlight = false;
+    if (hovered && (e.source === hovered.id || e.target === hovered.id)) isHighlight = true;
+    if (selected && (e.source === selected.id || e.target === selected.id)) isHighlight = true;
+
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    if (isHighlight) {
+      ctx.strokeStyle = 'rgba(124,106,255,0.6)';
+      ctx.lineWidth = 1.5 / cam.zoom;
+    } else {
+      const alpha = hasSearch ? 0.02 : Math.max(0.03, e.weight * 0.12);
+      ctx.strokeStyle = 'rgba(255,255,255,' + alpha + ')';
+      ctx.lineWidth = 0.5 / cam.zoom;
+    }
+    ctx.stroke();
+  }
+
+  // Nodes
+  for (const n of nodes) {
+    const isHov = hovered && hovered.id === n.id;
+    const isSel = selected && selected.id === n.id;
+    const col = nodeColor(n.id); // deterministic!
+    const matches = hasSearch && n.label.toLowerCase().includes(searchLower);
+    let opacity = n.alpha * 0.7;
+
+    if (hasSearch) {
+      opacity = matches ? 1 : 0.08;
+    }
+    if (isHov || isSel) opacity = 1;
+
+    const r = isHov ? Math.max(n.r, 7) : isSel ? Math.max(n.r, 9) : n.r;
+
+    if (isSel) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(245,158,11,0.15)';
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = hexAlpha(col, opacity);
+    ctx.fill();
+
+    if (isSel) {
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2 / cam.zoom;
+      ctx.stroke();
+    } else if (isHov) {
+      ctx.strokeStyle = hexAlpha(col, 0.8);
+      ctx.lineWidth = 1 / cam.zoom;
+      ctx.stroke();
+    }
+
+    const showLabel = isHov || isSel || (n.connections > 8 && cam.zoom > 1.2) || cam.zoom > LABEL_ZOOM_THRESHOLD;
+    if (showLabel) {
+      const fontSize = Math.max(9, Math.min(12, 11 / cam.zoom));
+      ctx.font = (isHov || isSel ? '500 ' : '400 ') + fontSize + 'px Inter, sans-serif';
+      ctx.fillStyle = hexAlpha('#e8e8ef', isHov || isSel ? 0.95 : 0.6);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      const lbl = n.label.length > 40 ? n.label.slice(0, 38) + '…' : n.label;
+      ctx.fillText(lbl, n.x, n.y + r + 4);
+    }
+  }
+
+  ctx.restore();
+}
+
+function renderMinimap() {
+  const mw = 160, mh = 120;
+  mmCtx.clearRect(0, 0, mw, mh);
+  mmCtx.fillStyle = 'rgba(12,12,18,0.6)';
+  mmCtx.fillRect(0, 0, mw, mh);
+
+  if (nodes.length === 0) return;
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
+  }
+  const pad = 40;
+  minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+  const gw = maxX - minX || 1;
+  const gh = maxY - minY || 1;
+  const scale = Math.min(mw / gw, mh / gh);
+  const ox = (mw - gw * scale) / 2;
+  const oy = (mh - gh * scale) / 2;
+
+  for (const n of nodes) {
+    const mx = ox + (n.x - minX) * scale;
+    const my = oy + (n.y - minY) * scale;
+    mmCtx.beginPath();
+    mmCtx.arc(mx, my, 1.5, 0, Math.PI * 2);
+    mmCtx.fillStyle = nodeColor(n.id);
+    mmCtx.globalAlpha = 0.6;
+    mmCtx.fill();
+    mmCtx.globalAlpha = 1;
+  }
+
+  const vpLeft = cam.x - W / (2 * cam.zoom);
+  const vpTop = cam.y - H / (2 * cam.zoom);
+  const vpW = W / cam.zoom;
+  const vpH = H / cam.zoom;
+  const rx = ox + (vpLeft - minX) * scale;
+  const ry = oy + (vpTop - minY) * scale;
+  const rw = vpW * scale;
+  const rh = vpH * scale;
+  mmCtx.strokeStyle = 'rgba(124,106,255,0.5)';
+  mmCtx.lineWidth = 1;
+  mmCtx.strokeRect(rx, ry, rw, rh);
+}
+
+// ── Interaction ─────────────────────────────────────────────
+function screenToWorld(sx, sy) {
+  const dx = sx - W / 2;
+  const dy = sy - H / 2;
+  const cos = Math.cos(-cam.rot);
+  const sin = Math.sin(-cam.rot);
+  const rx = (dx * cos - dy * sin) / cam.zoom + cam.x;
+  const ry = (dx * sin + dy * cos) / cam.zoom + cam.y;
+  return { x: rx, y: ry };
+}
+
+function hitTest(wx, wy) {
+  const hitR = 12 / cam.zoom;
+  let best = null, bestD = Infinity;
+  for (const n of nodes) {
+    const dx = n.x - wx, dy = n.y - wy;
+    const d = dx * dx + dy * dy;
+    if (d < hitR * hitR && d < bestD) { bestD = d; best = n; }
+  }
+  return best;
+}
+
+function onPointerDown(e) {
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (pointers.size === 2) {
+    const pts = [...pointers.values()];
+    pinchDist0 = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+    pinchZoom0 = cam.zoom;
+    pinchAngle0 = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x);
+    pinchRot0 = cam.rot;
+    return;
+  }
+
+  const w = screenToWorld(e.clientX, e.clientY);
+  const hit = hitTest(w.x, w.y);
+  if (hit) {
+    dragging = hit;
+    dragging.pinned = false; // unpin during drag so it can move freely
+    selectNode(hit);
+    simRunning = true; simAlpha = Math.max(simAlpha, 0.1);
+  } else if (e.button === 1 || e.ctrlKey) {
+    rotStart = { x: e.clientX, y: e.clientY };
+    rotAngle0 = cam.rot;
+  } else {
+    panStart = { x: e.clientX, y: e.clientY };
+    panCam0 = { x: cam.x, y: cam.y };
+  }
+}
+
+function onPointerMove(e) {
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (pointers.size === 2) {
+    const pts = [...pointers.values()];
+    const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+    const angle = Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x);
+    const newZoom = clamp(pinchZoom0 * (dist / pinchDist0), ZOOM_MIN, ZOOM_MAX);
+    cam.rot = pinchRot0 + (angle - pinchAngle0);
+    zoomAt((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2, newZoom);
+    return;
+  }
+
+  if (dragging) {
+    const w = screenToWorld(e.clientX, e.clientY);
+    dragging.x = w.x;
+    dragging.y = w.y;
+    dragging.vx = 0; dragging.vy = 0;
+    return;
+  }
+
+  if (rotStart) {
+    const dx = e.clientX - rotStart.x;
+    cam.rot = rotAngle0 + dx * (Math.PI * 2 / 800);
+    return;
+  }
+
+  if (panStart) {
+    const sdx = e.clientX - panStart.x;
+    const sdy = e.clientY - panStart.y;
+    const cos = Math.cos(-cam.rot);
+    const sin = Math.sin(-cam.rot);
+    const dx = (sdx * cos - sdy * sin) / cam.zoom;
+    const dy = (sdx * sin + sdy * cos) / cam.zoom;
+    cam.x = panCam0.x - dx;
+    cam.y = panCam0.y - dy;
+    return;
+  }
+
+  const w = screenToWorld(e.clientX, e.clientY);
+  const hit = hitTest(w.x, w.y);
+  if (hit !== hovered) {
+    hovered = hit;
+    canvas.style.cursor = hit ? 'pointer' : 'grab';
+  }
+}
+
+function onPointerUp(e) {
+  if (dragging) {
+    dragging.pinned = true; // re-pin after drag
+    dragging.vx = 0;
+    dragging.vy = 0;
+    saveLayout(); // persist new position
+  }
+  pointers.delete(e.pointerId);
+  dragging = null;
+  panStart = null;
+  rotStart = null;
+}
+
+function onWheel(e) {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+  const newZoom = clamp(cam.zoom * factor, ZOOM_MIN, ZOOM_MAX);
+  zoomAt(e.clientX, e.clientY, newZoom);
+}
+
+function zoomAt(sx, sy, newZoom) {
+  const w = screenToWorld(sx, sy);
+  cam.zoom = newZoom;
+  const dx = sx - W / 2;
+  const dy = sy - H / 2;
+  const cos = Math.cos(-cam.rot);
+  const sin = Math.sin(-cam.rot);
+  cam.x = w.x - (dx * cos - dy * sin) / cam.zoom;
+  cam.y = w.y - (dx * sin + dy * cos) / cam.zoom;
+}
+
+function onDblClick(e) {
+  const w = screenToWorld(e.clientX, e.clientY);
+  const hit = hitTest(w.x, w.y);
+  if (hit && hit.sessionId) {
+    window.open('/', '_blank');
+  }
+}
+
+function onKey(e) {
+  if (e.target.tagName === 'INPUT') return;
+  switch (e.key) {
+    case 'Escape': deselectNode(); break;
+    case 'f': case 'F': fitAll(); break;
+    case '/': e.preventDefault(); document.getElementById('searchBox').focus(); break;
+    case '+': case '=': cam.zoom = clamp(cam.zoom * 1.2, ZOOM_MIN, ZOOM_MAX); break;
+    case '-': cam.zoom = clamp(cam.zoom * 0.8, ZOOM_MIN, ZOOM_MAX); break;
+    case 'ArrowUp': cam.y -= 30 / cam.zoom; break;
+    case 'ArrowDown': cam.y += 30 / cam.zoom; break;
+    case 'ArrowLeft': cam.x -= 30 / cam.zoom; break;
+    case 'ArrowRight': cam.x += 30 / cam.zoom; break;
+    case 'r': cam.rot -= 0.05; break;
+    case 'R': cam.rot = 0; break;
+    case 'e': cam.rot += 0.05; break;
+  }
+}
+
+function onMinimapClick(e) {
+  if (nodes.length === 0) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const mw = 160, mh = 120;
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
+  }
+  const pad = 40;
+  minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+  const gw = maxX - minX || 1, gh = maxY - minY || 1;
+  const scale = Math.min(mw / gw, mh / gh);
+  const ox = (mw - gw * scale) / 2;
+  const oy = (mh - gh * scale) / 2;
+
+  cam.x = (mx - ox) / scale + minX;
+  cam.y = (my - oy) / scale + minY;
+}
+
+// ── Selection / Panel ───────────────────────────────────────
+function selectNode(n) {
+  selected = n;
+  const panel = document.getElementById('panel');
+  panel.classList.add('open');
+
+  document.getElementById('panelTitle').textContent = n.label;
+
+  const srcColor = SOURCE_COLORS[n.source] || '#9898a8';
+  let metaHTML = '<div class="panel-badge" style="background:' + srcColor + '20;color:' + srcColor + '"><span class="dot" style="background:' + srcColor + '"></span>' + n.source + '</div>';
+  metaHTML += '<div class="panel-badge" style="background:var(--surface-3);color:var(--text-secondary)">' + timeAgo(n.timestamp) + '</div>';
+  if (n.sessionId) {
+    metaHTML += '<div class="panel-badge" style="background:var(--surface-3);color:var(--text-tertiary);font-family:JetBrains Mono,monospace;font-size:10px">' + n.sessionId.slice(0, 24) + '</div>';
+  }
+  document.getElementById('panelMeta').innerHTML = metaHTML;
+
+  const conns = [];
+  for (const e of edges) {
+    if (e.source === n.id) conns.push({ id: e.target, weight: e.weight });
+    if (e.target === n.id) conns.push({ id: e.source, weight: e.weight });
+  }
+  conns.sort((a, b) => b.weight - a.weight);
+
+  let connHTML = '';
+  for (const c of conns.slice(0, 20)) {
+    const cn = nodeMap[c.id];
+    if (!cn) continue;
+    const lbl = cn.label.length > 50 ? cn.label.slice(0, 48) + '…' : cn.label;
+    connHTML += '<div class="panel-conn" onclick="selectNode(nodeMap[\'' + c.id + '\'])">' +
+      '<span class="panel-conn-label">' + escapeHtml(lbl) + '</span>' +
+      '<span class="panel-conn-score">' + (c.weight * 100).toFixed(0) + '%</span></div>';
+  }
+  if (conns.length === 0) connHTML = '<div style="font-size:12px;color:var(--text-ghost);padding:8px 0">No connections</div>';
+  document.getElementById('panelConns').innerHTML = connHTML;
+
+  const btn = document.getElementById('panelBtn');
+  btn.style.display = n.sessionId ? 'block' : 'none';
+  btn.onclick = () => window.open('/', '_blank');
+}
+
+function deselectNode() {
+  selected = null;
+  document.getElementById('panel').classList.remove('open');
+}
+
+function openSession() {
+  if (selected && selected.sessionId) window.open('/', '_blank');
+}
+
+// ── Search ──────────────────────────────────────────────────
+function onSearch(q) {
+  searchQuery = q;
+  if (!simRunning) { simRunning = true; simAlpha = 0.01; }
+}
+
+function zoomToMatch() {
+  if (!searchQuery) return;
+  const q = searchQuery.toLowerCase();
+  const match = nodes.find(n => n.label.toLowerCase().includes(q));
+  if (match) {
+    cam.x = match.x;
+    cam.y = match.y;
+    cam.zoom = 2.5;
+    selectNode(match);
+  }
+}
+
+// ── Mode Switch ─────────────────────────────────────────────
+function resetLayout() {
+  // Clear saved layout for current mode
+  localStorage.removeItem(STORAGE_KEY + '-' + mode);
+  colorMap = {};
+  
+  // Unpin all nodes, randomize positions, run fresh simulation
+  for (const n of nodes) {
+    n.pinned = false;
+    n.x = (Math.random() - 0.5) * 400;
+    n.y = (Math.random() - 0.5) * 400;
+    n.vx = 0;
+    n.vy = 0;
+    nodeColor(n.id); // reassign deterministic colors
+  }
+  
+  // Run initial simulation burst
+  simAlpha = 1.0;
+  simRunning = true;
+  for (let i = 0; i < 300; i++) {
+    simulate(simAlpha);
+    simAlpha *= 0.997;
+  }
+  
+  // Pin and fit
+  for (const n of nodes) n.pinned = true;
+  fitAll();
+  saveLayout();
+}
+
+function switchMode(m) {
+  // Save current mode's layout before switching
+  saveLayout();
+  mode = m;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.mode === m));
+  nodes = []; edges = []; edgeMap = {}; nodeMap = {};
+  selected = null; hovered = null;
+  document.getElementById('panel').classList.remove('open');
+
+  // Load saved colors for the new mode
+  const saved = loadLayout();
+  if (saved && saved.colors) {
+    for (const id in saved.colors) colorMap[id] = saved.colors[id];
+  }
+
+  showLoading(true);
+  showEmpty(false);
+  fetchGraph();
+}
+
+// ── Helpers ─────────────────────────────────────────────────
+function fitAll() {
+  if (nodes.length === 0) return;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const n of nodes) {
+    if (n.x < minX) minX = n.x; if (n.x > maxX) maxX = n.x;
+    if (n.y < minY) minY = n.y; if (n.y > maxY) maxY = n.y;
+  }
+  const gw = (maxX - minX) || 200;
+  const gh = (maxY - minY) || 200;
+  cam.x = (minX + maxX) / 2;
+  cam.y = (minY + maxY) / 2;
+  cam.zoom = Math.min(W / (gw + 100), (H - 52) / (gh + 100), 3);
+  cam.rot = 0;
+  saveLayout();
+}
+
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+function hexAlpha(hex, a) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+}
+
+function timeAgo(ts) {
+  if (!ts) return 'unknown';
+  const diff = Date.now() - ts;
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+  return Math.floor(diff / 86400000) + 'd ago';
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showLoading(v) { document.getElementById('loadingEl').style.display = v ? 'block' : 'none'; }
+function showEmpty(v) { document.getElementById('emptyEl').style.display = v ? 'block' : 'none'; }
+
+function updateStats() {
+  const ago = lastFetch ? timeAgo(lastFetch) : 'never';
+  document.getElementById('statsBar').textContent = nodes.length + ' nodes · ' + edges.length + ' edges · Updated ' + ago;
+  document.getElementById('countBadge').textContent = nodes.length + 'N / ' + edges.length + 'E';
+}
+
+// Expose for panel onclick
+window.nodeMap = nodeMap;
+window.selectNode = selectNode;
+</script>
+</body>
+</html>

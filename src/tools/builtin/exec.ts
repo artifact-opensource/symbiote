@@ -12,7 +12,7 @@ export const execTool: ToolDefinition = {
     properties: {
       command: { type: 'string', description: 'Shell command to execute' },
       workdir: { type: 'string', description: 'Working directory (defaults to cwd)' },
-      timeout: { type: 'number', description: 'Timeout in seconds (default 30, ignored if background)' },
+      timeout: { type: 'number', description: 'Timeout in seconds (default 120, ignored if background)' },
       background: { type: 'boolean', description: 'Run in background (returns process ID)' },
       pty: { type: 'boolean', description: 'Wrap in pseudo-TTY via script command' },
     },
@@ -44,7 +44,7 @@ export const execTool: ToolDefinition = {
       return JSON.stringify({ processId: p.id, pid: p.pid, status: 'running' });
     }
 
-    const timeoutMs = ((input.timeout as number) ?? 30) * 1000;
+    const timeoutMs = ((input.timeout as number) ?? 120) * 1000;
 
     // PTY wrapping: use `script` to allocate a pseudo-terminal
     const actualCommand = pty

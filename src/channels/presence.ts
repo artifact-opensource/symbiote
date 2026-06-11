@@ -41,7 +41,8 @@ export type ActivityState =
   | 'spawning'
   | 'speaking'
   | 'listening'
-  | 'reacting';
+  | 'reacting'
+  | 'deep_work';
 
 interface ActivityDisplay {
   text: string;
@@ -71,6 +72,7 @@ const TOOL_ACTIVITY: Record<string, ActivityDisplay> = {
   mark_read:       { text: '👀 Reading messages...', type: ActivityType.Custom },
   spawn:           { text: '🧬 Spawning sub-agent...', type: ActivityType.Custom },
   subagent_status: { text: '🔍 Checking sub-agent...', type: ActivityType.Custom },
+  deep_work:       { text: '🪖 Deep Work...', type: ActivityType.Custom },
 };
 
 const THINKING_ACTIVITY: ActivityDisplay = { text: '🤔 Thinking...', type: ActivityType.Custom };

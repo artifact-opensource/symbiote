@@ -472,6 +472,30 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return streamChat(res, sessionId, message);
   }
 
+  // ── Graph API (VDB-backed knowledge graph) ─────────────────────────────
+
+  if (method === 'GET' && (pathname === '/api/graph' || pathname === '/api/graph/sessions' || pathname === '/api/graph/stats')) {
+    try {
+      const { VectorDB } = await import('../memory/vdb.js');
+      const vdb = new VectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
+      if (pathname === '/api/graph') {
+        const threshold = parseFloat(url.searchParams.get('threshold') ?? '0.15');
+        const maxNodes = parseInt(url.searchParams.get('max') ?? '500', 10);
+        return json(res, vdb.graph(threshold, maxNodes));
+      }
+      if (pathname === '/api/graph/sessions') {
+        const threshold = parseFloat(url.searchParams.get('threshold') ?? '0.1');
+        return json(res, vdb.sessionGraph(threshold));
+      }
+      if (pathname === '/api/graph/stats') {
+        const stats = vdb.stats();
+        return json(res, { ...stats, generated: Date.now() });
+      }
+    } catch (err) {
+      return json(res, { error: 'Graph unavailable', detail: String(err) }, 500);
+    }
+  }
+
   // GET /api/agents
   if (method === 'GET' && pathname === '/api/agents') {
     return json(res, subAgents);
@@ -490,6 +514,12 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   if (method === 'GET') {
     if (pathname === '/' || pathname === '/index.html') {
       return serveStatic(res, path.join(WEB_DIR, 'index.html'));
+    }
+    if (pathname === '/graph') {
+      return serveStatic(res, path.join(WEB_DIR, 'graph.html'));
+    }
+    if (pathname === '/test') {
+      return serveStatic(res, path.join(WEB_DIR, 'test.html'));
     }
     // Serve other static files
     const safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');

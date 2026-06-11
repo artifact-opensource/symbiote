@@ -116,7 +116,16 @@ export class SessionManager {
         data.metadata = { ...this.defaultMetadata(), ...(data.metadata as Record<string, unknown> ?? {}) } as SessionMetadata;
       }
       // Sanitize tool pairs — remove orphaned tool results/calls
-      data.messages = sanitizeToolPairs(data.messages);
+      const cleaned = sanitizeToolPairs(data.messages);
+      if (cleaned.length < data.messages.length) {
+        data.messages = cleaned;
+        data.updatedAt = Date.now();
+        try {
+          fs.writeFileSync(this.filePath(id), JSON.stringify(data, null, 2));
+        } catch { /* best effort */ }
+      } else {
+        data.messages = cleaned;
+      }
       return data;
     } catch {
       return null;

@@ -1,0 +1,15 @@
+[Unit]
+Description=Mach6 Unified Daemon (Symbiote 2.2)
+After=network.target
+
+[Service]
+Type=simple
+User=adam
+WorkingDirectory=/home/adam/workspace/mach6/mach6-core
+ExecStart=/usr/bin/node dist/daemon/unified-daemon.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target

@@ -12,6 +12,7 @@ export interface SystemPromptParams {
   channel?: string;          // whatsapp | discord | etc.
   chatType?: string;         // direct | group
   senderId?: string;
+  chatId?: string;           // chat/channel/DM ID
   extraContext?: string;
   /** Override workspace files to load (for multi-persona support) */
   workspaceFiles?: { path: string; label: string; required?: boolean }[];
@@ -23,6 +24,7 @@ const WORKSPACE_FILES = [
   { path: 'IDENTITY.md',   label: 'Identity',          required: false },
   { path: 'USER.md',       label: 'About the User',    required: false },
   { path: 'AGENTS.md',     label: 'Operating Protocol', required: false },
+  { path: 'BOOTSTRAP.md',  label: 'Operational DNA',   required: false },
   { path: 'TOOLS.md',      label: 'Tool Notes',        required: false },
   { path: 'HEARTBEAT.md',  label: 'Heartbeat Config',  required: false },
   { path: 'WORKFLOW_AUTO.md', label: 'Active Workflows', required: false },
@@ -89,6 +91,7 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
     `- Channel: ${params.channel ?? 'unknown'}`,
     `- Chat type: ${params.chatType ?? 'unknown'}`,
     params.senderId ? `- Sender: ${params.senderId}` : '',
+    params.chatId ? `- Chat ID: ${params.chatId}` : '',
   ].filter(Boolean).join('\n'));
 
   // ── Workspace files (personality, identity, protocols) ──
@@ -139,6 +142,7 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
     '- Private things stay private. When in doubt, ask before external actions.',
     '- Write to memory files — mental notes don\'t survive restarts.',
     '- Each user message starts with <<message_id=ID>>. Use this ID for reactions (message tool with action="react") and mark_read.',
+    '- RESPONSE ROUTING: Your text response is automatically sent to the current chat. Just write your reply — do NOT use the message tool to reply. The message tool is for proactive messages to OTHER channels, reactions, and mark_read only.',
   ].join('\n'));
 
   return parts.join('\n');
