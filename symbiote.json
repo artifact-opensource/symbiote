@@ -1,6 +1,6 @@
 {
-  "defaultProvider": "github-copilot",
-  "defaultModel": "claude-sonnet-4",
+  "defaultProvider": "openrouter",
+  "defaultModel": "google/gemma-4-31b-it:free",
   "maxTokens": 8192,
   "maxIterations": 50,
   "temperature": 0.3,
