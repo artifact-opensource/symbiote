@@ -1,0 +1,33 @@
+{
+  "defaultProvider": "github-copilot",
+  "defaultModel": "claude-sonnet-4",
+  "maxTokens": 8192,
+  "maxIterations": 50,
+  "temperature": 0.3,
+  "workspace": "/workspace/symbiote",
+  "sessionsDir": ".sessions",
+  "providers": {
+    "github-copilot": {},
+    "anthropic": {},
+    "openai": {},
+    "gemini": {},
+    "ollama": { "baseUrl": "http://127.0.0.1:11434" },
+    "groq": { "baseUrl": "https://api.groq.com/openai" },
+    "openrouter": { "baseUrl": "https://openrouter.ai/api/v1" },
+    "xai": {},
+    "gladius": { "baseUrl": "http://127.0.0.1:8741" }
+  },
+  "ownerIds": ["193011943382974466"],
+  "apiPort": 3006,
+  "discord": {
+    "enabled": true,
+    "token": "${DISCORD_BOT_TOKEN}",
+    "botId": "${DISCORD_CLIENT_ID}",
+    "siblingBotIds": [],
+    "policy": {
+      "dmPolicy": "owner-only",
+      "groupPolicy": "mention-only"
+    }
+  },
+  "whatsapp": { "enabled": false }
+}
