@@ -1,0 +1,79 @@
+{
+  "$schema": "symbiote-config-v3",
+  "$version": "3.0.0",
+  "$updated": "2026-06-13",
+  "meta": {
+    "owner": "User Name",
+    "hostname": "your-machine-name",
+    "os": "Your OS (e.g., Kali Linux / Ubuntu)"
+  },
+  "runtime": {
+    "apiPort": 3006,
+    "webPort": 3011,
+    "webHost": "0.0.0.0",
+    "temperature": 0.5,
+    "maxTokens": 4096,
+    "maxIterations": 50,
+    "maxContextTokens": 120000,
+    "sessionsDir": "/opt/ava/mach6/.sessions"
+  },
+  "providers": {
+    "openrouter": {
+      "apiKey": "${OPENROUTER_API_KEY}",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "model": "google/gemma-4-31b-it:free",
+      "timeoutMs": 300000
+    },
+    "ollama": {
+      "baseUrl": "http://127.0.0.1:11434",
+      "model": "qwen2.5:3b",
+      "timeoutMs": 120000
+    },
+    "github-copilot": {
+      "model": "claude-opus-4.7",
+      "timeoutMs": 300000
+    }
+  },
+  "ai": {
+    "defaultProvider": "openrouter",
+    "defaultModel": "google/gemma-4-31b-it:free",
+    "fallbackProviders": ["openrouter", "ollama"],
+    "hektor": {
+      "type": "C++ vector database",
+      "daemon": "hektor-daemon.service"
+    },
+    "comb": {
+      "type": "lossless memory persistence",
+      "pypi": "comb-db"
+    }
+  },
+  "communication": {
+    "discord": {
+      "enabled": true,
+      "token": "${DISCORD_BOT_TOKEN}",
+      "botId": "YOUR_BOT_ID"
+    },
+    "whatsapp": {
+      "enabled": true,
+      "phoneNumber": "YOUR_PHONE_NUMBER",
+      "authDir": "/home/user/.mach6/credentials/whatsapp/default"
+    }
+  },
+  "mcpServers": {
+    "meridian": {
+      "enabled": true,
+      "command": ["python3", "/opt/meridian/meridian.py"],
+      "cwd": "/opt/meridian"
+    }
+  },
+  "paths": {
+    "mach6": "/opt/ava/mach6",
+    "worxpace": "/home/user/workspace",
+    "credentials": "/home/user/.mach6/credentials",
+    "vault": "/home/user/workspace/.ava-private/.credentials/vault.aes256"
+  },
+  "sudo": {
+    "password": "${SUDO_PASSWORD}",
+    "policy": "non-destructive"
+  }
+}
