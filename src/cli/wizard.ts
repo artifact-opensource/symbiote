@@ -595,9 +595,11 @@ class Wizard {
         'gemini': {},
         'ollama': { baseUrl: 'http://127.0.0.1:11434' },
         'groq': { baseUrl: 'https://api.groq.com/openai' },
+        'openrouter': { baseUrl: 'https://openrouter.ai/api/v1' },
         'xai': {},
         'gladius': { baseUrl: 'http://127.0.0.1:8741' },
       },
+      // NOTE: The wizard writes OPENROUTER_API_KEY to .env when the provider is configured.
       ownerIds: config.ownerIds,
       apiPort: config.apiPort,
     };
@@ -677,6 +679,15 @@ class Wizard {
       lines.push(`GEMINI_API_KEY=${config.apiKey}`);
     } else {
       lines.push('# GEMINI_API_KEY=');
+    }
+
+    lines.push('');
+
+    // OpenRouter
+    if (config.provider === 'openrouter' && config.apiKey) {
+      lines.push(`OPENROUTER_API_KEY=${config.apiKey}`);
+    } else {
+      lines.push('# OPENROUTER_API_KEY=');
     }
 
     lines.push('');
