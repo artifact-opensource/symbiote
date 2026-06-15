@@ -61,7 +61,7 @@ export interface SymbioteConfig {
 const DEFAULT_CONFIG: SymbioteConfig = {
   providers: {},
   defaultProvider: 'openrouter',
-  defaultModel: 'qwen/qwen3.6-plus:free',
+  defaultModel: 'openrouter/owl-alpha',
   maxTokens: 8192,
   temperature: 0.7,
   maxIterations: 100,
