@@ -5,8 +5,8 @@ After=network.target
 [Service]
 Type=simple
 User=adam
-WorkingDirectory=/home/adam/workspace/symbiote/symbiote-core
-ExecStart=/usr/bin/node dist/daemon/unified-daemon.js
+WorkingDirectory=/opt/ava/mach6/mach6-core
+ExecStart=/usr/bin/node /opt/ava/mach6/mach6-core/dist/daemon/unified-daemon.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production

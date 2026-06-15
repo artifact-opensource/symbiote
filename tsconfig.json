@@ -1,9 +1,9 @@
 {
   "compilerOptions": {
-    "target": "ES3.02",
+    "target": "ES2022",
     "module": "Node16",
     "moduleResolution": "Node16",
-    "lib": ["ES3.02"],
+    "lib": ["ES2022"],
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,

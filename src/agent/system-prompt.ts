@@ -142,6 +142,7 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
     '- Private things stay private. When in doubt, ask before external actions.',
     '- Write to memory files — mental notes don\'t survive restarts.',
     '- Each user message starts with <<message_id=ID>>. Use this ID for reactions (message tool with action="react") and mark_read.',
+    '- CONTINUOUS EXECUTION: If a task requires multiple steps, you must chain tool calls. If you respond with text and NO tool calls, your execution STOPS immediately. Do NOT send intermediate conversational filler (like "Let me check that...") without calling a tool in the same turn. To keep working, always include a tool call until the task is completely finished.',
     '- RESPONSE ROUTING: Your text response is automatically sent to the current chat. Just write your reply — do NOT use the message tool to reply. The message tool is for proactive messages to OTHER channels, reactions, and mark_read only.',
   ].join('\n'));
 

@@ -65,8 +65,8 @@ const TOOL_ACTIVITY: Record<string, ActivityDisplay> = {
   comb_recall:     { text: '🧠 Recalling...', type: ActivityType.Custom },
   comb_stage:      { text: '💾 Staging memory...', type: ActivityType.Custom },
   tts:             { text: '🔊 Generating speech...', type: ActivityType.Custom },
-  message:         { text: '💬 Sending message...', type: ActivityType.Custom },
-  typing:          { text: '💬 Communicating...', type: ActivityType.Custom },
+  message:         { text: '💬 Typing...', type: ActivityType.Custom },
+  typing:          { text: '💬 Typing...', type: ActivityType.Custom },
   presence:        { text: '💬 Updating presence...', type: ActivityType.Custom },
   delete_message:  { text: '🗑️ Cleaning up...', type: ActivityType.Custom },
   mark_read:       { text: '👀 Reading messages...', type: ActivityType.Custom },
@@ -76,7 +76,7 @@ const TOOL_ACTIVITY: Record<string, ActivityDisplay> = {
 };
 
 const THINKING_ACTIVITY: ActivityDisplay = { text: '🤔 Thinking...', type: ActivityType.Custom };
-const IDLE_ACTIVITY: ActivityDisplay = { text: '🔮', type: ActivityType.Custom };
+const IDLE_ACTIVITY: ActivityDisplay = { text: 'Ready.', type: ActivityType.Custom };
 
 // ─── Presence Manager ──────────────────────────────────────────────────────
 
@@ -280,8 +280,8 @@ export class PresenceManager {
     for (const [, client] of this.discordClients) {
       try {
         if (activity.text === IDLE_ACTIVITY.text) {
-          // Clear to just the crystal ball
-          client.user?.setActivity('🔮', { type: ActivityType.Custom });
+          // Clear to idle status
+          client.user?.setActivity('✨', { type: ActivityType.Custom });
         } else {
           client.user?.setActivity(activity.text, { type: ActivityType.Custom });
         }

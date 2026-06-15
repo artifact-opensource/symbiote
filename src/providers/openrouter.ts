@@ -30,7 +30,7 @@ function convertMessages(messages: Message[]): unknown[] {
       pendingToolCallIds = new Set(validToolCalls.map(tc => tc.id));
       out.push({
         role: 'assistant',
-        content,
+        content: content || null,
         tool_calls: validToolCalls.map(tc => ({
           id: tc.id,
           type: 'function',
@@ -42,6 +42,14 @@ function convertMessages(messages: Message[]): unknown[] {
     pendingToolCallIds.clear();
     out.push({ role: msg.role, content: typeof msg.content === 'string' ? msg.content : msg.content.map(b => b.text ?? '').join('') });
   }
+  
+  // OpenRouter requires at least one message with content. 
+  // If the last message is an assistant tool call with no content, 
+  // some models may reject it. We ensure the array is not empty.
+  if (out.length === 0) {
+    out.push({ role: 'user', content: 'Hello' });
+  }
+  
   return out;
 }
 

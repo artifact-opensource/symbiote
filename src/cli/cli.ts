@@ -262,6 +262,23 @@ async function cmdInstall() {
 async function cmdStart() {
   console.log();
   
+  // ── Pre-flight Environment Sync ──────────────────────────────────────
+  // Ensure tokens are synced from master /opt/ava/.env to workspace
+  const masterEnv = '/opt/ava/.env';
+  const localEnv = path.join(process.cwd(), '.env');
+  if (fs.existsSync(masterEnv)) {
+    try {
+      const masterContent = fs.readFileSync(masterEnv, 'utf-8');
+      if (!fs.existsSync(localEnv) || fs.readFileSync(localEnv, 'utf-8') !== masterContent) {
+        console.log(info('Syncing environment tokens from master...'));
+        fs.writeFileSync(localEnv, masterContent, 'utf-8');
+        console.log(ok('Environment synced.'));
+      }
+    } catch (err) {
+      console.log(warn(`Env sync failed: ${err instanceof Error ? err.message : err}`));
+    }
+  }
+
   const { running, pid } = isRunning();
   if (running) {
     console.log(warn(`Daemon is already running (PID: ${pid})`));
@@ -269,6 +286,7 @@ async function cmdStart() {
     console.log();
     return;
   }
+
 
   const configPath = getConfigPath();
   if (!configPath) {

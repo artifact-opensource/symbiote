@@ -60,11 +60,11 @@ export interface SymbioteConfig {
 
 const DEFAULT_CONFIG: SymbioteConfig = {
   providers: {},
-  defaultProvider: 'github-copilot',
-  defaultModel: 'claude-sonnet-4',
+  defaultProvider: 'openrouter',
+  defaultModel: 'qwen/qwen3.6-plus:free',
   maxTokens: 8192,
   temperature: 0.7,
-  maxIterations: 50,
+  maxIterations: 100,
   workspace: process.cwd(),
 };
 
@@ -91,6 +91,9 @@ function resolveEnvKeys(config: SymbioteConfig): SymbioteConfig {
   // Inject API keys from environment if not in config
   if (!config.providers.anthropic?.apiKey && process.env.ANTHROPIC_API_KEY) {
     config.providers.anthropic = { ...config.providers.anthropic, apiKey: process.env.ANTHROPIC_API_KEY };
+  }
+  if (!config.providers.openrouter?.apiKey && process.env.OPENROUTER_API_KEY) {
+    config.providers.openrouter = { ...config.providers.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
   }
   // OpenAI direct API removed — we route through GitHub Copilot
   return config;

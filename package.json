@@ -63,9 +63,11 @@
   },
   "dependencies": {
     "@google/genai": "^1.44.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
-    "discord.js": "^14.25.1",
+    "discord.js": "^14.26.4",
     "dotenv": "^17.3.1",
+    "express": "^5.2.1",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0"
   },

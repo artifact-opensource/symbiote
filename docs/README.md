@@ -23,13 +23,8 @@ No Docker. No Redis. No cloud dependencies. **Your machine, your data, your keys
 
 ## Quick Links
 
-- [Installation →](getting-started/installation.md)
-- [Quick Start →](getting-started/quick-start.md)
-- [Setup Wizard →](getting-started/wizard.md)
-- [Architecture →](core/architecture.md)
-- [Providers →](providers/overview.md)
-- [GitHub](https://github.com/Artifact-Virtual/symbiote)
-- [npm](https://www.npmjs.com/package/symbiote-core)
+- **MCP / xMCP:** MCP server exposes a local registry and tool endpoints at `http://localhost:3010` (default). xMCP provides reverse-binding for outbound platform access at `http://localhost:3011`.
+ 
 
 ## What You Can Build
 

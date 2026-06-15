@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { createServer, Server } from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
-import { logger } from './utils/logger';
+
 
 /**
  * Symbiote Unified Daemon (Symbiote 3.0)
@@ -21,37 +21,50 @@ interface ServiceConfig {
 
 class UnifiedDaemon {
     private services: Map<string, { process: any, config: ServiceConfig }> = new Map();
-    private bootSequence: string[] = ['hektor', 'comb', 'pulse', 'gateway'];
+    private bootSequence: string[] = ['hektor', 'mcp', 'xmcp', 'comb', 'pulse', 'gateway'];
 
     private serviceDefinitions: Record<string, ServiceConfig> = {
         hektor: {
             name: 'HEKTOR',
             command: 'python3',
-            args: ['.ava-memory/ava_memory_fast.py', 'daemon'],
+            args: ['/opt/ava/.ava-memory/ava_memory_fast.py', 'daemon'],
             critical: true,
+        },
+        mcp: {
+            name: 'MCP',
+            command: 'node',
+            args: ['/opt/ava/mach6/mach6-core/dist/daemon/mcp-server.js'],
+            env: { MCP_PORT: '3012' },
+            critical: false,
+        },
+        xmcp: {
+            name: 'xMCP',
+            command: 'node',
+            args: ['/opt/ava/mach6/mach6-core/dist/daemon/xmcp-server.js'],
+            critical: false,
         },
         comb: {
             name: 'COMB',
             command: 'node',
-            args: ['dist/comb-daemon.js'],
+            args: ['/opt/ava/mach6/mach6-core/dist/daemon/comb-daemon.js'],
             critical: true,
         },
         pulse: {
             name: 'PULSE',
             command: 'node',
-            args: ['dist/pulse-monitor.js'],
+            args: ['/opt/ava/mach6/mach6-core/dist/daemon/pulse-monitor.js'],
             critical: false,
         },
         gateway: {
             name: 'Gateway',
             command: 'node',
-            args: ['dist/gateway.js'],
+            args: ['/opt/ava/mach6/mach6-core/dist/gateway/daemon.js', '--config=/opt/ava/mach6/symbiote.json'],
             critical: true,
         }
     };
 
     async boot() {
-        logger.info('Symbiote 3.0: Starting Semantic Initialization sequence...');
+        console.info('Symbiote 3.0: Starting Semantic Initialization sequence...');
         
         for (const serviceId of this.bootSequence) {
             const config = this.serviceDefinitions[serviceId];
@@ -59,17 +72,17 @@ class UnifiedDaemon {
 
             try {
                 await this.startService(serviceId, config);
-                logger.info(`[Boot] ${config.name} initialized successfully.`);
+                console.info(`[Boot] ${config.name} initialized successfully.`);
             } catch (e) {
                 if (config.critical) {
-                    logger.error(`[Boot] Critical service ${config.name} failed to start. Aborting.`);
+                    console.error(`[Boot] Critical service ${config.name} failed to start. Aborting.`);
                     process.exit(1);
                 }
-                logger.warn(`[Boot] Non-critical service ${config.name} failed. Continuing.`);
+                console.warn(`[Boot] Non-critical service ${config.name} failed. Continuing.`);
             }
         }
         
-        logger.info('Symbiote 3.0: All systems operational. VDB-first boot complete.');
+        console.info('Symbiote 3.0: All systems operational. VDB-first boot complete.');
     }
 
     private async startService(id: string, config: ServiceConfig): Promise<void> {
@@ -92,9 +105,9 @@ class UnifiedDaemon {
     }
 
     async shutdown() {
-        logger.info('Shutting down Unified Daemon...');
+        console.info('Shutting down Unified Daemon...');
         for (const [id, service] of this.services) {
-            logger.info(`Stopping ${service.config.name}...`);
+            console.info(`Stopping ${service.config.name}...`);
             service.process.kill();
         }
         process.exit(0);
