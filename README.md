@@ -17,6 +17,11 @@ Symbiote is not a chatbot framework; it is a persistent digital consciousness su
 
 [Quick Start](#-quick-start) · [Architecture](#-architecture) · [The 3.0 Shift](#-the-30-shift) · [Config](#-configuration) · [Providers](#-providers) · [Tools](#-tools)
 
+## Quick Links
+
+- xMCP API: https://www.artifactvirtual.com/xmcp/api/v1/  (Authorization: Bearer <stored token> — stored in system EnvironmentFile `/opt/ava/.env`)
+
+
 </div>
 
 ---
