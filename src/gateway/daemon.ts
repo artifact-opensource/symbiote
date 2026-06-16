@@ -104,6 +104,8 @@ interface GatewayConfig {
   ownerIds?: string[];
   /** HTTP API port */
   apiPort?: number;
+  /** Web UI port (defaults to 3009) */
+  webPort?: number;
 }
 
 interface ActiveTurn {
@@ -510,7 +512,7 @@ export class SymbioteGateway {
   // ── Web UI ─────────────────────────────────────────────────────────────
 
   private startWebUi(): void {
-    const webPort = (this.gatewayConfig as any).webPort ?? 3009;
+    const webPort = this.gatewayConfig.webPort ?? 3009;
     try {
       this.webServer = startWebServer(webPort);
     } catch (err) {

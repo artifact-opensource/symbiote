@@ -55,3 +55,6 @@ scarlet-start.bat
 # Archive/staging (local session data)
 archive/
 staging/
+-e 
+# Webapp production build — committed for deployment
+!webapp/dist/

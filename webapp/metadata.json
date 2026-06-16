@@ -1,0 +1,6 @@
+{
+  "name": "Symbiote",
+  "description": "An immersive, aesthetic, and highly modular AI chat interface for the Symbiote system, featuring dynamic plugin environments and advanced customization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

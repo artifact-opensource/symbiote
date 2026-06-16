@@ -1,0 +1,11 @@
+# xmcp/.gitignore
+
+# API keys — never commit
+xmcp_api_key
+
+# Node modules
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -161,13 +161,51 @@ Symbiote provides a comprehensive toolkit for autonomous operation:
 
 ## 🖥 Web UI & CLI
 
-**Web UI:** Accessible at `http://localhost:3006`. Features real-time tool visualization, session management, and live config tuning.
+### Symbiote Dashboard (New)
+**Location:** `webapp/` directory
+**Port:** `3010`
+**Access:** `http://localhost:3010`
 
-**CLI:** 
+The new Symbiote Dashboard is a full React-based web application featuring:
+- **Live System Telemetry** — Real-time CPU, RAM, uptime, network monitoring
+- **Neural Art Generation** — AI image generation via Pollinations.ai (free) + Gemini fallback
+- **Plugin System** — Modular extensions with guided plugin design sessions
+- **Chat Interface ("Symbiant")** — Real-time chat with the Mach6 gateway
+
+```bash
+cd webapp
+npm install && npm run build
+NODE_ENV=production node dist/server.cjs
+```
+
+See [webapp/README.md](webapp/README.md) for full documentation.
+
+### Legacy Web UI (Deprecated)
+The old static web UI in `web/` has been deprecated. Port 3009 is reserved for xmcp.
+
+### CLI
 - `symbiote repl`: Interactive agent loop.
 - `/model <name>`: Switch models mid-session.
 - `/provider <name>`: Switch providers mid-session.
 - `/spawn <task>`: Delegate to a sub-agent.
+
+---
+
+## 🔌 XMCP — Extended Model Context Protocol
+
+**Location:** `xmcp/` directory
+
+XMCP is the extended MCP server and bridge system for the Symbiote ecosystem. It provides standardized tool and resource exposure to AI agents.
+
+- `xmcp-server.js` — Tool/resource registry and invocation
+- `xmcp-proxy.js` — Request routing proxy
+- `mcp-server.js` — Core MCP protocol implementation
+- `mcp-bridge.js` — Connects MCP clients to Mach6 tools
+- `mcp-sse-bridge.cjs` — SSE transport for MCP
+
+See [xmcp/README.md](xmcp/README.md) for full documentation.
+
+**Port:** 3009 (reserved)
 
 ---
 
