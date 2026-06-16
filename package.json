@@ -1,82 +1,36 @@
 {
-  "name": "symbiote-core",
-  "version": "3.0.0",
-  "description": "Symbiote — Multi-channel AI agent framework. Persistent daemon, real-time interrupts, tool execution. Runs on a laptop.",
+  "name": "react-example",
+  "private": true,
+  "version": "0.0.0",
   "type": "module",
-  "main": "dist/index.js",
-  "bin": {
-    "symbiote": "dist/index.js"
-  },
-  "files": [
-    "dist",
-    "web",
-    "README.md",
-    "LICENSE",
-    "symbiote.example.json",
-    ".env.example"
-  ],
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/gateway/daemon.js --config=symbiote.json",
-    "dev": "tsc && node dist/index.js",
-    "init": "tsc && node dist/cli/wizard.js"
-  },
-  "keywords": [
-    "ai-agent",
-    "ai-agent-framework",
-    "llm-agent",
-    "autonomous-agent",
-    "agentic-ai",
-    "tool-calling",
-    "multi-channel",
-    "discord-bot",
-    "whatsapp-bot",
-    "chatbot",
-    "llm",
-    "groq",
-    "openai",
-    "anthropic",
-    "claude",
-    "grok",
-    "ollama",
-    "github-copilot",
-    "mcp",
-    "model-context-protocol",
-    "typescript",
-    "nodejs",
-    "local-first",
-    "self-hosted",
-    "open-source"
-  ],
-  "author": "Artifact Virtual <hello@artifactvirtual.com> (https://artifactvirtual.com)",
-  "license": "MIT",
-  "homepage": "https://github.com/Artifact-Virtual/symbiote#readme",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Artifact-Virtual/symbiote.git"
-  },
-  "bugs": {
-    "url": "https://github.com/Artifact-Virtual/symbiote/issues"
-  },
-  "engines": {
-    "node": ">=20.0.0"
+    "dev": "tsx server.ts",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "start": "node dist/server.cjs",
+    "clean": "rm -rf dist server.js",
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^1.44.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
-    "discord.js": "^14.26.4",
-    "dotenv": "^17.3.1",
-    "express": "^5.2.1",
-    "qrcode": "^1.5.4",
-    "qrcode-terminal": "^0.12.0"
+    "@google/genai": "^2.4.0",
+    "@tailwindcss/vite": "^4.1.14",
+    "@vitejs/plugin-react": "^5.0.4",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "lucide-react": "^0.546.0",
+    "motion": "^12.23.24",
+    "react": "^19.0.1",
+    "react-dom": "^19.0.1",
+    "react-markdown": "^10.1.0",
+    "vite": "^6.2.3"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "@types/qrcode": "^1.5.6",
-    "typescript": "^5.7.0"
-  },
-  "overrides": {
-    "undici": ">=6.23.0"
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.14.0",
+    "autoprefixer": "^10.4.21",
+    "esbuild": "^0.25.0",
+    "tailwindcss": "^4.1.14",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.3"
   }
 }
