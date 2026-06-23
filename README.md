@@ -1,10 +1,11 @@
 <div align="center">
 
-# Symbiote
+# SYMBIOTE
+> APEX
 
 **Build persistent AI agents. Single process. Any machine.**
 
-![](https://img.shields.io/badge/Version-2.0.0-4B0082?style=for-the-badge&labelColor=0D1117&logo=git&logoColor=white)
+![](https://img.shields.io/badge/Version-3.0.0-4B0082?style=for-the-badge&labelColor=0D1117&logo=git&logoColor=white)
 ![](https://img.shields.io/badge/Tools-38-4B0082?style=for-the-badge&labelColor=0D1117&logo=hammer&logoColor=white)
 ![](https://img.shields.io/badge/Providers-8-4B0082?style=for-the-badge&labelColor=0D1117&logo=openai&logoColor=white)
 ![](https://img.shields.io/badge/TypeScript-18K_LOC-4B0082?style=for-the-badge&labelColor=0D1117&logo=typescript&logoColor=white)
@@ -430,7 +431,6 @@ MIT — see [LICENSE](LICENSE)
 <div align="center">
 
 **Built by [Artifact Virtual](https://github.com/Artifact-Virtual)**
-
-*Your machine. Your data. Your keys.*
+> commit.
 
 </div>
