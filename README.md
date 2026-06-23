@@ -200,7 +200,7 @@ Configure failover chains in `mach6.json`:
 ### Memory
 | Tool | Description |
 |------|-------------|
-| `memory_search` | Hybrid search across all indexed memory (HEKTOR) |
+| `memory_search` | Hybrid search across all indexed memory (VDB) |
 | `memory_recall` | Search persistent memory with source filtering |
 | `memory_ingest` | Ingest conversation history into persistent memory |
 | `memory_stats` | Show memory database statistics |
