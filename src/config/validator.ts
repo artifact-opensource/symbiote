@@ -19,7 +19,7 @@ export function validateConfig(config: SymbioteConfig): ValidationError[] {
 
   // Check provider config
   if (!config.defaultProvider) {
-    issues.push({ field: 'defaultProvider', message: 'No default provider set', severity: 'error', suggestion: 'Set defaultProvider to one of: github-copilot, gladius' });
+    issues.push({ field: 'defaultProvider', message: 'No default provider set', severity: 'error', suggestion: 'Set defaultProvider to one of: anthropic, github-copilot, openai, ollama, groq, gladius, nvidia, gemini, xai' });
   }
 
   if (!config.defaultModel) {

@@ -19,6 +19,10 @@
     "github-copilot": {},
     "gladius": {
       "baseUrl": "http://127.0.0.1:8741"
+    },
+    "nvidia": {
+      "baseUrl": "https://integrate.api.nvidia.com",
+      "model": "meta/llama-4-maverick-17b-128e-instruct"
     }
   },
   "ownerIds": [],

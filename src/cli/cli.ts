@@ -440,7 +440,7 @@ async function cmdConfigure() {
   console.log();
 
   // Provider
-  const providers = ['anthropic', 'github-copilot', 'openai', 'ollama', 'groq', 'gladius'];
+  const providers = ['anthropic', 'github-copilot', 'openai', 'ollama', 'groq', 'gladius', 'nvidia', 'gemini', 'xai'];
   console.log(`  ${palette.dim}Available providers: ${providers.join(', ')}${palette.reset}`);
   const provider = await ask('Default provider', config.defaultProvider);
   config.defaultProvider = provider;

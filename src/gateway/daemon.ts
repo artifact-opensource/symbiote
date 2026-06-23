@@ -123,6 +123,8 @@ interface ActiveTurn {
   adapterId: string;
 }
 
+import { nvidiaProvider } from '../providers/nvidia.js';
+
 // ─── Provider Registry ─────────────────────────────────────────────────────
 
 const PROVIDERS = new Map<string, Provider>([
@@ -132,6 +134,7 @@ const PROVIDERS = new Map<string, Provider>([
   ['gemini', geminiProvider],
   ['gladius', gladiusProvider],
   ['groq', groqProvider],
+  ['nvidia', nvidiaProvider],
   ['ollama', ollamaProvider],
   ['xai', xaiProvider],
 ]);
