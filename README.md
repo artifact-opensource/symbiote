@@ -14,8 +14,6 @@
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-green.svg?style=for-the-badge&labelColor=0D1117&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![Platform](https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=for-the-badge&labelColor=0D1117&logo=windows&logoColor=white)]()
 
-A persistent daemon that connects messaging platforms, LLM providers, and tool execution into a single agentic loop. Embedded persistent memory. Real-time interrupts. Full web automation. Voice pipeline. Session-to-session continuity.
-
 **No Docker. No Redis. No cloud dependencies. Your machine. Your data. Your keys.**
 
 [Quick Start](#-quick-start) · [Architecture](#-architecture) · [Memory](#-persistent-memory) · [Providers](#-providers) · [Tools](#-tools) · [Web UI](#-web-ui)
