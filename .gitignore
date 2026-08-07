@@ -58,3 +58,17 @@ staging/
 -e 
 # Webapp production build — committed for deployment
 !webapp/dist/
+
+# Runtime data and memory
+.ava-memory/
+.vdb/
+.mcp/
+.pulse/
+.vendored-libs/
+mach6-core/
+
+# Backups and old versions
+*.bak
+webapp_old/
+webapp_old_backup_*/
+.archived-webapp/
