@@ -19,6 +19,7 @@ import { groqProvider } from './providers/groq.js';
 import { ollamaProvider } from './providers/ollama.js';
 import { xaiProvider } from './providers/xai.js';
 import { freeaiProvider } from './providers/freeai.js';
+import { qwenProvider } from './providers/qwen.js';
 import type { Provider, ProviderConfig } from './providers/types.js';
 import { ToolRegistry } from './tools/registry.js';
 import { readTool } from './tools/builtin/read.js';
@@ -53,6 +54,7 @@ const providers = new Map<string, Provider>([
   ['ollama', ollamaProvider],
   ['xai', xaiProvider],
   ['free-ai', freeaiProvider],
+  ['qwen', qwenProvider],
 ]);
 
 // ─── Main ───

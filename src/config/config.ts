@@ -60,12 +60,16 @@ export interface SymbioteConfig {
 
 const DEFAULT_CONFIG: SymbioteConfig = {
   providers: {},
-  defaultProvider: 'openrouter',
-  defaultModel: 'openrouter/owl-alpha',
+  providers: {
+    qwen: { baseUrl: 'https://api.qwen.ai', model: 'qwen3.6' },
+  },
+  defaultProvider: 'free-ai',
+  defaultModel: 'poolside/laguna-s-2.1:free',
   maxTokens: 8192,
-  temperature: 0.7,
-  maxIterations: 100,
+  temperature: 0.5,
+  maxIterations: 50,
   workspace: process.cwd(),
+  fallbackProviders: ['openrouter', 'ollama', 'gemini'],
 };
 
 /**
