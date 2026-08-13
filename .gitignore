@@ -72,3 +72,4 @@ mach6-core/
 webapp_old/
 webapp_old_backup_*/
 .archived-webapp/
+.env.archive

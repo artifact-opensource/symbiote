@@ -64,6 +64,7 @@ import { groqProvider } from '../providers/groq.js';
 import { ollamaProvider } from '../providers/ollama.js';
 import { xaiProvider } from '../providers/xai.js';
 import { openrouterProvider } from '../providers/openrouter.js';
+import { freeaiProvider } from '../providers/freeai.js';
 import type { BusEnvelope, ChannelPolicy, OutboundMessage } from '../channels/types.js';
 import { formatForChannel } from '../channels/formatter.js';
 import { createSandboxedRegistry, type SessionContext } from '../tools/sandbox.js';
@@ -129,6 +130,7 @@ const PROVIDERS = new Map<string, Provider>([
   ['ollama', ollamaProvider],
   ['xai', xaiProvider],
   ['openrouter', openrouterProvider],
+  ['free-ai', freeaiProvider],
 ]);
 
 // ─── Gateway ───────────────────────────────────────────────────────────────
