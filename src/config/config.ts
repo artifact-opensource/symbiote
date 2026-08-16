@@ -64,7 +64,7 @@ const DEFAULT_CONFIG: SymbioteConfig = {
     qwen: { baseUrl: 'https://api.qwen.ai', model: 'qwen3.6' },
   },
   defaultProvider: 'free-ai',
-  defaultModel: 'poolside/laguna-s-2.1:free',
+  defaultModel: 'bbl/claude-4.7-opus',
   maxTokens: 8192,
   temperature: 0.5,
   maxIterations: 50,
