@@ -131,8 +131,10 @@ export class InboundRouter {
     // 3. Policy check (mention-only protocol)
     const policy = this.getPolicy(source.channelType);
     if (!this.checkPolicy(policy, source)) {
-      if (source.chatType === 'group') {
-        console.log(`[router] Group message from ${source.chatId} dropped by policy (no @mention match). mentions=${JSON.stringify(source.mentions ?? [])}, selfId=${policy.selfId}, aliases=${JSON.stringify(policy.selfIdAliases ?? [])}`);
+      if (source.chatType === 'group' || source.chatType === 'channel' || source.chatType === 'thread') {
+        console.log(`[router] ${source.chatType} message from ${source.chatId} dropped by policy (groupPolicy=${policy.groupPolicy}, owner=${this.isOwner(policy, source.senderId)}, no @mention match). mentions=${JSON.stringify(source.mentions ?? [])}, selfId=${policy.selfId}, aliases=${JSON.stringify(policy.selfIdAliases ?? [])}`);
+      } else {
+        console.log(`[router] ${source.chatType} message from ${source.chatId} dropped by policy (dmPolicy=${policy.dmPolicy})`);
       }
       return false;
     }
@@ -173,13 +175,16 @@ export class InboundRouter {
   }
 
   /**
-   * Mention-Only Protocol (Day 21):
+   * Mention-Only Protocol (Day 21), extended to honor groupPolicy:
    * 
    * DMs: allowed senders get through (allowlist) or everyone (open)
-   * Groups/Channels: message MUST contain @mention of this bot's selfId
-   * 
-   * That's it. No sibling yield. No groupPolicy modes. No requireMention toggle.
-   * One rule: @mention me or I don't respond.
+   * Groups/Channels/Threads:
+   *   - Owner always gets through (matches DM owner-bypass behavior)
+   *   - Otherwise governed by groupPolicy: 'open' (no mention needed),
+   *     'allowlist' (allowedSenders match), 'mention-only' (default —
+   *     requires @mention of selfId), 'deny' (never)
+   *   - @mention of selfId always works as an override, regardless of
+   *     groupPolicy, unless groupPolicy is 'deny'
    */
   private checkPolicy(policy: ChannelPolicy, source: ChannelSource): boolean {
     // Ignored channels: completely blocked
@@ -195,9 +200,18 @@ export class InboundRouter {
       }
     }
 
-    // Groups, Channels, Threads — ONLY respond if @mentioned
+    // Groups, Channels, Threads — owner bypass, then honor groupPolicy
     if (source.chatType === 'group' || source.chatType === 'channel' || source.chatType === 'thread') {
-      return this.isMentioned(policy, source);
+      if (policy.groupPolicy === 'deny') return false;
+      if (this.isOwner(policy, source.senderId)) return true;
+      if (this.isMentioned(policy, source)) return true;
+
+      switch (policy.groupPolicy) {
+        case 'open': return true;
+        case 'allowlist': return jidInList(source.senderId, policy.allowedSenders ?? []);
+        case 'mention-only': return false; // already checked isMentioned above
+        default: return false;
+      }
     }
 
     return false;

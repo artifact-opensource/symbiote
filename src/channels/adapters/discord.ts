@@ -175,8 +175,20 @@ export class DiscordAdapter extends BaseAdapter {
     // Sibling bots ARE allowed through — the router's @mention check handles loop prevention
     if (msg.author.bot && !this.siblingBotIds.has(msg.author.id)) return;
 
+    // Temporary diagnostic log to confirm inbound Discord events reach the adapter.
+    console.log(
+      `[${this.id}] inbound message: guild=${msg.guildId ?? 'dm'} channel=${msg.channel.id} ` +
+      `author=${msg.author.id} bot=${msg.author.bot} chatType=${this.resolveChatType(msg.channel)} ` +
+      `contentLen=${msg.content?.length ?? 0} mentions=${msg.mentions.users.size}`,
+    );
+
     const source = this.buildSource(msg);
     const payload = this.buildPayload(msg);
+
+    console.log(
+      `[${this.id}] routed payload: chatId=${source.chatId} sender=${source.senderId} ` +
+      `chatType=${source.chatType} text=${payload.text ? 'yes' : 'no'} media=${payload.media?.length ?? 0}`,
+    );
 
     this.emit(source, payload, msg.id);
   }

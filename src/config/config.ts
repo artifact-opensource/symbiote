@@ -60,16 +60,12 @@ export interface SymbioteConfig {
 
 const DEFAULT_CONFIG: SymbioteConfig = {
   providers: {},
-  providers: {
-    qwen: { baseUrl: 'https://api.qwen.ai', model: 'qwen3.6' },
-  },
   defaultProvider: 'free-ai',
-  defaultModel: 'bbl/claude-4.7-opus',
+  defaultModel: 'glm/glm-5.2',
   maxTokens: 8192,
-  temperature: 0.5,
-  maxIterations: 50,
+  temperature: 0.7,
+  maxIterations: 100,
   workspace: process.cwd(),
-  fallbackProviders: ['openrouter', 'ollama', 'gemini'],
 };
 
 /**
@@ -93,6 +89,9 @@ function resolveEnvKeys(config: SymbioteConfig): SymbioteConfig {
   config = resolveEnvVars(config);
 
   // Inject API keys from environment if not in config
+  if (!config.providers['free-ai']?.apiKey && process.env.FREEAI_API_KEY) {
+    config.providers['free-ai'] = { ...config.providers['free-ai'], apiKey: process.env.FREEAI_API_KEY };
+  }
   if (!config.providers.anthropic?.apiKey && process.env.ANTHROPIC_API_KEY) {
     config.providers.anthropic = { ...config.providers.anthropic, apiKey: process.env.ANTHROPIC_API_KEY };
   }
@@ -143,9 +142,11 @@ export function loadConfig(configPath?: string): SymbioteConfig {
       );
       const parsed = JSON.parse(stripped);
       const normalizedWorkspace = pickWorkspace(parsed.workspace, DEFAULT_CONFIG.workspace);
+      const runtimeBlock = parsed.runtime ?? {};
       return resolveEnvKeys({
         ...DEFAULT_CONFIG,
         ...parsed,
+        ...runtimeBlock,
         ...normalizedWorkspace,
       });
     } catch { continue; }

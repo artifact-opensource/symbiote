@@ -1385,27 +1385,36 @@ export async function startGateway(configPath?: string): Promise<SymbioteGateway
   const config = loadConfig(configPath);
 
   // Build gateway config from environment + symbiote.json
+  // NOTE: Discord/WhatsApp settings live under the `communication` block in
+  // symbiote.json (see communication.discord / communication.whatsapp), NOT
+  // top-level `discord`/`whatsapp` keys. Fall back to top-level for backward
+  // compatibility with older configs that didn't nest under `communication`.
+  const communication = (config as any).communication ?? {};
+  const discordCfg = communication.discord ?? (config as any).discord ?? {};
+  const whatsappCfg = communication.whatsapp ?? (config as any).whatsapp ?? {};
+  const discordExtraCfg = (config as any).discordExtra ?? communication.discordExtra ?? [];
+
   const gatewayConfig: GatewayConfig = {
     configPath,
     ownerIds: (config as any).ownerIds ?? [],
     channels: {
       discord: {
-        enabled: !!process.env.DISCORD_BOT_TOKEN || !!(config as any).discord?.token,
-        token: process.env.DISCORD_BOT_TOKEN ?? (config as any).discord?.token ?? '',
-        botId: (config as any).discord?.botId,
-        adapterId: (config as any).discord?.adapterId ?? 'discord-main',
-        policy: (config as any).discord?.policy,
+        enabled: (discordCfg.enabled ?? true) && (!!process.env.DISCORD_BOT_TOKEN || !!discordCfg.token),
+        token: process.env.DISCORD_BOT_TOKEN ?? discordCfg.token ?? '',
+        botId: discordCfg.botId ?? process.env.DISCORD_CLIENT_ID,
+        adapterId: discordCfg.adapterId ?? 'discord-main',
+        policy: discordCfg.policy,
       },
       whatsapp: {
-        enabled: !!(config as any).whatsapp?.enabled,
-        authDir: (config as any).whatsapp?.authDir ?? path.join(os.homedir(), '.symbiote', 'whatsapp-auth'),
-        phoneNumber: (config as any).whatsapp?.phoneNumber,
-        autoRead: (config as any).whatsapp?.autoRead ?? true,
-        policy: (config as any).whatsapp?.policy,
+        enabled: !!whatsappCfg.enabled,
+        authDir: whatsappCfg.authDir ?? path.join(os.homedir(), '.symbiote', 'whatsapp-auth'),
+        phoneNumber: whatsappCfg.phoneNumber,
+        autoRead: whatsappCfg.autoRead ?? true,
+        policy: whatsappCfg.policy,
       },
     },
     // Additional Discord bot instances
-    discordExtra: ((config as any).discordExtra ?? []).map((extra: any) => ({
+    discordExtra: (discordExtraCfg ?? []).map((extra: any) => ({
       enabled: extra.enabled !== false,
       token: extra.token ?? '',
       botId: extra.botId,

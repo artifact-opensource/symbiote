@@ -73,3 +73,4 @@ webapp_old/
 webapp_old_backup_*/
 .archived-webapp/
 .env.archive
+sessions-backup-20260815T150357Z.tar.gz
