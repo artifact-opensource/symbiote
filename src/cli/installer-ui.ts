@@ -77,6 +77,25 @@ function openBrowser(url: string): void {
   exec(command, () => {});
 }
 
+function clientErrorMessage(err: unknown): string {
+  if (err instanceof SyntaxError) {
+    return 'Invalid installer request payload';
+  }
+  if (err instanceof Error && err.message === 'Generated configuration failed validation') {
+    return err.message;
+  }
+  if (typeof err === 'object' && err !== null && 'code' in err) {
+    const code = String((err as { code?: unknown }).code);
+    if (code === 'EACCES' || code === 'EPERM') {
+      return 'Permission denied while writing installer files';
+    }
+    if (code === 'ENOENT') {
+      return 'A required installer file or directory was not found';
+    }
+  }
+  return 'Installer request failed. Check the terminal for details.';
+}
+
 export async function startInstallerUi(port = 3010): Promise<http.Server> {
   const existing = fs.existsSync(path.resolve('mach6.json')) ? loadConfig(path.resolve('mach6.json')) : undefined;
   const defaults = defaultSetupInput(existing);
@@ -120,7 +139,7 @@ export async function startInstallerUi(port = 3010): Promise<http.Server> {
       json(res, { error: 'Not found' }, 404);
     } catch (err) {
       console.error('[installer-ui] request failed:', err);
-      json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
+      json(res, { error: clientErrorMessage(err) }, 500);
     }
   });
 
