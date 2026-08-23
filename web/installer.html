@@ -199,10 +199,39 @@ function syncProviderModel() {
   if (!model.value) model.value = selected.defaultModel;
 }
 
-function showStatus(kind, message) {
+function showError(message) {
   const el = document.getElementById('status');
-  el.className = `status ${kind}`;
-  el.innerHTML = message;
+  el.className = 'status error';
+  el.textContent = message;
+}
+
+function appendCodeLine(container, prefix, value) {
+  const line = document.createElement('div');
+  line.append(document.createTextNode(prefix + ' '));
+  const code = document.createElement('code');
+  code.textContent = value;
+  line.append(code);
+  container.append(line);
+}
+
+function showSuccess(data) {
+  const el = document.getElementById('status');
+  el.className = 'status ok';
+  el.replaceChildren();
+
+  appendCodeLine(el, 'Saved', data.configPath);
+  appendCodeLine(el, 'Saved', data.envPath);
+
+  if (Array.isArray(data.createdIdentityFiles) && data.createdIdentityFiles.length > 0) {
+    appendCodeLine(el, 'Created', data.createdIdentityFiles.join(', '));
+  }
+
+  const note = document.createElement('div');
+  note.style.marginTop = '8px';
+  note.textContent = data.whatsappEnabled
+    ? 'WhatsApp is enabled. Finish with symbiote install in a terminal to scan the QR code.'
+    : 'You can now start Symbiote with symbiote start.';
+  el.append(note);
 }
 
 document.getElementById('provider').addEventListener('change', syncProviderModel);
@@ -219,12 +248,12 @@ document.getElementById('setupForm').addEventListener('submit', async (event) =>
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
-    showStatus('error', data.error || 'Failed to save configuration.');
+    showError(data.error || 'Failed to save configuration.');
     return;
   }
-  showStatus('ok', `Saved <strong>${data.configPath}</strong> and <strong>${data.envPath}</strong>.<br>${data.createdIdentityFiles?.length ? `Created: ${data.createdIdentityFiles.join(', ')}.<br>` : ''}${data.whatsappEnabled ? 'WhatsApp is enabled. Finish with <code>symbiote install</code> in a terminal to scan the QR code.' : 'You can now start Symbiote with <code>symbiote start</code>.'}`);
+  showSuccess(data);
 });
-loadDefaults().catch(err => showStatus('error', err.message || String(err)));
+loadDefaults().catch(err => showError(err.message || String(err)));
 </script>
 </body>
 </html>

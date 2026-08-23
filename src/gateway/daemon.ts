@@ -801,6 +801,9 @@ export class SymbioteGateway {
           model: this.model,
         });
 
+        const ownerIds = this.gatewayConfig.ownerIds ?? [];
+        const effectiveSenderId = request.verifiedAgentId ?? request.senderId ?? 'http-user';
+
         // Build system prompt
         const turnPrompt = buildSystemPrompt({
           workspace: this.config.workspace,
@@ -824,8 +827,6 @@ export class SymbioteGateway {
         session.messages.push({ role: 'user', content: userContent });
 
         // Sandbox context — HTTP API users get 'standard' tier (not admin)
-        const ownerIds = this.gatewayConfig.ownerIds ?? [];
-        const effectiveSenderId = request.verifiedAgentId ?? request.senderId ?? 'http-user';
         const isOwner = !!request.verifiedAgentId && (ownerIds.includes('*') || ownerIds.includes(effectiveSenderId));
         const sandboxCtx: SessionContext = {
           sessionId,

@@ -29,6 +29,7 @@ import {
   kvLine, ok, warn, fail, info, step, divider, box, sectionHeader,
 } from './brand.js';
 import { APP_VERSION, RELEASE_CODENAME } from '../meta/version.js';
+import { loadConfig } from '../config/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

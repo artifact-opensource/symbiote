@@ -79,6 +79,8 @@ let config: Config = {
 let agentName = 'Agent';
 let agentEmoji = '🤖';
 
+const configPath = path.resolve(process.cwd(), 'mach6.json');
+
 // Load config from mach6.json if exists
 try {
   const loaded = loadConfig();
