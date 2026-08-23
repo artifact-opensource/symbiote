@@ -120,7 +120,7 @@ export async function startInstallerUi(port = 3010): Promise<http.Server> {
       json(res, { error: 'Not found' }, 404);
     } catch (err) {
       console.error('[installer-ui] request failed:', err);
-      json(res, { error: 'Installer request failed' }, 500);
+      json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
     }
   });
 

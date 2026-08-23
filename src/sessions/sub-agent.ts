@@ -41,7 +41,7 @@ export class SubAgentManager {
     toolRegistry: ToolExecutor,
     workspace: string,
   ): Promise<SubAgentHandle> {
-    if (config.depth > MAX_DEPTH) {
+    if (config.depth >= MAX_DEPTH) {
       return {
         sessionId: '',
         task: config.task,
@@ -114,6 +114,14 @@ Task: ${config.task}`,
 
     try {
       while (true) {
+        if (this.runtimes.get(session.id)?.killed) {
+          handle.status = 'killed';
+          handle.completedAt = Date.now();
+          this.sessionManager.save(session);
+          this.onComplete?.(config.parentSessionId, handle);
+          return;
+        }
+
         const runtime: RuntimeState = {
           session,
           abortController: new AbortController(),

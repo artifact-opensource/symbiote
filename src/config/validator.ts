@@ -20,6 +20,16 @@ function validPort(port: number | undefined): boolean {
   return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535;
 }
 
+function nearestExistingParent(targetPath: string): string | undefined {
+  let current = targetPath;
+  while (!fs.existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+  return current;
+}
+
 export function validateConfig(config: SymbioteConfig): ValidationError[] {
   const issues: ValidationError[] = [];
 
@@ -36,7 +46,18 @@ export function validateConfig(config: SymbioteConfig): ValidationError[] {
   } else {
     const resolvedWorkspace = path.resolve(config.workspace);
     try {
-      fs.mkdirSync(resolvedWorkspace, { recursive: true });
+      if (fs.existsSync(resolvedWorkspace)) {
+        if (!fs.statSync(resolvedWorkspace).isDirectory()) {
+          throw new Error('Workspace path is not a directory');
+        }
+        fs.accessSync(resolvedWorkspace, fs.constants.W_OK);
+      } else {
+        const parentDir = nearestExistingParent(resolvedWorkspace);
+        if (!parentDir) {
+          throw new Error('Workspace parent directory does not exist');
+        }
+        fs.accessSync(parentDir, fs.constants.W_OK);
+      }
     } catch (err) {
       issues.push({ field: 'workspace', message: `Workspace is not writable: ${err instanceof Error ? err.message : err}`, severity: 'error' });
     }
