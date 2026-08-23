@@ -108,7 +108,7 @@ symbiote/
 │   │   ├── bus.ts      # Priority queue, coalescing, interrupts
 │   │   ├── router.ts   # Policy, dedup, JID normalization, priority
 │   │   └── adapters/   # Discord (discord.js), WhatsApp (Baileys v7)
-│   ├── cli/            # Interactive setup wizard, branding
+│   ├── cli/            # Guided setup flow, branding
 │   ├── config/         # Config loader, validator, env interpolation
 │   ├── cron/           # Cron budget management
 │   ├── formatters/     # Platform-aware markdown formatting

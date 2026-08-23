@@ -56,6 +56,7 @@ import { ContextStore } from '../agent/context-store.js';
 import { PulseBudgetManager } from '../agent/pulse.js';
 import { BlinkController } from '../agent/blink.js';
 import { loadConfig, type SymbioteConfig } from '../config/config.js';
+import { validateAndReport } from '../config/validator.js';
 import type { Provider, ProviderConfig } from '../providers/types.js';
 import { anthropicProvider } from '../providers/anthropic.js';
 import { openaiProvider } from '../providers/openai.js';
@@ -74,6 +75,7 @@ import { McpBridge } from '../tools/mcp-bridge.js';
 import { MetricsCollector, getMetrics } from '../metrics/collector.js';
 import { HotResumeManager } from '../sessions/hot-resume.js';
 import { ProviderHealthMonitor } from '../providers/health.js';
+import { APP_VERSION } from '../meta/version.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -108,10 +110,14 @@ interface GatewayConfig {
   ownerIds?: string[];
   /** HTTP API port */
   apiPort?: number;
+  /** HTTP API host */
+  apiHost?: string;
   /** Web UI port */
   webPort?: number;
   /** Web UI host (default 127.0.0.1, use 0.0.0.0 for LAN access) */
   webHost?: string;
+  /** Optional QR callback for WhatsApp pairing */
+  onQrCode?: (qr: string) => void;
 }
 
 interface ActiveTurn {
@@ -246,7 +252,7 @@ export class SymbioteGateway {
     // v2.0 — Metrics collector
     this.metrics = getMetrics({
       metricsDir: path.join(this.config.sessionsDir ?? '.sessions', 'metrics'),
-      version: '2.0.0',
+      version: APP_VERSION,
     });
 
     // v2.0 — Provider health monitor (circuit breaker + latency tracking)
@@ -255,7 +261,7 @@ export class SymbioteGateway {
     // v2.0 — Hot resume manager (session state persistence across restarts)
     this.hotResume = new HotResumeManager({
       sessionsDir: this.config.sessionsDir ?? '.sessions',
-      version: '2.0.0',
+      version: APP_VERSION,
       provider: this.providerName,
       model: this.model,
     });
@@ -334,7 +340,7 @@ export class SymbioteGateway {
   // ── Start ──────────────────────────────────────────────────────────────
 
   async start(): Promise<void> {
-    console.log(versionBanner('2.0.0'));
+    console.log(versionBanner(APP_VERSION));
 
     const gatewayTitle = gradient('SYMBIOTE', [138, 43, 226], [0, 229, 255]);
     console.log(`  ${palette.bold}${gatewayTitle}${palette.reset}`);
@@ -366,7 +372,7 @@ export class SymbioteGateway {
     // Start HTTP API server
     await this.startHttpApi();
 
-    // Start Web UI server (bound to 0.0.0.0 for LAN access)
+    // Start Web UI server
     this.startWebUi();
 
     // Start VDB real-time memory pulse (5s incremental indexing)
@@ -713,6 +719,7 @@ export class SymbioteGateway {
               qrcode.generate(qr, { small: true }, (rendered: string) => {
                 console.log(rendered);
               });
+              this.gatewayConfig.onQrCode?.(qr);
             },
           },
           policy,
@@ -728,7 +735,8 @@ export class SymbioteGateway {
   // ── HTTP API ───────────────────────────────────────────────────────────
 
   private async startHttpApi(): Promise<void> {
-    const port = (this.gatewayConfig as any).apiPort ?? 3006;
+    const port = this.gatewayConfig.apiPort ?? 3006;
+    const host = this.gatewayConfig.apiHost ?? '127.0.0.1';
     const apiKey = process.env.MACH6_API_KEY || process.env.API_KEY || '';
 
     if (!apiKey) {
@@ -739,7 +747,12 @@ export class SymbioteGateway {
     this.httpApi = new HttpApiServer({
       port,
       apiKey,
-      allowedOrigins: (this.config as any).allowedOrigins ?? ['*'],
+      host,
+      allowedOrigins: this.config.allowedOrigins ?? [
+        `http://${this.gatewayConfig.webHost ?? '127.0.0.1'}:${this.gatewayConfig.webPort ?? 3009}`,
+        'http://127.0.0.1:3009',
+        'http://localhost:3009',
+      ],
       onChat: async (request: ChatRequest): Promise<ChatResponse> => {
         return this.handleHttpChat(request);
       },
@@ -763,8 +776,8 @@ export class SymbioteGateway {
   // ── Web UI ─────────────────────────────────────────────────────────────
 
   private startWebUi(): void {
-    const webPort = (this.gatewayConfig as any).webPort ?? 3009;
-    const webHost = (this.gatewayConfig as any).webHost ?? '127.0.0.1';
+    const webPort = this.gatewayConfig.webPort ?? 3009;
+    const webHost = this.gatewayConfig.webHost ?? '127.0.0.1';
     try {
       this.webServer = startWebServer(webPort, webHost);
     } catch (err) {
@@ -794,7 +807,7 @@ export class SymbioteGateway {
           tools: this.toolRegistry.list().map(t => t.name),
           channel: 'http',
           chatType: 'direct',
-          senderId: request.senderId ?? 'http-user',
+          senderId: effectiveSenderId,
         });
 
         if (session.messages.length > 0 && session.messages[0].role === 'system') {
@@ -812,13 +825,14 @@ export class SymbioteGateway {
 
         // Sandbox context — HTTP API users get 'standard' tier (not admin)
         const ownerIds = this.gatewayConfig.ownerIds ?? [];
-        const isOwner = request.senderId ? (ownerIds.includes('*') || ownerIds.includes(request.senderId)) : false;
+        const effectiveSenderId = request.verifiedAgentId ?? request.senderId ?? 'http-user';
+        const isOwner = !!request.verifiedAgentId && (ownerIds.includes('*') || ownerIds.includes(effectiveSenderId));
         const sandboxCtx: SessionContext = {
           sessionId,
           adapterId: 'http-api',
           channelType: 'http',
           chatType: 'direct',
-          senderId: request.senderId ?? 'http-user',
+          senderId: request.verifiedAgentId ?? request.senderId ?? 'http-user',
           isOwner,
         };
         const sandboxedTools = createSandboxedRegistry(this.toolRegistry, sandboxCtx);
@@ -1621,22 +1635,32 @@ export class SymbioteGateway {
       process.on('SIGUSR1', () => {
         console.log(`${palette.dim}  [gateway]${palette.reset} ${palette.cyan}SIGUSR1${palette.reset} — reloading config...`);
         try {
-          this.config = loadConfig(this.gatewayConfig.configPath);
-          this.providerName = this.config.defaultProvider;
-          this.provider = PROVIDERS.get(this.providerName)!;
-          this.model = this.config.defaultModel;
-          // Rebuild fallback chain
-          this.fallbackChain = [];
-          if (this.config.fallbackProviders?.length) {
-            for (const fbName of this.config.fallbackProviders) {
+          const nextConfig = loadConfig(this.gatewayConfig.configPath);
+          if (!validateAndReport(nextConfig)) {
+            throw new Error('Configuration validation failed');
+          }
+          const nextProviderName = nextConfig.defaultProvider;
+          const nextProvider = PROVIDERS.get(nextProviderName);
+          if (!nextProvider) {
+            throw new Error(`Unknown provider: ${nextProviderName}`);
+          }
+          const nextFallbackChain: { name: string; provider: Provider }[] = [];
+          if (nextConfig.fallbackProviders?.length) {
+            for (const fbName of nextConfig.fallbackProviders) {
               const fbProvider = PROVIDERS.get(fbName);
-              if (fbProvider) this.fallbackChain.push({ name: fbName, provider: fbProvider });
+              if (fbProvider) nextFallbackChain.push({ name: fbName, provider: fbProvider });
             }
           }
-          this.systemPrompt = buildSystemPrompt({
-            workspace: this.config.workspace,
+          const nextSystemPrompt = buildSystemPrompt({
+            workspace: nextConfig.workspace,
             tools: this.toolRegistry.list().map(t => t.name),
           });
+          this.config = nextConfig;
+          this.providerName = nextProviderName;
+          this.provider = nextProvider;
+          this.model = nextConfig.defaultModel;
+          this.fallbackChain = nextFallbackChain;
+          this.systemPrompt = nextSystemPrompt;
           console.log(`${palette.dim}  [gateway]${palette.reset} Provider: ${palette.cyan}${this.providerName}/${this.model}${palette.reset}${this.fallbackChain.length > 0 ? ` → fallback: ${this.fallbackChain.map(f => f.name).join(' → ')}` : ''}`);
           console.log(`${palette.dim}  [gateway]${palette.reset} System prompt refreshed ${palette.dim}(${this.systemPrompt.length} chars)${palette.reset}`);
           console.log(ok('Config reloaded successfully'));
@@ -1651,7 +1675,7 @@ export class SymbioteGateway {
 
   status() {
     return {
-      version: '2.0.0',
+      version: APP_VERSION,
       uptime: Date.now() - this.startTime,
       uptimeHuman: this.formatUptime(Date.now() - this.startTime),
       provider: `${this.providerName}/${this.model}`,
@@ -1687,6 +1711,9 @@ export class SymbioteGateway {
 export async function startGateway(configPath?: string): Promise<SymbioteGateway> {
   // Load gateway config from symbiote config or env
   const config = loadConfig(configPath);
+  if (!validateAndReport(config)) {
+    throw new Error('Configuration validation failed');
+  }
 
   // Build gateway config from environment + symbiote config
   const gatewayConfig: GatewayConfig = {
@@ -1717,9 +1744,10 @@ export async function startGateway(configPath?: string): Promise<SymbioteGateway
       policy: extra.policy,
       promptFiles: extra.promptFiles,
     })),
-    apiPort: (config as any).apiPort ?? 3006,
-    webPort: (config as any).webPort ?? 3009,
-    webHost: (config as any).webHost ?? '127.0.0.1',
+    apiPort: config.apiPort ?? 3006,
+    apiHost: config.apiHost ?? '127.0.0.1',
+    webPort: config.webPort ?? 3009,
+    webHost: config.webHost ?? '127.0.0.1',
   };
 
   const gateway = new SymbioteGateway(gatewayConfig);

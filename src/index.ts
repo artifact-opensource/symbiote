@@ -41,6 +41,7 @@ import {
   sectionHeader, ok, warn, info, kvLine, divider, thickDivider,
   versionBanner, box,
 } from './cli/brand.js';
+import { APP_VERSION } from './meta/version.js';
 
 // ─── Provider registry ───
 const providers = new Map<string, Provider>([
@@ -114,7 +115,7 @@ async function main() {
 
   // ── Branded CLI Header ──────────────────────────────────────
 
-  console.log(versionBanner('1.0.0'));
+  console.log(versionBanner(APP_VERSION));
 
   const providerDisplay = `${palette.cyan}${currentProvider!.name}${palette.reset}${palette.dim}/${palette.reset}${palette.white}${currentModel}${palette.reset}`;
   const toolCount = `${palette.gold}${registry.list().length}${palette.reset}`;

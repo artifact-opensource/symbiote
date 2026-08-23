@@ -40,7 +40,7 @@ Environment variables are auto-loaded from `.env` via the built-in dotenv loader
 
 ## Next Steps
 
-1. Run the [setup wizard](wizard.md): `npx symbiote init`
+1. Run the [guided setup flow](wizard.md): `npx symbiote init` or double-click `install.command` / `install.cmd`
 2. Follow the [Quick Start](quick-start.md)
 
 ## Platform Support

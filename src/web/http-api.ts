@@ -28,6 +28,7 @@ const __http_dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface HttpApiConfig {
   port: number;
+  host?: string;
   apiKey: string;
   /** CORS origins to allow (default: ['*']) */
   allowedOrigins?: string[];
@@ -102,8 +103,9 @@ export class HttpApiServer {
           resolve(); // Non-fatal — gateway continues without HTTP API
         }
       });
-      this.server.listen(this.config.port, '0.0.0.0', () => {
-        console.log(ok(`HTTP API → ${palette.cyan}http://0.0.0.0:${this.config.port}/api/v1/${palette.reset}`));
+      const host = this.config.host ?? '127.0.0.1';
+      this.server.listen(this.config.port, host, () => {
+        console.log(ok(`HTTP API → ${palette.cyan}http://${host}:${this.config.port}/api/v1/${palette.reset}`));
         resolve();
       });
     });
@@ -148,8 +150,11 @@ export class HttpApiServer {
       return this.json(res, health);
     }
 
-    // Serve web UI at root (no auth — local only)
+    // Serve web UI at root only for loopback callers
     if (method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
+      if (!this.isLoopbackRequest(req)) {
+        return this.json(res, { error: 'Forbidden' }, 403);
+      }
       const webPaths = [
         path.join(__http_dirname, '..', '..', 'web', 'index.html'),
         path.join(__http_dirname, '..', 'web', 'index.html'),
@@ -165,9 +170,8 @@ export class HttpApiServer {
       }
     }
 
-    // Auth check — skip for web UI chat path (local-only, served from same origin)
-    const isWebUIPath = pathname === '/api/chat';
-    if (!isWebUIPath && !this.authenticate(req)) {
+    // Auth check
+    if (!this.authenticate(req)) {
       return this.json(res, { error: 'Unauthorized' }, 401);
     }
 
@@ -236,7 +240,7 @@ export class HttpApiServer {
       parsed.sessionId = `http-${parsed.source ?? 'web'}-${parsed.senderId ?? 'anon'}`;
     }
 
-    console.log(`${palette.dim}  [http-api]${palette.reset} Chat: "${parsed.text.slice(0, 80)}..." ${palette.dim}(session=${parsed.sessionId}${ipcResult.verified ? `, ipc=${ipcResult.agentId}` : ''})${palette.reset}`);
+    console.log(`${palette.dim}  [http-api]${palette.reset} Chat received ${palette.dim}(session=${parsed.sessionId}, chars=${parsed.text.length}${ipcResult.verified ? `, ipc=${ipcResult.agentId}` : ''})${palette.reset}`);
 
     try {
       const startMs = Date.now();
@@ -289,7 +293,7 @@ export class HttpApiServer {
       return this.json(res, { error: 'target and text fields are required' }, 400);
     }
 
-    console.log(`${palette.dim}  [http-api]${palette.reset} Relay to ${palette.cyan}${parsed.target}${palette.reset}: "${parsed.text.slice(0, 80)}..."`);
+    console.log(`${palette.dim}  [http-api]${palette.reset} Relay request ${palette.dim}(target=${parsed.target}, chars=${parsed.text.length})${palette.reset}`);
 
     try {
       const result = await this.config.onRelay(parsed.target, parsed.text);
@@ -317,6 +321,13 @@ export class HttpApiServer {
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────
+
+  private isLoopbackRequest(req: http.IncomingMessage): boolean {
+    const remote = req.socket.remoteAddress ?? '';
+    return remote === '127.0.0.1'
+      || remote === '::1'
+      || remote === '::ffff:127.0.0.1';
+  }
 
   private authenticate(req: http.IncomingMessage): boolean {
     const auth = req.headers.authorization;

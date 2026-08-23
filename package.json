@@ -1,6 +1,6 @@
 {
   "name": "symbiote",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "description": "Symbiote \u2014 AI agent framework with persistent memory and web automation. Runs on a laptop.",
   "type": "module",
   "main": "dist/index.js",
@@ -14,7 +14,14 @@
     "README.md",
     "LICENSE",
     "mach6.example.json",
-    ".env.example"
+    ".env.example",
+    "symbiote.sh",
+    "symbiote.ps1",
+    "symbiote-gateway.service",
+    "install.sh",
+    "install.ps1",
+    "install.command",
+    "install.cmd"
   ],
   "scripts": {
     "build": "tsc",

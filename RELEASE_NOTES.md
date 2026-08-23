@@ -1,77 +1,58 @@
-# Release Notes - v1.6.0
+# Release Notes - v3.0.0 Apex
 
-## Mach6 v1.6.0 - Native Gemini, 8 Providers, Multi-User Deployment
+## Symbiote v3.0.0 Apex - Production Hardening + Installer Overhaul
 
-**Date:** March 7, 2026
+**Date:** August 23, 2026
 
-This release adds native Google Gemini integration, bringing the total provider count to 8. Plus multi-user deployment support, a de-branded web UI, and self-contained QR pairing.
+This release closes production gaps across API exposure, sub-agent control, installation, versioning, and deployment assets. It also introduces a professional desktop installer UI and a shared setup flow used by both the terminal and browser-based installers.
 
-### Native Gemini Provider
+### Production Hardening
 
-**Direct SDK integration** - Uses `@google/genai` SDK natively. Not an OpenAI-compatible shim. Full streaming, function calling, and thinking support out of the box.
+- **HTTP API authentication is enforced** for both `/api/v1/chat` and `/api/chat`
+- **HTTP API now binds to configurable hosts** and defaults to loopback-safe settings
+- **Loopback-only web root serving** blocks remote access to the embedded web UI on the API port
+- **HTTP request owner impersonation is prevented** unless identity is IPC-verified
+- **Config validation now runs before startup and reload** so broken production config is rejected early
 
-**Thinking support** - Gemini models with thinking enabled return `thoughtSignature` fields. Mach6 automatically preserves these across tool call roundtrips - required by the Gemini API for thinking-enabled sessions. Configure depth via `thinkingBudget` in provider config.
+### Sub-Agent Reliability
 
-**Automatic schema adaptation** - Gemini rejects `additionalProperties` in tool schemas. Mach6 strips them automatically so your existing tools work without modification.
+- **Real depth tracking** for nested sub-agents
+- **Working kill semantics** via abort signals
+- **Working steering semantics** via controlled abort + resume
+- **Sub-agents no longer inherit owner/admin privileges** by accident
 
-**System instructions** - System prompts are passed via Gemini's dedicated `systemInstruction` field, not injected into message history. Cleaner context separation.
+### Installer & Setup
 
-### Models
+- **New desktop installer UI** via `symbiote init --ui`
+- **New double-click launchers**: `install.command` and `install.cmd`
+- **Shared guided setup core** powers both CLI and desktop installer flows
+- **CLI install flow now installs, builds, configures, and launches**
+- **WhatsApp-enabled CLI installs start in the foreground** so the QR code is visible during pairing
+- **Existing `.env` secrets are preserved** during guided reconfiguration
 
-| Model | Config Value | Notes |
-|-------|-------------|-------|
-| Gemini 2.5 Pro | `gemini-2.5-pro-preview-05-06` | Strongest reasoning, thinking support |
-| Gemini 2.5 Flash | `gemini-2.5-flash-preview-04-17` | Fast + thinking support |
-| Gemini 2.0 Flash | `gemini-2.0-flash` | Fast, general purpose |
-| Gemini 1.5 Pro | `gemini-1.5-pro` | Long context (1M tokens) |
-| Gemini 1.5 Flash | `gemini-1.5-flash` | Budget-friendly |
+### Launchers & Deployment Assets
 
-### Multi-User Deployment
+- Added `symbiote.sh` and `symbiote.ps1`
+- Added `symbiote-gateway.service`
+- Repaired legacy `mach6.*` wrappers for compatibility
+- Fixed browser sidecar path resolution for packaged/runtime installs
 
-One Mach6 install can now serve multiple user profiles with isolated workspaces, configs, and sessions. Each user gets their own identity files and conversation history.
+### Version Alignment
 
-### Other Changes
-
-- **Sandbox wildcard ownerIds** - `"*"` allows open access for testing/demo deployments
-- **De-branded web UI** - agent name and emoji pulled from config, not hardcoded
-- **Self-contained QR HTML** - WhatsApp QR pairing page works without CDN dependencies
-- **Landing page** - `mach6.artifactvirtual.com` with CNAME support
-- **dotenv auto-import** - `.env` files loaded automatically at startup
-- **xAI provider registration** - `xai` was defined but not registered in the provider map. Fixed.
-- **Default provider** - changed from `github-copilot` to `groq` (free, fastest)
-- **Discord chatType detection** - correctly identifies channel vs thread messages
-
-### Configuration
-
-```json
-{
-  "providers": {
-    "gemini": {}
-  }
-}
-```
-
-```bash
-# .env
-GEMINI_API_KEY=AIza...    # https://aistudio.google.com/apikey
-```
+- Runtime components now read the version from `package.json`
+- CLI, gateway, MCP bridge, metrics, and web status endpoints now report a single version
+- Release metadata aligned to **v3.0.0 Apex**
 
 ### Upgrade Path
 
-Fully backward compatible. Existing configs work unchanged.
-
 ```bash
-git pull origin master
-npm install && npm run build
+git pull origin main
+npm install
+npm run build
+symbiote install
 ```
 
-### Stats
+### Notes
 
-- 8 LLM providers
-- 18+ built-in tools
-- 2 channel adapters + HTTP API
-- 38 documentation files
-
----
-
-Built by [Artifact Virtual](https://artifactvirtual.com). MIT License.
+- Existing `mach6.json` deployments remain compatible
+- New installs should prefer the `symbiote-*` launcher and service assets

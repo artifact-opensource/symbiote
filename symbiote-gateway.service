@@ -1,6 +1,3 @@
-# Legacy compatibility wrapper.
-# Use symbiote-gateway.service for new deployments.
-
 [Unit]
 Description=Symbiote AI Gateway
 After=network-online.target

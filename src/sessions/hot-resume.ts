@@ -14,6 +14,7 @@
  * @since 2.0.0
  */
 
+import { APP_VERSION } from '../meta/version.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -75,7 +76,7 @@ export class HotResumeManager {
     checkpointIntervalMs?: number;
   }) {
     this.stateFile = path.join(opts.sessionsDir, 'hot-state.json');
-    this.version = opts.version ?? '2.0.0';
+    this.version = opts.version ?? APP_VERSION;
     this.provider = opts.provider;
     this.model = opts.model;
 

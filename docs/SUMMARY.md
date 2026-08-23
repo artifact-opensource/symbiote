@@ -6,7 +6,7 @@
 
 * [Installation](getting-started/installation.md)
 * [Quick Start](getting-started/quick-start.md)
-* [Setup Wizard](getting-started/wizard.md)
+* [Setup Flow](getting-started/wizard.md)
 * [Configuration](getting-started/configuration.md)
 
 ## Core Concepts

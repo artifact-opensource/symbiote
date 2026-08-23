@@ -4,7 +4,7 @@
  * Subcommand dispatcher. Routes `symbiote <command>` to the right handler.
  * 
  * Commands:
- *   init        — Interactive setup wizard (create mach6.json + workspace)
+ *   init        — Guided setup flow (CLI or desktop UI)
  *   start       — Start the gateway daemon
  *   stop        — Stop a running daemon
  *   restart     — Restart the daemon
@@ -12,7 +12,7 @@
  *   configure   — Edit mach6.json interactively
  *   agent       — Interactive REPL (default if no subcommand)
  *   logs        — Tail daemon logs
- *   install     — Install dependencies + validate environment
+ *   install     — Install, build, configure, and optionally launch
  *   version     — Show version info
  *   help        — Show this help
  * 
@@ -28,11 +28,13 @@ import {
   palette, gradient, multiGradient, banner, versionBanner,
   kvLine, ok, warn, fail, info, step, divider, box, sectionHeader,
 } from './brand.js';
+import { APP_VERSION, RELEASE_CODENAME } from '../meta/version.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const ROOT = path.resolve(__dirname, '..');
-const VERSION = '1.4.0';
+const DIST_ROOT = path.resolve(__dirname, '..');
+const PROJECT_ROOT = path.resolve(DIST_ROOT, '..');
+const VERSION = APP_VERSION;
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -102,7 +104,7 @@ async function cmdHelp() {
   console.log();
 
   const commands: [string, string][] = [
-    ['init',       'Interactive setup wizard — create agent + config'],
+    ['init',       'Guided setup flow — CLI or desktop UI'],
     ['start',      'Start the gateway daemon (background)'],
     ['stop',       'Stop the running daemon'],
     ['restart',    'Restart the daemon'],
@@ -110,7 +112,7 @@ async function cmdHelp() {
     ['configure',  'Edit configuration interactively'],
     ['agent',      'Interactive REPL session (default)'],
     ['logs',       'Tail daemon output logs'],
-    ['install',    'Validate environment + install dependencies'],
+    ['install',    'Install, build, configure, and launch'],
     ['version',    'Show version information'],
     ['help',       'Show this help'],
   ];
@@ -140,9 +142,10 @@ async function cmdVersion() {
   console.log(versionBanner(VERSION));
   
   console.log(kvLine('Version', `${palette.cyan}${VERSION}${palette.reset}`));
+  console.log(kvLine('Codename', `${palette.violet}${RELEASE_CODENAME}${palette.reset}`));
   console.log(kvLine('Node', `${palette.green}${process.version}${palette.reset}`));
   console.log(kvLine('Platform', `${palette.silver}${process.platform} ${process.arch}${palette.reset}`));
-  console.log(kvLine('Engine root', `${palette.dim}${ROOT}${palette.reset}`));
+  console.log(kvLine('Install root', `${palette.dim}${PROJECT_ROOT}${palette.reset}`));
   
   const configPath = getConfigPath();
   console.log(kvLine('Config', configPath
@@ -154,109 +157,87 @@ async function cmdVersion() {
 async function cmdInstall() {
   console.log();
   console.log(versionBanner(VERSION));
-  
-  const title = gradient('ENVIRONMENT CHECK', [255, 193, 37], [255, 160, 0]);
+
+  const args = process.argv.slice(3);
+  const useUi = args.includes('--ui');
+  const skipSetup = args.includes('--skip-setup');
+  const noStart = args.includes('--no-start');
+
+  const title = gradient('INSTALL', [255, 193, 37], [255, 160, 0]);
   console.log(`  ${palette.bold}${title}${palette.reset}`);
   console.log();
-  
-  let allGood = true;
 
-  // 1. Node.js version
-  const nodeVer = process.version;
-  const nodeMajor = parseInt(nodeVer.slice(1).split('.')[0], 10);
-  if (nodeMajor >= 20) {
-    console.log(ok(`Node.js ${nodeVer}`));
-  } else {
-    console.log(fail(`Node.js ${nodeVer} — requires ≥ 20.x`));
-    allGood = false;
+  const nodeMajor = parseInt(process.version.slice(1).split('.')[0], 10);
+  if (nodeMajor < 20) {
+    console.log(fail(`Node.js ${process.version} — requires ≥ 20.x`));
+    console.log();
+    return;
   }
+  console.log(ok(`Node.js ${process.version}`));
 
-  // 2. npm
   try {
     const npmVer = execSync('npm --version', { stdio: 'pipe' }).toString().trim();
     console.log(ok(`npm ${npmVer}`));
   } catch {
     console.log(fail('npm not found'));
-    allGood = false;
+    console.log();
+    return;
   }
 
-  // 3. Dependencies installed
-  const nodeModules = path.join(ROOT, 'node_modules');
-  if (fs.existsSync(nodeModules)) {
-    const pkgCount = fs.readdirSync(nodeModules).filter(d => !d.startsWith('.')).length;
-    console.log(ok(`Dependencies installed (${pkgCount} packages)`));
-  } else {
-    console.log(warn('Dependencies not installed — run: npm install'));
-    allGood = false;
-  }
-
-  // 4. Built
-  const distDir = path.join(ROOT, 'gateway', 'daemon.js');
-  if (fs.existsSync(distDir)) {
-    console.log(ok('Built (dist/ present)'));
-  } else {
-    console.log(warn('Not built — run: npm run build'));
-    allGood = false;
-  }
-
-  // 5. Config
-  const configPath = getConfigPath();
-  if (configPath) {
-    console.log(ok(`Config found: ${configPath}`));
-    const config = readConfig();
-    if (config) {
-      console.log(info(`  Provider: ${config.defaultProvider ?? 'not set'}`));
-      console.log(info(`  Model: ${config.defaultModel ?? 'not set'}`));
-    }
-  } else {
-    console.log(warn('No mach6.json — run: mach6 init'));
-  }
-
-  // 6. Workspace
-  const workspace = process.cwd();
-  const soulFile = path.join(workspace, 'SOUL.md');
-  if (fs.existsSync(soulFile)) {
-    console.log(ok(`Workspace: ${workspace}`));
-  } else {
-    console.log(info(`Workspace: ${workspace} (no SOUL.md — run symbiote init)`));
-  }
-
-  // 7. Channels check
-  if (configPath) {
-    const config = readConfig();
-    if (config) {
-      // Discord
-      const discordToken = process.env.DISCORD_BOT_TOKEN || config.discord?.token;
-      if (discordToken) {
-        console.log(ok('Discord: token configured'));
-      } else {
-        console.log(info('Discord: no token (optional)'));
-      }
-
-      // WhatsApp
-      if (config.whatsapp?.enabled) {
-        console.log(ok('WhatsApp: enabled'));
-      } else {
-        console.log(info('WhatsApp: disabled (optional)'));
-      }
-    }
-  }
-
-  // 8. Git
   try {
     const gitVer = execSync('git --version', { stdio: 'pipe' }).toString().trim();
     console.log(ok(gitVer));
   } catch {
-    console.log(info('Git: not found (optional)'));
+    console.log(warn('Git not found — source updates will not be available from this machine.'));
   }
 
-  console.log();
-  if (allGood) {
-    console.log(ok(`${palette.bold}Environment is ready.${palette.reset} Run ${palette.cyan}symbiote start${palette.reset} to launch.`));
+  const nodeModules = path.join(PROJECT_ROOT, 'node_modules');
+  if (!fs.existsSync(nodeModules)) {
+    console.log(info('Installing npm dependencies...'));
+    execSync('npm install', { cwd: PROJECT_ROOT, stdio: 'inherit' });
   } else {
-    console.log(warn('Some issues found. Fix them and run symbiote install again.'));
+    console.log(ok('Dependencies already installed'));
   }
-  console.log();
+
+  console.log(info('Building distribution...'));
+  execSync('npm run build', { cwd: PROJECT_ROOT, stdio: 'inherit' });
+  console.log(ok('Build complete'));
+
+  const configPath = path.join(process.cwd(), 'mach6.json');
+  const envPath = path.join(process.cwd(), '.env');
+
+  if (!skipSetup) {
+    if (useUi) {
+      const { startInstallerUi } = await import('./installer-ui.js');
+      await startInstallerUi();
+      console.log(info('Installer UI opened in your browser. Leave this window open until setup is saved.'));
+      console.log();
+      return;
+    }
+    const { runInteractiveSetup } = await import('./setup.js');
+    await runInteractiveSetup(configPath, envPath);
+  } else if (!fs.existsSync(configPath)) {
+    console.log(warn('No mach6.json found. Re-run without --skip-setup to create one.'));
+    console.log();
+    return;
+  }
+
+  if (noStart) {
+    console.log(ok('Install completed. Start Symbiote with `symbiote start`.'));
+    console.log();
+    return;
+  }
+
+  const config = loadConfig(configPath);
+  if (config.whatsapp?.enabled) {
+    console.log(info('Starting Symbiote in the foreground so you can scan the WhatsApp QR code...'));
+    console.log();
+    const { startGateway } = await import('../gateway/daemon.js');
+    await startGateway(configPath);
+    return;
+  }
+
+  await cmdStart();
 }
 
 async function cmdStart() {
@@ -279,7 +260,7 @@ async function cmdStart() {
 
   console.log(info('Starting Symbiote daemon...'));
   
-  const daemonPath = path.join(ROOT, 'gateway', 'daemon.js');
+  const daemonPath = path.join(DIST_ROOT, 'gateway', 'daemon.js');
   const logFile = getLogFile();
   const logFd = fs.openSync(logFile, 'a');
   
@@ -574,8 +555,15 @@ async function cmdAgent() {
 }
 
 async function cmdInit() {
-  const { runWizard } = await import('./wizard.js');
-  await runWizard();
+  const args = process.argv.slice(3);
+  const useUi = args.includes('--ui') || args.includes('--desktop');
+  if (useUi) {
+    const { startInstallerUi } = await import('./installer-ui.js');
+    await startInstallerUi();
+    return;
+  }
+  const { runInteractiveSetup } = await import('./setup.js');
+  await runInteractiveSetup();
 }
 
 // ── Router ─────────────────────────────────────────────────────

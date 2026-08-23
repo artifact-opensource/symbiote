@@ -9,6 +9,8 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { palette, ok } from '../cli/brand.js';
+import { loadConfig } from '../config/config.js';
+import { APP_VERSION } from '../meta/version.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -78,13 +80,10 @@ let agentName = 'Agent';
 let agentEmoji = '🤖';
 
 // Load config from mach6.json if exists
-const configPath = path.resolve(process.cwd(), 'mach6.json');
 try {
-  const raw = fs.readFileSync(configPath, 'utf-8');
-  const loaded = JSON.parse(raw);
+  const loaded = loadConfig();
   if (loaded.name) agentName = loaded.name;
   if (loaded.emoji) agentEmoji = loaded.emoji;
-  // Map mach6.json fields to webchat config
   if (loaded.defaultProvider) config.provider = loaded.defaultProvider;
   if (loaded.defaultModel) config.model = loaded.defaultModel;
   config = { ...config, ...loaded };
@@ -191,15 +190,16 @@ async function streamChat(
 
   try {
     // Proxy to real HTTP API (port 3006) which runs through the actual agent pipeline
-    const apiPort = parseInt(process.env.MACH6_API_PORT ?? '3006', 10);
-    const apiKey = process.env.MACH6_API_KEY ?? '';
+    const apiPort = parseInt(process.env.MACH6_API_PORT ?? String((config as any).apiPort ?? process.env.MACH6_PORT ?? 3006), 10);
+    const apiHost = process.env.MACH6_API_HOST ?? String((config as any).apiHost ?? '127.0.0.1');
+    const apiKey = process.env.MACH6_API_KEY ?? process.env.API_KEY ?? '';
     const payload = JSON.stringify({ sessionId, message: userMessage, senderId: 'webchat-owner', source: 'webchat' });
 
     const apiRes = await new Promise<http.IncomingMessage>((resolve, reject) => {
       const apiReq = http.request({
-        hostname: '127.0.0.1',
+        hostname: apiHost,
         port: apiPort,
-        path: '/api/chat',
+        path: '/api/v1/chat',
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -360,7 +360,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       totalTokens,
       model: config.model,
       provider: config.provider,
-      version: '0.1.0',
+      version: APP_VERSION,
       agentName,
       agentEmoji,
     });
@@ -547,6 +547,6 @@ export function startWebServer(port = 3006, host = '127.0.0.1'): http.Server {
 // Run directly
 const __filename = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename)) {
-  const port = parseInt(process.env.MACH6_PORT ?? '3006', 10);
+  const port = parseInt(process.env.MACH6_PORT ?? String((config as any).webPort ?? 3009), 10);
   startWebServer(port);
 }

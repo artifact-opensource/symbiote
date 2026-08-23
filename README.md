@@ -46,7 +46,7 @@ mach6 start
 Or from source:
 
 ```bash
-git clone https://github.com/Artifact-Virtual/Symbiote.git
+git clone https://github.com/artifact-opensource/symbiote.git
 cd Symbiote && npm install && npm run build
 node dist/gateway/daemon.js --config=mach6.json
 ```
@@ -353,16 +353,16 @@ Keyring-based. Each agent has a unique ID and shared secret. Non-IPC requests (h
 
 ```bash
 # Linux/macOS
-curl -fsSL https://raw.githubusercontent.com/Artifact-Virtual/Symbiote/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/artifact-opensource/symbiote/main/install.sh | bash
 
 # Windows (PowerShell)
-irm https://raw.githubusercontent.com/Artifact-Virtual/Symbiote/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/artifact-opensource/symbiote/main/install.ps1 | iex
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/Artifact-Virtual/Symbiote.git
+git clone https://github.com/artifact-opensource/symbiote.git
 cd Symbiote
 npm install
 npm run build
@@ -375,8 +375,8 @@ node dist/gateway/daemon.js --config=mach6.json
 ### systemd service
 
 ```bash
-cp mach6-gateway.service ~/.config/systemd/user/
-systemctl --user enable --now mach6-gateway
+cp symbiote-gateway.service ~/.config/systemd/user/
+systemctl --user enable --now symbiote-gateway
 ```
 
 ---
