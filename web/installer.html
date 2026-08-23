@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Symbiote Installer</title>
+<style>
+:root {
+  --bg: #0b0d12;
+  --panel: #141924;
+  --panel-2: #1a2130;
+  --text: #ecf2ff;
+  --muted: #93a0b8;
+  --accent: #7c6cff;
+  --accent-2: #22c3ff;
+  --ok: #38d39f;
+  --danger: #ff6b6b;
+  --border: rgba(255,255,255,0.08);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  background: radial-gradient(circle at top, rgba(124,108,255,.18), transparent 32%), var(--bg);
+  color: var(--text);
+}
+main { max-width: 1100px; margin: 0 auto; padding: 40px 20px 60px; }
+.hero { display: grid; grid-template-columns: 1.1fr .9fr; gap: 24px; margin-bottom: 24px; }
+.card {
+  background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.015));
+  border: 1px solid var(--border); border-radius: 22px; padding: 24px;
+  box-shadow: 0 24px 80px rgba(0,0,0,.28);
+}
+.badge { display: inline-flex; gap: 8px; align-items: center; color: var(--accent-2); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; }
+h1 { margin: 10px 0 8px; font-size: 44px; line-height: 1.05; }
+p.lead { color: var(--muted); font-size: 16px; line-height: 1.6; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+input, select, textarea {
+  width: 100%; background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 14px; padding: 12px 14px; font: inherit;
+}
+textarea { min-height: 98px; resize: vertical; }
+.row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.row3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.check { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 14px; }
+.check input { width: auto; }
+.actions { display: flex; gap: 12px; align-items: center; margin-top: 24px; }
+button {
+  border: 0; border-radius: 14px; padding: 13px 18px; font: inherit; font-weight: 600; cursor: pointer;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white;
+}
+button.secondary { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+.status { margin-top: 18px; padding: 14px 16px; border-radius: 14px; display: none; }
+.status.ok { display: block; background: rgba(56,211,159,.12); color: #c6f8e5; border: 1px solid rgba(56,211,159,.25); }
+.status.error { display: block; background: rgba(255,107,107,.12); color: #ffd3d3; border: 1px solid rgba(255,107,107,.25); }
+.kpi { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.kpi div { background: var(--panel-2); border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
+.kpi strong { display: block; font-size: 28px; margin-bottom: 6px; }
+small.note { display: block; color: var(--muted); margin-top: 10px; line-height: 1.5; }
+@media (max-width: 900px) {
+  .hero, .grid, .row, .row3, .kpi { grid-template-columns: 1fr; }
+  h1 { font-size: 34px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="card">
+      <div class="badge">Symbiote <span id="version">…</span> · <span id="codename">Apex</span></div>
+      <h1>Desktop installer</h1>
+      <p class="lead">Configure a production-ready Symbiote deployment from a local desktop UI. This writes <code>mach6.json</code>, <code>.env</code>, and optional workspace identity files.</p>
+      <div class="kpi">
+        <div><strong>1</strong><span>Write config + env</span></div>
+        <div><strong>2</strong><span>Prepare channels</span></div>
+        <div><strong>3</strong><span>Launch from CLI for QR</span></div>
+      </div>
+      <small class="note">If you enable WhatsApp, finish here and then run <code>symbiote install</code> in a terminal to complete pairing and scan the QR code.</small>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">What this covers</h3>
+      <ul style="color:var(--muted);line-height:1.8;padding-left:18px">
+        <li>Provider + model selection</li>
+        <li>Loopback-safe API and web host defaults</li>
+        <li>Discord and WhatsApp channel configuration</li>
+        <li>Owner allowlists and workspace scaffolding</li>
+        <li>Shared install flow with CLI compatibility</li>
+      </ul>
+    </div>
+  </section>
+
+  <form id="setupForm" class="card">
+    <div class="grid">
+      <div>
+        <label for="provider">Provider</label>
+        <select id="provider" name="provider"></select>
+      </div>
+      <div>
+        <label for="model">Model</label>
+        <input id="model" name="model" />
+      </div>
+      <div>
+        <label for="providerApiKey">Provider API key (optional)</label>
+        <input id="providerApiKey" name="providerApiKey" type="password" />
+      </div>
+      <div>
+        <label for="workspace">Workspace directory</label>
+        <input id="workspace" name="workspace" />
+      </div>
+    </div>
+
+    <div class="row3" style="margin-top:16px">
+      <div><label for="apiPort">HTTP API port</label><input id="apiPort" name="apiPort" type="number" /></div>
+      <div><label for="apiHost">HTTP API host</label><input id="apiHost" name="apiHost" /></div>
+      <div><label for="webPort">Web UI port</label><input id="webPort" name="webPort" type="number" /></div>
+    </div>
+    <div class="row" style="margin-top:16px">
+      <div><label for="webHost">Web UI host</label><input id="webHost" name="webHost" /></div>
+      <div><label for="ownerIds">Owner IDs (comma separated)</label><input id="ownerIds" name="ownerIds" /></div>
+    </div>
+
+    <div class="row" style="margin-top:20px">
+      <div class="card" style="padding:18px">
+        <div class="check"><input id="discordEnabled" name="discordEnabled" type="checkbox"><label for="discordEnabled" style="margin:0;color:var(--text)">Enable Discord</label></div>
+        <div style="margin-top:14px"><label for="discordToken">Discord bot token</label><input id="discordToken" name="discordToken" type="password"></div>
+        <div style="margin-top:14px"><label for="discordBotId">Discord application/client ID</label><input id="discordBotId" name="discordBotId"></div>
+      </div>
+      <div class="card" style="padding:18px">
+        <div class="check"><input id="whatsappEnabled" name="whatsappEnabled" type="checkbox"><label for="whatsappEnabled" style="margin:0;color:var(--text)">Enable WhatsApp</label></div>
+        <div style="margin-top:14px"><label for="whatsappPhoneNumber">WhatsApp phone number</label><input id="whatsappPhoneNumber" name="whatsappPhoneNumber"></div>
+        <div style="margin-top:14px"><label for="whatsappAuthDir">WhatsApp auth directory</label><input id="whatsappAuthDir" name="whatsappAuthDir"></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:20px">
+      <div class="card" style="padding:18px">
+        <div class="check"><input id="agentEnabled" name="agentEnabled" type="checkbox"><label for="agentEnabled" style="margin:0;color:var(--text)">Create workspace identity files</label></div>
+        <div style="margin-top:14px"><label for="agentName">Agent name</label><input id="agentName" name="agentName"></div>
+        <div style="margin-top:14px"><label for="agentEmoji">Agent emoji</label><input id="agentEmoji" name="agentEmoji"></div>
+        <div style="margin-top:14px"><label for="creatorName">Creator/operator name</label><input id="creatorName" name="creatorName"></div>
+      </div>
+      <div class="card" style="padding:18px">
+        <label for="agentPersonality">Agent personality</label>
+        <textarea id="agentPersonality" name="agentPersonality"></textarea>
+        <small class="note">This is used when scaffolding <code>SOUL.md</code> and related workspace files.</small>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button type="submit">Save installer configuration</button>
+      <button class="secondary" type="button" id="reloadBtn">Reload defaults</button>
+    </div>
+    <div id="status" class="status"></div>
+  </form>
+</main>
+<script>
+const fields = [
+  'provider','model','providerApiKey','workspace','apiPort','apiHost','webPort','webHost','ownerIds',
+  'discordToken','discordBotId','whatsappPhoneNumber','whatsappAuthDir','agentName','agentEmoji','creatorName','agentPersonality'
+];
+const checks = ['discordEnabled','whatsappEnabled','agentEnabled'];
+let providers = [];
+
+async function loadDefaults() {
+  const res = await fetch('/api/defaults');
+  const data = await res.json();
+  providers = data.providers;
+  document.getElementById('version').textContent = data.version;
+  document.getElementById('codename').textContent = data.codename;
+  const providerSelect = document.getElementById('provider');
+  providerSelect.innerHTML = providers.map(p => `<option value="${p.id}">${p.name} (${p.id})</option>`).join('');
+
+  const d = data.defaults;
+  providerSelect.value = d.provider;
+  document.getElementById('model').value = d.model;
+  document.getElementById('workspace').value = d.workspace;
+  document.getElementById('apiPort').value = d.apiPort;
+  document.getElementById('apiHost').value = d.apiHost;
+  document.getElementById('webPort').value = d.webPort;
+  document.getElementById('webHost').value = d.webHost;
+  document.getElementById('ownerIds').value = (d.ownerIds || []).join(', ');
+  document.getElementById('discordEnabled').checked = d.discordEnabled;
+  document.getElementById('discordToken').value = d.discordToken || '';
+  document.getElementById('discordBotId').value = d.discordBotId || '';
+  document.getElementById('whatsappEnabled').checked = d.whatsappEnabled;
+  document.getElementById('whatsappPhoneNumber').value = d.whatsappPhoneNumber || '';
+  document.getElementById('whatsappAuthDir').value = d.whatsappAuthDir;
+  document.getElementById('agentEnabled').checked = d.agent.enabled;
+  document.getElementById('agentName').value = d.agent.name;
+  document.getElementById('agentEmoji').value = d.agent.emoji;
+  document.getElementById('creatorName').value = d.agent.creatorName;
+  document.getElementById('agentPersonality').value = d.agent.personality;
+}
+
+function syncProviderModel() {
+  const selected = providers.find(p => p.id === document.getElementById('provider').value);
+  if (!selected) return;
+  const model = document.getElementById('model');
+  if (!model.value) model.value = selected.defaultModel;
+}
+
+function showError(message) {
+  const el = document.getElementById('status');
+  el.className = 'status error';
+  el.textContent = message;
+}
+
+function appendCodeLine(container, prefix, value) {
+  const line = document.createElement('div');
+  line.append(document.createTextNode(prefix + ' '));
+  const code = document.createElement('code');
+  code.textContent = value;
+  line.append(code);
+  container.append(line);
+}
+
+function showSuccess(data) {
+  const el = document.getElementById('status');
+  el.className = 'status ok';
+  el.replaceChildren();
+
+  appendCodeLine(el, 'Saved', data.configPath);
+  appendCodeLine(el, 'Saved', data.envPath);
+
+  if (Array.isArray(data.createdIdentityFiles) && data.createdIdentityFiles.length > 0) {
+    appendCodeLine(el, 'Created', data.createdIdentityFiles.join(', '));
+  }
+
+  const note = document.createElement('div');
+  note.style.marginTop = '8px';
+  note.textContent = data.whatsappEnabled
+    ? 'WhatsApp is enabled. Finish with symbiote install in a terminal to scan the QR code.'
+    : 'You can now start Symbiote with symbiote start.';
+  el.append(note);
+}
+
+document.getElementById('provider').addEventListener('change', syncProviderModel);
+document.getElementById('reloadBtn').addEventListener('click', loadDefaults);
+document.getElementById('setupForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const payload = {};
+  for (const id of fields) payload[id] = document.getElementById(id).value;
+  for (const id of checks) payload[id] = document.getElementById(id).checked;
+  const res = await fetch('/api/setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    showError(data.error || 'Failed to save configuration.');
+    return;
+  }
+  showSuccess(data);
+});
+loadDefaults().catch(err => showError(err.message || String(err)));
+</script>
+</body>
+</html>

@@ -28,13 +28,14 @@ export function createSpawnTool(
       const task = String(input.task ?? '');
       const maxIterations = Number(input.maxIterations ?? 25);
       const parentSessionId = opts?.sessionId ?? 'unknown';
+      const parentDepth = subAgentManager.getDepth(parentSessionId);
 
       try {
         const handle = await subAgentManager.spawn(
           {
             task,
             parentSessionId,
-            depth: 1, // TODO: track actual depth from parent session
+            depth: parentDepth + 1,
             maxIterations,
           },
           provider,

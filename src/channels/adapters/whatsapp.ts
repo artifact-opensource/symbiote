@@ -26,6 +26,8 @@ import * as path from 'node:path';
 import { exec } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const __wa_dirname = path.dirname(fileURLToPath(import.meta.url));
+const WHATSAPP_DEBUG = process.env.SYMBIOTE_DEBUG === '1';
+const debugLog = (...args: unknown[]) => { if (WHATSAPP_DEBUG) console.log(...args); };
 import { BaseAdapter } from '../adapter.js';
 import { formatForChannel } from '../formatter.js';
 import { logInbound, logOutbound, logReaction } from '../message-logger.js';
@@ -138,16 +140,6 @@ export class WhatsAppAdapter extends BaseAdapter {
         // Track QR attempts for max retry
         this.qrAttempts++;
         
-        // Render QR code in terminal
-        console.log(`\n  \x1b[38;2;255;193;37m📱 WhatsApp QR Code — scan with WhatsApp to link (attempt ${this.qrAttempts}):\x1b[0m\n`);
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const qrt = require('qrcode-terminal');
-          qrt.generate(qr, { small: true });
-        } catch {
-          console.log(`  QR Data: ${qr}\n`);
-        }
-        
         if (this.onQR) {
           this.onQR(qr);
         }
@@ -205,9 +197,9 @@ export class WhatsAppAdapter extends BaseAdapter {
     });
 
     // Incoming messages
-    console.log(`[${this.id}] Registering messages.upsert listener`);
+    debugLog(`[${this.id}] Registering messages.upsert listener`);
     this.socket.ev.on('messages.upsert', ({ messages, type }) => {
-      console.log(`[${this.id}] messages.upsert fired: type=${type}, count=${messages.length}`);
+      debugLog(`[${this.id}] messages.upsert fired: type=${type}, count=${messages.length}`);
       this.handleMessages(messages, type);
     });
 
@@ -216,7 +208,7 @@ export class WhatsAppAdapter extends BaseAdapter {
     for (const evName of debugEvents) {
       (this.socket.ev as any).on(evName, (data: any) => {
         const count = Array.isArray(data) ? data.length : (data?.messages?.length ?? '?');
-        console.log(`[${this.id}] event: ${evName} (count=${count})`);
+        debugLog(`[${this.id}] event: ${evName} (count=${count})`);
       });
     }
 
@@ -257,11 +249,11 @@ export class WhatsAppAdapter extends BaseAdapter {
   // ── Inbound Handlers ──────────────────────────────────────────────────
 
   private handleMessages(messages: WAMessage[], type: MessageUpsertType): void {
-    console.log(`[${this.id}] handleMessages: type=${type}, count=${messages.length}`);
+    debugLog(`[${this.id}] handleMessages: type=${type}, count=${messages.length}`);
     if (type !== 'notify') return; // Only process new messages
 
     for (const msg of messages) {
-      console.log(`[${this.id}] msg: from=${msg.key.remoteJid}, fromMe=${msg.key.fromMe}, hasMsg=${!!msg.message}, participant=${msg.key.participant}`);
+      debugLog(`[${this.id}] msg: from=${msg.key.remoteJid}, fromMe=${msg.key.fromMe}, hasMsg=${!!msg.message}, participant=${msg.key.participant}`);
       if (!msg.message) continue;
       if (msg.key.fromMe) continue; // Ignore own messages
 
@@ -295,7 +287,7 @@ export class WhatsAppAdapter extends BaseAdapter {
       const localPath = await this.downloadMedia(msg, mediaDir);
       if (localPath && payload.media) {
         payload.media[0].path = localPath;
-        console.log(`[${this.id}] Media downloaded: ${localPath}`);
+        debugLog(`[${this.id}] Media downloaded: ${localPath}`);
       }
     } catch (err) {
       console.warn(`[${this.id}] Media download failed:`, err);
@@ -452,11 +444,11 @@ export class WhatsAppAdapter extends BaseAdapter {
             lastMessageId = sent;
           }
         } else if (chunks[i]) {
-          console.log(`[whatsapp-send] Sending text to ${chatId}: ${chunks[i].slice(0, 80)}...`);
+          debugLog(`[whatsapp-send] Sending text to ${chatId} (chars=${chunks[i].length})`);
           const sent = await this.socket.sendMessage(chatId, {
             text: chunks[i],
           });
-          console.log(`[whatsapp-send] sendMessage returned:`, JSON.stringify(sent?.key));
+          debugLog(`[whatsapp-send] sendMessage returned:`, JSON.stringify(sent?.key));
           lastMessageId = sent?.key?.id ?? undefined;
         }
       } catch (err) {

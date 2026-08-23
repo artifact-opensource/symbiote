@@ -11,6 +11,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createInterface, type Interface } from 'node:readline';
 import type { ToolDefinition, ToolParameter } from './types.js';
+import { APP_VERSION } from '../meta/version.js';
 
 interface McpBridgeConfig {
   /** Command + args to spawn the MCP server */
@@ -108,7 +109,7 @@ export class McpBridge {
     const initResp = await this._request('initialize', {
       protocolVersion: '2025-03-26',
       capabilities: {},
-      clientInfo: { name: 'symbiote', version: '1.0.0' },
+      clientInfo: { name: 'symbiote', version: APP_VERSION },
     }, timeout);
 
     if (initResp.error) {

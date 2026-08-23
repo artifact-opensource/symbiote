@@ -24,4 +24,4 @@ Symbiote is a self-contained AI agent gateway that handles multi-channel communi
 - [Architecture](advanced/architecture.md) — system design
 - [Providers](providers/README.md) — LLM provider configuration
 
-Built by [Artifact Virtual](https://artifactvirtual.com). v2.1.0.
+Built by [Artifact Virtual](https://artifactvirtual.com). v3.0.0.

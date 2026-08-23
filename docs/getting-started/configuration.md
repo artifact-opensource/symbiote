@@ -86,7 +86,7 @@ MACH6_API_KEY=
 MACH6_PORT=3006
 ```
 
-> Run `npx symbiote init` to generate both files interactively. See [Wizard](wizard.md).
+> Run `npx symbiote init` for the guided CLI setup, or `npx symbiote init --ui` for the desktop installer UI. See [Setup Flow](wizard.md).
 
 ## Key Settings
 

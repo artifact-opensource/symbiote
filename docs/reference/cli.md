@@ -20,7 +20,7 @@ Type /help for commands
 npx symbiote init
 ```
 
-Interactive 6-step wizard that generates `mach6.json`, `.env`, and optionally agent identity files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md, HEARTBEAT.md). See [Wizard docs](../getting-started/wizard.md) for details.
+Guided setup flow that generates `mach6.json`, `.env`, and optional workspace identity files. Use `symbiote init` for CLI setup or `symbiote init --ui` for the desktop installer UI. See [Setup Flow](../getting-started/wizard.md).
 
 ## One-Shot Mode
 

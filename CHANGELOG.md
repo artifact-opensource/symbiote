@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.0.0 (2026-08-23) — Apex
+
+### Production Hardening
+- Enforced HTTP API authentication across web and API chat paths
+- Added loopback-safe API host defaults and stricter CORS validation
+- Prevented unverified HTTP owner impersonation
+- Validated config before startup and hot reload
+- Reduced sensitive request/message logging in production paths
+
+### Installer & Setup
+- Replaced the legacy wizard with a shared guided setup flow
+- Added a desktop installer UI served by `symbiote init --ui`
+- Added double-click launchers: `install.command` and `install.cmd`
+- Rebuilt `symbiote install` to install, build, configure, and launch in one flow
+- Preserved existing `.env` secrets during reconfiguration
+
+### Runtime Reliability
+- Fixed sub-agent depth accounting
+- Implemented real sub-agent kill and steer behavior via abort + resume
+- Removed accidental admin-tier treatment for sub-agents
+- Fixed packaged browser sidecar path discovery
+- Unified runtime version reporting through package metadata
+
+---
+
 ## v2.1.0 (2026-03-12)
 
 ### Circuit Breaker Failover

@@ -8,7 +8,7 @@ Get a working agent in under 2 minutes.
 npx symbiote init
 ```
 
-The [interactive wizard](wizard.md) walks you through 6 steps:
+The [guided setup flow](wizard.md) walks you through provider, channel, access, and workspace setup:
 
 1. **Agent Identity** — name, emoji, personality (generates SOUL.md, IDENTITY.md, etc.)
 2. **Provider** — choose from 8 LLM providers (Groq is the default — free, fastest)

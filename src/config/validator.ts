@@ -1,6 +1,7 @@
-// Symbiote — Config Validation (fixes Pain #1, #9)
-// Validates config BEFORE anything starts. Never crash-loop.
+// Symbiote — Config Validation
 
+import fs from 'node:fs';
+import path from 'node:path';
 import type { SymbioteConfig } from './config.js';
 
 export interface ValidationError {
@@ -10,40 +11,104 @@ export interface ValidationError {
   severity: 'error' | 'warning';
 }
 
-/**
- * Validate config and return all issues found.
- * Errors = fatal (must fix). Warnings = suspicious but allowed.
- */
+function isLoopbackHost(host?: string): boolean {
+  if (!host) return true;
+  return ['127.0.0.1', 'localhost', '::1'].includes(host);
+}
+
+function validPort(port: number | undefined): boolean {
+  return typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+
+function nearestExistingParent(targetPath: string): string | undefined {
+  let current = targetPath;
+  while (!fs.existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+  return current;
+}
+
 export function validateConfig(config: SymbioteConfig): ValidationError[] {
   const issues: ValidationError[] = [];
 
-  // Check provider config
   if (!config.defaultProvider) {
-    issues.push({ field: 'defaultProvider', message: 'No default provider set', severity: 'error', suggestion: 'Set defaultProvider to one of: anthropic, github-copilot, openai, ollama, groq, gladius, nvidia, gemini, xai' });
+    issues.push({ field: 'defaultProvider', message: 'No default provider set', severity: 'error', suggestion: 'Set defaultProvider to a configured provider.' });
   }
 
   if (!config.defaultModel) {
-    issues.push({ field: 'defaultModel', message: 'No default model set', severity: 'error', suggestion: 'Set defaultModel (e.g. "claude-sonnet-4", "gpt-4o")' });
+    issues.push({ field: 'defaultModel', message: 'No default model set', severity: 'error', suggestion: 'Set defaultModel (for example, claude-sonnet-4).' });
   }
 
-  // Check for contradictory settings
+  if (!config.workspace) {
+    issues.push({ field: 'workspace', message: 'Workspace is required', severity: 'error' });
+  } else {
+    const resolvedWorkspace = path.resolve(config.workspace);
+    try {
+      if (fs.existsSync(resolvedWorkspace)) {
+        if (!fs.statSync(resolvedWorkspace).isDirectory()) {
+          throw new Error('Workspace path is not a directory');
+        }
+        fs.accessSync(resolvedWorkspace, fs.constants.W_OK);
+      } else {
+        const parentDir = nearestExistingParent(resolvedWorkspace);
+        if (!parentDir) {
+          throw new Error('Workspace parent directory does not exist');
+        }
+        fs.accessSync(parentDir, fs.constants.W_OK);
+      }
+    } catch (err) {
+      issues.push({ field: 'workspace', message: `Workspace is not writable: ${err instanceof Error ? err.message : err}`, severity: 'error' });
+    }
+  }
+
   if (config.providers.anthropic?.apiKey && config.providers.anthropic.apiKey.length < 10) {
-    issues.push({ field: 'providers.anthropic.apiKey', message: 'API key looks too short', severity: 'warning', suggestion: 'Anthropic keys start with "sk-ant-" and are ~100+ chars' });
+    issues.push({ field: 'providers.anthropic.apiKey', message: 'API key looks too short', severity: 'warning', suggestion: 'Anthropic keys usually start with sk-ant- and are much longer.' });
   }
 
-
-
-  // Validate temperature
   if (config.temperature < 0 || config.temperature > 2) {
-    issues.push({ field: 'temperature', message: `Temperature ${config.temperature} is out of range`, severity: 'error', suggestion: 'Use 0.0–2.0 (recommended: 0.3–0.8)' });
+    issues.push({ field: 'temperature', message: `Temperature ${config.temperature} is out of range`, severity: 'error', suggestion: 'Use a value between 0.0 and 2.0.' });
   }
 
-  // Validate maxTokens
   if (config.maxTokens < 1 || config.maxTokens > 1_000_000) {
-    issues.push({ field: 'maxTokens', message: `maxTokens ${config.maxTokens} seems wrong`, severity: 'warning', suggestion: 'Typical values: 4096–16384' });
+    issues.push({ field: 'maxTokens', message: `maxTokens ${config.maxTokens} seems wrong`, severity: 'warning', suggestion: 'Typical values are between 4096 and 16384.' });
   }
 
-  // Heartbeat validation
+  if (config.maxIterations !== undefined && config.maxIterations < 1) {
+    issues.push({ field: 'maxIterations', message: 'maxIterations must be at least 1', severity: 'error' });
+  }
+
+  if (!validPort(config.apiPort)) {
+    issues.push({ field: 'apiPort', message: `Invalid API port: ${config.apiPort}`, severity: 'error' });
+  }
+
+  if (!validPort(config.webPort)) {
+    issues.push({ field: 'webPort', message: `Invalid web UI port: ${config.webPort}`, severity: 'error' });
+  }
+
+  if (config.apiPort && config.webPort && config.apiPort === config.webPort) {
+    issues.push({ field: 'apiPort', message: 'API port and web UI port must be different', severity: 'error' });
+  }
+
+  if (config.allowedOrigins?.includes('*') && !isLoopbackHost(config.apiHost)) {
+    issues.push({
+      field: 'allowedOrigins',
+      message: 'Wildcard CORS is not allowed when the HTTP API listens on a non-loopback host',
+      severity: 'error',
+      suggestion: 'Set allowedOrigins to explicit trusted origins or bind apiHost to 127.0.0.1.',
+    });
+  }
+
+  if (!isLoopbackHost(config.apiHost) && !process.env.MACH6_API_KEY && !process.env.API_KEY) {
+    issues.push({
+      field: 'apiHost',
+      message: 'HTTP API is exposed beyond localhost but MACH6_API_KEY is not configured',
+      severity: 'error',
+      suggestion: 'Set MACH6_API_KEY before binding the API to a non-loopback host.',
+    });
+  }
+
   if (config.heartbeat) {
     const hb = config.heartbeat;
     if (hb.quietHoursStart !== undefined && hb.quietHoursEnd !== undefined) {
@@ -51,12 +116,11 @@ export function validateConfig(config: SymbioteConfig): ValidationError[] {
         issues.push({ field: 'heartbeat.quietHours', message: 'Quiet hours must be 0–23', severity: 'error' });
       }
     }
-    if (hb.activeIntervalMin !== undefined && hb.activeIntervalMin < 5) {
-      issues.push({ field: 'heartbeat.activeIntervalMin', message: 'Active heartbeat interval < 5min is excessive', severity: 'warning', suggestion: 'Minimum recommended: 15 minutes' });
+    if (hb.activeIntervalMin !== undefined && hb.activeIntervalMin < 1) {
+      issues.push({ field: 'heartbeat.activeIntervalMin', message: 'Active heartbeat interval must be at least 1 minute', severity: 'error' });
     }
   }
 
-  // Timeout validation
   if (config.timeouts) {
     for (const [key, val] of Object.entries(config.timeouts)) {
       if (typeof val === 'number' && val < 1000) {
@@ -65,7 +129,6 @@ export function validateConfig(config: SymbioteConfig): ValidationError[] {
     }
   }
 
-  // Channel account key validation (phone numbers)
   if (config.channels) {
     for (const [name, ch] of Object.entries(config.channels)) {
       if (ch.accountKey && /^\d{10}$/.test(ch.accountKey)) {
@@ -73,13 +136,12 @@ export function validateConfig(config: SymbioteConfig): ValidationError[] {
           field: `channels.${name}.accountKey`,
           message: `Account key "${ch.accountKey}" looks like a phone number without country code`,
           severity: 'warning',
-          suggestion: `Did you mean "${ch.countryCode ?? '1'}${ch.accountKey}"? Include the country code.`,
+          suggestion: `Include the country code (for example, ${ch.countryCode ?? '1'}${ch.accountKey}).`,
         });
       }
     }
   }
 
-  // Budget validation
   if (config.budgets) {
     for (const [resource, budget] of Object.entries(config.budgets)) {
       if (budget.dailyLimit !== undefined && budget.dailyLimit < 1) {
@@ -88,13 +150,21 @@ export function validateConfig(config: SymbioteConfig): ValidationError[] {
     }
   }
 
+  if (config.discord?.enabled && !config.discord.token && !process.env.DISCORD_BOT_TOKEN) {
+    issues.push({ field: 'discord.token', message: 'Discord is enabled but no bot token is configured', severity: 'error', suggestion: 'Set discord.token or DISCORD_BOT_TOKEN.' });
+  }
+
+  if (config.whatsapp?.enabled && !config.whatsapp.authDir) {
+    issues.push({ field: 'whatsapp.authDir', message: 'WhatsApp is enabled but authDir is missing', severity: 'error' });
+  }
+
+  if ((config.ownerIds?.length ?? 0) === 0) {
+    issues.push({ field: 'ownerIds', message: 'No ownerIds configured', severity: 'warning', suggestion: 'Set ownerIds to restrict privileged access.' });
+  }
+
   return issues;
 }
 
-/**
- * Run validation and handle results. Returns true if config is usable.
- * On fatal errors: prints them and returns false (caller should exit).
- */
 export function validateAndReport(config: SymbioteConfig): boolean {
   const issues = validateConfig(config);
   const errors = issues.filter(i => i.severity === 'error');

@@ -60,11 +60,12 @@ export interface SandboxDenial {
 const PRIMARY_ADAPTERS = new Set(['discord-main', 'whatsapp-main']);
 
 export function classifySession(ctx: SessionContext): SessionTier {
-  // Admin: owner anywhere (Ali controls the system regardless of channel type)
+  if (ctx.channelType === 'internal' || ctx.adapterId === 'subagent') {
+    return 'standard';
+  }
   if (ctx.isOwner) {
     return 'admin';
   }
-  // Restricted: non-owner
   return 'restricted';
 }
 
