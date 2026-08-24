@@ -1,0 +1,50 @@
+{
+  "defaultProvider": "groq",
+  "defaultModel": "llama-3.3-70b-versatile",
+  "maxTokens": 8192,
+  "maxIterations": 25,
+  "temperature": 0.3,
+  "workspace": ".",
+  "sessionsDir": ".sessions",
+  "providers": {
+    "groq": {
+      "baseUrl": "https://api.groq.com/openai"
+    },
+    "anthropic": {},
+    "openai": {},
+    "ollama": {
+      "baseUrl": "http://127.0.0.1:11434"
+    },
+    "xai": {},
+    "github-copilot": {},
+    "gladius": {
+      "baseUrl": "http://127.0.0.1:8741"
+    }
+  },
+  "ownerIds": [],
+  "discord": {
+    "enabled": false,
+    "token": "${DISCORD_BOT_TOKEN}",
+    "botId": "${DISCORD_CLIENT_ID}",
+    "siblingBotIds": [],
+    "policy": {
+      "dmPolicy": "allowlist",
+      "groupPolicy": "mention-only",
+      "requireMention": true,
+      "allowedSenders": [],
+      "allowedGroups": []
+    }
+  },
+  "whatsapp": {
+    "enabled": false,
+    "authDir": "~/.symbiote/whatsapp-auth",
+    "autoRead": true,
+    "policy": {
+      "dmPolicy": "allowlist",
+      "groupPolicy": "mention-only",
+      "allowedSenders": [],
+      "allowedGroups": []
+    }
+  },
+  "apiPort": 3006
+}

@@ -1,0 +1,36 @@
+# dependencies & build output (reproducible via npm + npx tsc)
+node_modules/
+dist/
+
+# runtime data — never leaves this machine
+.sessions/
+.comb/
+.vdb/
+.ava/
+.pulse/
+hektor/
+whatsapp-auth/
+*.log
+*.pid
+
+# secrets & instance config
+.env
+symbiote.json
+symbiote.json.bak
+*.key
+*.pem
+
+# agent identity — per-instance, private by design
+IDENTITY.md
+SOUL.md
+USER.md
+AGENTS.md
+HEARTBEAT.md
+
+# vendored native libs
+.vendored-libs/
+
+# OS noise
+.DS_Store
+Thumbs.db
+*.swp
