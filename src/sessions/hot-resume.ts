@@ -166,9 +166,18 @@ export class HotResumeManager {
   }
 
   /** Get sessions that were recently active (within last N minutes) */
-  getResumableSessions(previousState: HotResumeState, maxAgeMinutes = 60): HotSessionState[] {
+  getResumableSessions(previousState: HotResumeState, maxAgeMinutes = 180): HotSessionState[] {
     const cutoff = Date.now() - maxAgeMinutes * 60 * 1000;
-    return previousState.sessions.filter(s => s.lastActivity > cutoff);
+    return previousState.sessions.filter(s => s.lastActivity > cutoff || s.wasActive);
+  }
+
+  /** Rehydrate a recovered session into active tracking. */
+  restoreSession(state: HotSessionState): void {
+    this.activeSessions.set(state.sessionId, {
+      ...state,
+      lastActivity: Date.now(),
+      wasActive: true,
+    });
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────

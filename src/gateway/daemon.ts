@@ -48,6 +48,7 @@ import { createSpawnTool, createSubAgentStatusTool } from '../tools/builtin/spaw
 import { SubAgentManager } from '../sessions/sub-agent.js';
 import { createMessageTool, createTypingTool, createPresenceTool, createDeleteMessageTool, createMarkReadTool } from '../tools/builtin/message.js';
 import { SessionManager } from '../sessions/manager.js';
+import { WorkJournal } from '../sessions/work-journal.js';
 import { buildSystemPrompt } from '../agent/system-prompt.js';
 import { runAgent } from '../agent/runner.js';
 import { PulseBudgetManager } from '../agent/pulse.js';
@@ -217,6 +218,18 @@ export class SymbioteGateway {
 
     // Sessions
     this.sessionManager = new SessionManager(this.config.sessionsDir);
+    const journal = new WorkJournal({
+      dir: this.config.sessionsDir,
+      sessionId: 'gateway',
+      objective: 'Maintain gateway runtime continuity',
+      activeFiles: ['src/gateway/daemon.ts', 'src/sessions/hot-resume.ts', 'src/agent/blink.ts'],
+    });
+    const journal = new WorkJournal({
+      dir: this.config.sessionsDir,
+      sessionId: 'gateway',
+      objective: 'Maintain gateway runtime continuity',
+      activeFiles: ['src/gateway/daemon.ts', 'src/sessions/hot-resume.ts', 'src/agent/blink.ts'],
+    });
 
     // System prompt (base — rebuilt per-message with channel context)
     this.systemPrompt = buildSystemPrompt({
@@ -592,7 +605,7 @@ export class SymbioteGateway {
         console.log(`${palette.dim}  [http]${palette.reset} Agent turn for ${palette.violet}${sessionId}${palette.reset}`);
         const startMs = Date.now();
         const maxIterations = Math.max(this.config.maxIterations ?? 25, this.pulseBudget.getEffectiveCap());
-        const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 10, prepareAt: 3, cooldownMs: 1000 });
+        const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 14, prepareAt: 3, cooldownMs: 800 });
 
         let currentSessionMessages = session.messages;
         let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
@@ -615,16 +628,45 @@ export class SymbioteGateway {
             onToolEnd: (name) => console.log(`  ${palette.green}✓ ${name}${palette.reset}`),
           });
 
-          // Handle abort — save state and break
+          // Handle abort — treat as a resumable boundary, not a terminal failure.
           if (result.aborted) {
-            console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}Agent aborted${palette.reset} (http). Preserving session state.`);
+            console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}Agent aborted${palette.reset} (http). Preserving session state and attempting resume if the session is still active.`);
             session.messages = result.messages;
+            journal.add('risk', 'Turn aborted; preserving state for resume');
             this.sessionManager.save(session);
-            finalResult = result;
+
+            if (blinkCtrl.shouldContinue()) {
+              journal.add('checkpoint', `Blink after ${result.iterations} iterations and ${result.toolCalls.length} tool calls`);
+              blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);
+              const resumeDelay = Math.max(250, blinkCtrl.getCooldownMs());
+              const resumeMessages = [...result.messages];
+              const last = resumeMessages[resumeMessages.length - 1];
+              if (last?.role === 'assistant' && (last.content === '[Max iterations reached]' || last.content === '[Blink depth exceeded]')) {
+                resumeMessages.pop();
+              }
+              if (blinkCtrl.shouldPrepare(1)) {
+                resumeMessages.push({ role: 'assistant', content: blinkCtrl.getCheckpointMessage(result.iterations) });
+              }
+              resumeMessages.push({ role: 'user', content: blinkCtrl.getResumeMessage() });
+              currentSessionMessages = resumeMessages;
+              await new Promise(r => setTimeout(r, resumeDelay));
+              continue;
+            }
+
+            finalResult = {
+              text: '[Blink depth exceeded]',
+              messages: result.messages,
+              toolCalls: result.toolCalls,
+              iterations: result.iterations,
+              maxIterationsHit: false,
+              aborted: true,
+              temperatureHistory: result.temperatureHistory,
+            };
             break;
           }
 
           if (result.maxIterationsHit && blinkCtrl.needsBlink(true)) {
+            journal.add('checkpoint', `Blink after ${result.iterations} iterations and ${result.toolCalls.length} tool calls`);
             blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);
             console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}⚡ Blink #${blinkCtrl.getState().depth}${palette.reset} (http) — continuing`);
             currentSessionMessages = result.messages;
@@ -634,11 +676,15 @@ export class SymbioteGateway {
                 currentSessionMessages.pop();
               }
             }
+            if (blinkCtrl.shouldPrepare(1)) {
+              currentSessionMessages.push({ role: 'assistant', content: blinkCtrl.getCheckpointMessage(result.iterations) });
+            }
             currentSessionMessages.push({ role: 'user', content: blinkCtrl.getResumeMessage() });
             await new Promise(r => setTimeout(r, blinkCtrl.getCooldownMs()));
             continue;
           }
 
+          journal.add('progress', `Completed turn in ${result.iterations} iterations`);
           blinkCtrl.recordComplete(result.iterations, result.toolCalls.length);
           finalResult = result;
           break;
@@ -653,6 +699,7 @@ export class SymbioteGateway {
           session.messages = finalResult.messages;
           if (finalResult.text && finalResult.text !== '[Max iterations reached]' && finalResult.text !== '[Blink depth exceeded]') {
             session.messages.push({ role: 'assistant', content: finalResult.text });
+            journal.add('progress', 'Assistant response finalized');
           }
           this.sessionManager.save(session);
         }
@@ -699,7 +746,7 @@ export class SymbioteGateway {
 
         // Subscribe to this session
         bus.subscribe(route.sessionId, (envelope) => {
-          this.handleEnvelope(envelope);
+          void this.handleEnvelope(envelope);
         });
 
         // Subscribe to interrupts

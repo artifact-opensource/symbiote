@@ -30,10 +30,10 @@ export interface BlinkConfig {
 
 export const DEFAULT_BLINK_CONFIG: BlinkConfig = {
   enabled: true,
-  maxDepth: 5,
+  maxDepth: 32,
   prepareAt: 3,
   cooldownMs: 1000,
-  checkpointInterval: 25,
+  checkpointInterval: 6,
 };
 
 export type BlinkPhase = 'normal' | 'prepare' | 'blinking' | 'resumed' | 'capped';
@@ -103,7 +103,7 @@ export class BlinkController {
   /** Can we do another blink? */
   shouldContinue(): boolean {
     if (!this.config.enabled) return this.state.depth === 0;
-    return this.state.depth < this.config.maxDepth;
+    return this.state.depth < this.config.maxDepth || this.state.phase === 'prepare';
   }
 
   /** Does this agent result require a blink?
