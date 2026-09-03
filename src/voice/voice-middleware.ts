@@ -13,16 +13,27 @@
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import type { BusEnvelope } from '../channels/types.js';
+import { isWindows } from '../runtime/platform.js';
 
 const execAsync = promisify(exec);
 
 // Python environments
-const HEKTOR_PYTHON = '/home/adam/workspace/.hektor-env/bin/python3';
-const VOICE_PYTHON = '/home/adam/workspace/.ava-voice/venv/bin/python3';
-const VOICE_DIR = '/home/adam/workspace/voice';
-const SPEAK_SCRIPT = '/home/adam/workspace/.ava-voice/speak.py';
+const WORKSPACE = process.env.MACH6_WORKSPACE ?? process.cwd();
+const HEKTOR_PYTHON = process.env.SYMBIOTE_HEKTOR_PYTHON
+  ?? process.env.MACH6_HEKTOR_PYTHON
+  ?? (isWindows() ? 'py -3' : 'python3');
+const VOICE_PYTHON = process.env.SYMBIOTE_VOICE_PYTHON
+  ?? process.env.MACH6_VOICE_PYTHON
+  ?? HEKTOR_PYTHON;
+const VOICE_DIR = process.env.SYMBIOTE_VOICE_DIR
+  ?? process.env.MACH6_VOICE_DIR
+  ?? path.join(WORKSPACE, 'voice');
+const SPEAK_SCRIPT = process.env.SYMBIOTE_SPEAK_SCRIPT
+  ?? process.env.MACH6_SPEAK_SCRIPT
+  ?? path.join(VOICE_DIR, 'speak.py');
 
 // ─── Inbound: Voice → Text ─────────────────────────────────────────────
 
@@ -123,7 +134,7 @@ export async function processVoiceInbound(envelope: BusEnvelope): Promise<Transc
 export async function generateVoiceReply(text: string): Promise<string | null> {
   if (!text || text.length === 0) return null;
 
-  const outputPath = `/tmp/ava-voice-reply-${Date.now()}.ogg`;
+  const outputPath = path.join(os.tmpdir(), `symbiote-voice-reply-${Date.now()}.ogg`);
   
   // For long texts, use the chunked TTS
   const useChunked = text.length > 250;

@@ -1,10 +1,9 @@
 // Symbiote — Config loading
 
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
 import type { TemperatureConfig, TaskCategory } from '../agent/temperature.js';
+import { appPath, configSearchPaths } from '../runtime/platform.js';
 
 export interface ChannelConfig {
   accountKey?: string;
@@ -193,10 +192,7 @@ function resolveEnvKeys(config: SymbioteConfig): SymbioteConfig {
 export function loadConfig(configPath?: string): SymbioteConfig {
   const tryPaths = configPath
     ? [configPath]
-    : [
-        path.join(process.cwd(), 'mach6.json'),
-        path.join(os.homedir(), '.mach6', 'config.json'),
-      ];
+    : configSearchPaths();
 
   for (const p of tryPaths) {
     try {

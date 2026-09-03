@@ -7,6 +7,7 @@ import { scaffoldAgent } from './agent-scaffold.js';
 import { loadConfig, type SymbioteConfig } from '../config/config.js';
 import { validateAndReport } from '../config/validator.js';
 import { APP_VERSION, RELEASE_CODENAME } from '../meta/version.js';
+import { appPath } from '../runtime/platform.js';
 
 export interface ProviderChoice {
   id: string;
@@ -103,7 +104,7 @@ export function defaultSetupInput(existing?: SymbioteConfig, envPath = path.reso
     discordBotId: env.DISCORD_CLIENT_ID || existing?.discord?.botId,
     whatsappEnabled: !!existing?.whatsapp?.enabled,
     whatsappPhoneNumber: existing?.whatsapp?.phoneNumber,
-    whatsappAuthDir: existing?.whatsapp?.authDir ?? path.join(os.homedir(), '.mach6', 'whatsapp-auth'),
+    whatsappAuthDir: existing?.whatsapp?.authDir ?? appPath('whatsapp-auth'),
     providerApiKey: providerChoice.envKey ? (process.env[providerChoice.envKey] ?? env[providerChoice.envKey]) : undefined,
     agent: {
       enabled: !fs.existsSync(path.join(workspace, 'SOUL.md')),

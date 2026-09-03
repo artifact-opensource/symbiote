@@ -30,6 +30,7 @@ import {
 } from './brand.js';
 import { APP_VERSION, RELEASE_CODENAME } from '../meta/version.js';
 import { loadConfig } from '../config/config.js';
+import { configSearchPaths, preferredExistingPath } from '../runtime/platform.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,11 +52,7 @@ function getConfigPath(): string | undefined {
   const args = process.argv.slice(3);
   const configArg = args.find(a => a.startsWith('--config='));
   if (configArg) return configArg.split('=')[1];
-  const cwd = path.join(process.cwd(), 'mach6.json');
-  if (fs.existsSync(cwd)) return cwd;
-  const home = path.join(os.homedir(), '.mach6', 'config.json');
-  if (fs.existsSync(home)) return home;
-  return undefined;
+  return preferredExistingPath(configSearchPaths());
 }
 
 function isRunning(): { running: boolean; pid?: number } {

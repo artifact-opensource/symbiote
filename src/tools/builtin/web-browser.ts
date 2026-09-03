@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ToolDefinition } from '../types.js';
+import { appHomeDir, pythonCommand } from '../../runtime/platform.js';
 
 const __filename_esm = fileURLToPath(import.meta.url);
 const __dirname_esm = dirname(__filename_esm);
@@ -41,9 +42,13 @@ function ensureSidecar(): ChildProcess {
     throw new Error('browser-sidecar.py not found. Ensure the web/ directory is present in the installation.');
   }
 
-  sidecar = spawn('python3', [sidecarPath], {
+  const python = pythonCommand(sidecarPath);
+  sidecar = spawn(python.file, python.args, {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      SYMBIOTE_HOME: process.env.SYMBIOTE_HOME ?? appHomeDir(),
+    },
   });
 
   sidecar.stdout!.on('data', (chunk: Buffer) => {
