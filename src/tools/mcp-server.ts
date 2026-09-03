@@ -30,6 +30,7 @@ import { ttsTool } from './builtin/tts.js';
 import { webFetchTool } from './builtin/web-fetch.js';
 import { memorySearchTool } from './builtin/memory.js';
 import { combRecallTool, combStageTool } from './builtin/comb.js';
+import { APP_VERSION } from '../meta/version.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -45,7 +46,7 @@ interface JsonRpcMessage {
 // ── Server State ───────────────────────────────────────────────────────────
 
 const SERVER_NAME = 'symbiote';
-const SERVER_VERSION = '1.3.0';
+const SERVER_VERSION = APP_VERSION;
 const PROTOCOL_VERSION = '2025-03-26';
 
 let initialized = false;

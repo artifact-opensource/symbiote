@@ -1,12 +1,13 @@
 # Symbiote Releases
 
-## Latest: v3.0.0 Apex (August 23, 2026)
-Production hardening release with a new desktop installer UI, repaired CLI install flow, fixed HTTP API exposure, corrected sub-agent control semantics, and aligned launcher/service assets.
+## Latest: v4.0.0 Apex (September 3, 2026)
+Windows-first production hardening release with cross-platform shell/path fixes, installer and launcher cleanup, packaged distribution prep, refreshed release assets, and a rebuilt static landing experience.
 
 ## All Releases
 
 | Version | Date | Highlights |
 |---------|------|-----------|
+| **v4.0.0 Apex** | Sep 3, 2026 | Windows-first runtime fixes, installer cleanup, packaging prep, docs + landing overhaul |
 | **v3.0.0 Apex** | Aug 23, 2026 | Production hardening, desktop installer UI, CLI install overhaul, release alignment |
 | **v2.1.0** | Mar 12, 2026 | Circuit breaker failover, hot resume, metrics, health endpoint |
 | **v2.0.0** | Mar 12, 2026 | Rebrand, IPC identity, Playwright tools, VDB, voice, installers |

@@ -1,7 +1,7 @@
 {
   "name": "symbiote",
-  "version": "3.0.0",
-  "description": "Symbiote \u2014 AI agent framework with persistent memory and web automation. Runs on a laptop.",
+  "version": "4.0.0",
+  "description": "Symbiote — AI agent framework with persistent memory and web automation. Runs on a laptop.",
   "type": "module",
   "main": "dist/index.js",
   "bin": {

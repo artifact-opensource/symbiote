@@ -210,6 +210,7 @@ async function cmdInstall() {
       await startInstallerUi();
       console.log(info('Installer UI opened in your browser. Leave this window open until setup is saved.'));
       console.log();
+      await new Promise<void>(() => {});
       return;
     }
     const { runInteractiveSetup } = await import('./setup.js');
@@ -558,6 +559,7 @@ async function cmdInit() {
   if (useUi) {
     const { startInstallerUi } = await import('./installer-ui.js');
     await startInstallerUi();
+    await new Promise<void>(() => {});
     return;
   }
   const { runInteractiveSetup } = await import('./setup.js');

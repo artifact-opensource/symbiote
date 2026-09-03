@@ -1,58 +1,35 @@
-# Release Notes - v3.0.0 Apex
+# Release Notes - v4.0.0 Apex
 
-## Symbiote v3.0.0 Apex - Production Hardening + Installer Overhaul
+## Symbiote v4.0.0 Apex - Windows-First Hardening + Packaging Prep
 
-**Date:** August 23, 2026
+**Date:** September 3, 2026
 
-This release closes production gaps across API exposure, sub-agent control, installation, versioning, and deployment assets. It also introduces a professional desktop installer UI and a shared setup flow used by both the terminal and browser-based installers.
+This release prepares Symbiote for broader production deployment and public packaging by fixing Windows-first runtime issues, cleaning up cross-platform paths, tightening installer/runtime flows, and refreshing release assets.
 
-### Production Hardening
+### Windows-First Runtime Fixes
 
-- **HTTP API authentication is enforced** for both `/api/v1/chat` and `/api/chat`
-- **HTTP API now binds to configurable hosts** and defaults to loopback-safe settings
-- **Loopback-only web root serving** blocks remote access to the embedded web UI on the API port
-- **HTTP request owner impersonation is prevented** unless identity is IPC-verified
-- **Config validation now runs before startup and reload** so broken production config is rejected early
+- **Core shell tools now use platform-aware shells** instead of assuming `sh -c`
+- **Background process execution is portable** across Windows, Linux, and macOS
+- **IPC keyring lookup no longer assumes `/etc/mach6`** and now respects portable app-home resolution
+- **Copilot token cache paths are unified** through shared runtime path helpers
+- **Voice reply temp files use `os.tmpdir()`** instead of raw Unix temp paths
 
-### Sub-Agent Reliability
+### Web Automation & Tooling
 
-- **Real depth tracking** for nested sub-agents
-- **Working kill semantics** via abort signals
-- **Working steering semantics** via controlled abort + resume
-- **Sub-agents no longer inherit owner/admin privileges** by accident
+- **Playwright sidecar startup now resolves Python portably**
+- **Chromium path is configurable** instead of hardcoded to `/usr/bin/chromium`
+- **Encrypted browser profile permissions are applied only where supported**
+- **Edge TTS execution no longer depends on `/bin/bash` activation flows**
 
-### Installer & Setup
+### Installer, Launchers, and Packaging
 
-- **New desktop installer UI** via `symbiote init --ui`
-- **New double-click launchers**: `install.command` and `install.cmd`
-- **Shared guided setup core** powers both CLI and desktop installer flows
-- **CLI install flow now installs, builds, configures, and launches**
-- **WhatsApp-enabled CLI installs start in the foreground** so the QR code is visible during pairing
-- **Existing `.env` secrets are preserved** during guided reconfiguration
+- Hardened packaged/runtime asset discovery for installer and browser flows
+- Preserved legacy `mach6` compatibility while preparing current Symbiote release assets
+- Updated install guidance to use **`npm install -g symbiote`**
+- Prepared the repository for **v4.0.0 Apex** packaging and maintainer release publishing
 
-### Launchers & Deployment Assets
+### Release Handoff
 
-- Added `symbiote.sh` and `symbiote.ps1`
-- Added `symbiote-gateway.service`
-- Repaired legacy `mach6.*` wrappers for compatibility
-- Fixed browser sidecar path resolution for packaged/runtime installs
-
-### Version Alignment
-
-- Runtime components now read the version from `package.json`
-- CLI, gateway, MCP bridge, metrics, and web status endpoints now report a single version
-- Release metadata aligned to **v3.0.0 Apex**
-
-### Upgrade Path
-
-```bash
-git pull origin main
-npm install
-npm run build
-symbiote install
-```
-
-### Notes
-
-- Existing `mach6.json` deployments remain compatible
-- New installs should prefer the `symbiote-*` launcher and service assets
+- **Suggested tag:** `v4.0.0`
+- **Suggested release title:** `v4.0.0 Apex`
+- **Publish note:** create the Git tag and GitHub release from a maintainer environment, then attach these release notes as the release body
