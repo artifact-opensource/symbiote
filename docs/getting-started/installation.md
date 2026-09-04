@@ -9,7 +9,7 @@
 ## From npm
 
 ```bash
-npm install -g symbiote-core
+npm install -g symbiote
 ```
 
 ## From Source
@@ -47,8 +47,8 @@ Environment variables are auto-loaded from `.env` via the built-in dotenv loader
 
 | Platform | Status |
 |----------|--------|
-| Linux (x64, arm64) | ✅ Fully supported |
-| macOS (Intel, Apple Silicon) | ✅ Fully supported |
-| Windows (x64) | ✅ Fully supported |
+| Linux (x64, arm64) | ✅ Supported |
+| macOS (Intel, Apple Silicon) | ✅ Supported |
+| Windows (x64) | ✅ Supported |
 
-Symbiote uses `os.tmpdir()` and `os.homedir()` for all path resolution — zero hardcoded Unix paths. The same codebase runs everywhere without modification.
+Symbiote resolves temp, home, config, and credential paths through platform-aware runtime helpers. Legacy `mach6` paths remain supported for compatibility, while new installs use the current Symbiote runtime assets.

@@ -5,7 +5,7 @@
 
 **Build persistent AI agents. Single process. Any machine.**
 
-![](https://img.shields.io/badge/Version-3.0.0-4B0082?style=for-the-badge&labelColor=0D1117&logo=git&logoColor=white)
+![](https://img.shields.io/badge/Version-4.0.0-4B0082?style=for-the-badge&labelColor=0D1117&logo=git&logoColor=white)
 ![](https://img.shields.io/badge/Tools-38-4B0082?style=for-the-badge&labelColor=0D1117&logo=hammer&logoColor=white)
 ![](https://img.shields.io/badge/Providers-8-4B0082?style=for-the-badge&labelColor=0D1117&logo=openai&logoColor=white)
 ![](https://img.shields.io/badge/TypeScript-18K_LOC-4B0082?style=for-the-badge&labelColor=0D1117&logo=typescript&logoColor=white)
@@ -37,10 +37,10 @@ A single TypeScript process handles messaging (WhatsApp, Discord), LLM routing (
 npm install -g symbiote
 
 # Interactive setup — generates mach6.json + .env
-mach6 init
+symbiote init
 
 # Start the daemon
-mach6 start
+symbiote start
 ```
 
 Or from source:
@@ -51,7 +51,7 @@ cd Symbiote && npm install && npm run build
 node dist/gateway/daemon.js --config=mach6.json
 ```
 
-> **Windows:** Fully supported. Use `.\install.ps1` for automated setup or `node dist/gateway/daemon.js --config=mach6.json`.
+> **Platform support:** Windows, Linux, and macOS launchers are supported. Legacy `mach6` paths remain compatible while the packaged Symbiote runtime uses cross-platform path resolution internally.
 
 ---
 

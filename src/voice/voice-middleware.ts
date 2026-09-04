@@ -10,19 +10,34 @@
  * 2. After finalResult.text → call generateVoiceReply()
  */
 
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import type { BusEnvelope } from '../channels/types.js';
+import { pythonCommand } from '../runtime/platform.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // Python environments
-const HEKTOR_PYTHON = '/home/adam/workspace/.hektor-env/bin/python3';
-const VOICE_PYTHON = '/home/adam/workspace/.ava-voice/venv/bin/python3';
-const VOICE_DIR = '/home/adam/workspace/voice';
-const SPEAK_SCRIPT = '/home/adam/workspace/.ava-voice/speak.py';
+const WORKSPACE = process.env.MACH6_WORKSPACE ?? process.cwd();
+const HEKTOR_PYTHON = process.env.SYMBIOTE_HEKTOR_PYTHON
+  ?? process.env.MACH6_HEKTOR_PYTHON;
+const VOICE_PYTHON = process.env.SYMBIOTE_VOICE_PYTHON
+  ?? process.env.MACH6_VOICE_PYTHON
+  ?? HEKTOR_PYTHON;
+const VOICE_DIR = process.env.SYMBIOTE_VOICE_DIR
+  ?? process.env.MACH6_VOICE_DIR
+  ?? path.join(WORKSPACE, 'voice');
+const SPEAK_SCRIPT = process.env.SYMBIOTE_SPEAK_SCRIPT
+  ?? process.env.MACH6_SPEAK_SCRIPT
+  ?? path.join(VOICE_DIR, 'speak.py');
+
+function pythonExec(scriptPath: string, executable?: string): { file: string; args: string[] } {
+  if (executable) return { file: executable, args: [scriptPath] };
+  return pythonCommand(scriptPath);
+}
 
 // ─── Inbound: Voice → Text ─────────────────────────────────────────────
 
@@ -51,8 +66,10 @@ export function isVoiceMessage(envelope: BusEnvelope): boolean {
  */
 export async function transcribeAudio(audioPath: string): Promise<TranscriptionResult> {
   try {
-    const { stdout } = await execAsync(
-      `${HEKTOR_PYTHON} ${VOICE_DIR}/stt.py "${audioPath}"`,
+    const python = pythonExec(path.join(VOICE_DIR, 'stt.py'), HEKTOR_PYTHON);
+    const { stdout } = await execFileAsync(
+      python.file,
+      [...python.args, audioPath],
       { timeout: 120_000 }
     );
     const result = JSON.parse(stdout.trim());
@@ -123,20 +140,24 @@ export async function processVoiceInbound(envelope: BusEnvelope): Promise<Transc
 export async function generateVoiceReply(text: string): Promise<string | null> {
   if (!text || text.length === 0) return null;
 
-  const outputPath = `/tmp/ava-voice-reply-${Date.now()}.ogg`;
+  const outputPath = path.join(os.tmpdir(), `symbiote-voice-reply-${Date.now()}.ogg`);
   
   // For long texts, use the chunked TTS
   const useChunked = text.length > 250;
   
   try {
     if (useChunked) {
-      const { stdout } = await execAsync(
-        `${HEKTOR_PYTHON} ${VOICE_DIR}/tts.py "${text.replace(/"/g, '\\"')}" --output "${outputPath}"`,
-        { timeout: 300_000 } // 5 min for long texts
+      const python = pythonExec(path.join(VOICE_DIR, 'tts.py'), HEKTOR_PYTHON);
+      await execFileAsync(
+        python.file,
+        [...python.args, text, '--output', outputPath],
+        { timeout: 300_000 }
       );
     } else {
-      await execAsync(
-        `${VOICE_PYTHON} ${SPEAK_SCRIPT} "${text.replace(/"/g, '\\"')}" --output "${outputPath}"`,
+      const python = pythonExec(SPEAK_SCRIPT, VOICE_PYTHON);
+      await execFileAsync(
+        python.file,
+        [...python.args, text, '--output', outputPath],
         { timeout: 120_000 }
       );
     }

@@ -15,6 +15,7 @@
 
 import * as http from 'node:http';
 import { IpcIdentity, type IpcKeyring } from './ipc-identity.js';
+import { defaultIpcKeyringPath } from '../runtime/platform.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -75,7 +76,7 @@ export class IpcClient {
     // Get target connection details from keyring
     // We need to re-read the keyring for host/port — the public API only exposes id/name/description
     // So we access the keyring directly via a fresh read
-    const keyringPath = process.env.IPC_KEYRING_PATH ?? '/etc/mach6/ipc-keyring.json';
+    const keyringPath = defaultIpcKeyringPath();
     const { readFileSync } = await import('node:fs');
     const keyring: IpcKeyring = JSON.parse(readFileSync(keyringPath, 'utf-8'));
     const targetAgent = keyring.agents[targetAgentId];
@@ -163,7 +164,7 @@ export class IpcClient {
    * Check if a target agent is reachable (health endpoint).
    */
   async ping(targetAgentId: string): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
-    const keyringPath = process.env.IPC_KEYRING_PATH ?? '/etc/mach6/ipc-keyring.json';
+    const keyringPath = defaultIpcKeyringPath();
     const { readFileSync } = await import('node:fs');
     const keyring: IpcKeyring = JSON.parse(readFileSync(keyringPath, 'utf-8'));
     const targetAgent = keyring.agents[targetAgentId];

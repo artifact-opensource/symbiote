@@ -1,5 +1,25 @@
 # Changelog
 
+## v4.0.0 (2026-09-03) — Apex
+
+### Windows-First Runtime Portability
+- Replaced Unix-only shell assumptions in core execution tools with platform-aware shell dispatch
+- Added shared runtime helpers for app home, config discovery, IPC keyring lookup, Python launch, and shell execution
+- Removed hardcoded `/etc`, `/usr/bin/chromium`, `/bin/bash`, `/home/...`, and raw `/tmp/...` assumptions from key runtime paths
+- Preserved legacy `mach6` paths for compatibility while preferring current Symbiote runtime locations
+
+### Installer & Launch Flow Cleanup
+- Hardened launcher/runtime assets for Windows, Linux, and macOS
+- Improved browser sidecar startup so packaged and cross-platform installs can resolve Python and browser paths correctly
+- Aligned setup defaults with portable app data locations for new installs
+
+### Release & Packaging Prep
+- Aligned package metadata and runtime version reporting to **v4.0.0 Apex**
+- Refreshed release surfaces and static landing assets for public packaging and deployment handoff
+- Updated installation guidance to use the published `symbiote` package name
+
+---
+
 ## v3.0.0 (2026-08-23) — Apex
 
 ### Production Hardening

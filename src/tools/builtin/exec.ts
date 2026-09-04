@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process';
 import { getProcessManager } from './process.js';
 import type { ToolDefinition } from '../types.js';
+import { isWindows, shellCommand, wrapPtyCommand } from '../../runtime/platform.js';
 
 export const execTool: ToolDefinition = {
   name: 'exec',
@@ -47,16 +48,18 @@ export const execTool: ToolDefinition = {
     const timeoutMs = ((input.timeout as number) ?? 30) * 1000;
 
     // PTY wrapping: use `script` to allocate a pseudo-terminal
-    const actualCommand = pty
-      ? `script -qec ${JSON.stringify(command)} /dev/null`
-      : command;
+    const actualCommand = pty ? wrapPtyCommand(command) : command;
+    const shell = shellCommand(actualCommand);
 
     return new Promise<string>((resolve) => {
       const chunks: Buffer[] = [];
-      const proc = spawn('sh', ['-c', actualCommand], {
+      const proc = spawn(shell.file, shell.args, {
         cwd: workdir,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, TERM: pty ? 'xterm-256color' : (process.env.TERM ?? 'dumb') },
+        env: {
+          ...process.env,
+          TERM: pty && !isWindows() ? 'xterm-256color' : (process.env.TERM ?? 'dumb'),
+        },
       });
 
       const timer = setTimeout(() => {

@@ -15,8 +15,8 @@ $Branch = 'main'
 
 Write-Host ""
 Write-Host "╔══════════════════════════════════════════════╗" -ForegroundColor Magenta
-Write-Host "║  Symbiote — Desktop Installer                ║" -ForegroundColor Magenta
-Write-Host "║  Apex · production-ready setup               ║" -ForegroundColor Magenta
+Write-Host "║  Symbiote v4.0 — Desktop Installer           ║" -ForegroundColor Magenta
+Write-Host "║  Apex · cross-platform setup                 ║" -ForegroundColor Magenta
 Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Magenta
 Write-Host ""
 

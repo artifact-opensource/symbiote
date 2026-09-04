@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Symbiote Installer</title>
+<title>Symbiote v4 Installer</title>
 <style>
 :root {
   --bg: #0b0d12;
@@ -31,6 +31,8 @@ main { max-width: 1100px; margin: 0 auto; padding: 40px 20px 60px; }
   box-shadow: 0 24px 80px rgba(0,0,0,.28);
 }
 .badge { display: inline-flex; gap: 8px; align-items: center; color: var(--accent-2); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; }
+.pillbar { display:flex; gap:10px; flex-wrap:wrap; margin-top:16px; }
+.pill { padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.04); border:1px solid var(--border); color:var(--muted); font-size:12px; }
 h1 { margin: 10px 0 8px; font-size: 44px; line-height: 1.05; }
 p.lead { color: var(--muted); font-size: 16px; line-height: 1.6; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
@@ -69,13 +71,18 @@ small.note { display: block; color: var(--muted); margin-top: 10px; line-height:
     <div class="card">
       <div class="badge">Symbiote <span id="version">…</span> · <span id="codename">Apex</span></div>
       <h1>Desktop installer</h1>
-      <p class="lead">Configure a production-ready Symbiote deployment from a local desktop UI. This writes <code>mach6.json</code>, <code>.env</code>, and optional workspace identity files.</p>
+      <p class="lead">Configure a production-ready Symbiote deployment from a local desktop UI. v4 tightens Windows, Linux, and macOS install flows while preserving legacy <code>mach6</code> compatibility where required.</p>
+      <div class="pillbar">
+        <div class="pill">Windows-first runtime fixes</div>
+        <div class="pill">Loopback-safe defaults</div>
+        <div class="pill">Packaged release ready</div>
+      </div>
       <div class="kpi">
         <div><strong>1</strong><span>Write config + env</span></div>
         <div><strong>2</strong><span>Prepare channels</span></div>
         <div><strong>3</strong><span>Launch from CLI for QR</span></div>
       </div>
-      <small class="note">If you enable WhatsApp, finish here and then run <code>symbiote install</code> in a terminal to complete pairing and scan the QR code.</small>
+      <small class="note">This writes <code>mach6.json</code>, <code>.env</code>, and optional workspace identity files. If you enable WhatsApp, finish here and then run <code>symbiote install</code> in a terminal to complete pairing and scan the QR code.</small>
     </div>
     <div class="card">
       <h3 style="margin-top:0">What this covers</h3>
