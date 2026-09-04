@@ -14,7 +14,7 @@ Fastest inference available — 280-1000 tok/sec on Groq's custom LPU (Language 
 GROQ_API_KEY=gsk_...
 ```
 
-3. Configure in `symbiote.json`:
+3. Configure in `mach6.json`:
 
 ```json
 {

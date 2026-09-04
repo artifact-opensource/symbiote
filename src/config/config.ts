@@ -1,10 +1,9 @@
 // Symbiote — Config loading
 
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
 import type { TemperatureConfig, TaskCategory } from '../agent/temperature.js';
+import { appPath, configSearchPaths } from '../runtime/platform.js';
 
 export interface ChannelConfig {
   accountKey?: string;
@@ -25,59 +24,127 @@ export interface HeartbeatConfigBlock {
   quietHoursEnd?: number;
 }
 
+export interface ChannelPolicyConfig {
+  dmPolicy?: string;
+  groupPolicy?: string;
+  requireMention?: boolean;
+  allowedSenders?: string[];
+  allowedGroups?: string[];
+  ownerIds?: string[];
+  selfId?: string;
+  selfIdAliases?: string[];
+}
+
+export interface DiscordConfigBlock {
+  enabled?: boolean;
+  token?: string;
+  botId?: string;
+  adapterId?: string;
+  siblingBotIds?: string[];
+  policy?: ChannelPolicyConfig;
+  promptFiles?: { path: string; label: string }[];
+}
+
+export interface WhatsAppConfigBlock {
+  enabled?: boolean;
+  authDir?: string;
+  phoneNumber?: string;
+  autoRead?: boolean;
+  markOnline?: boolean;
+  policy?: ChannelPolicyConfig;
+}
+
+export interface ProviderConfigBlock {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  timeoutMs?: number;
+  contextWindow?: number;
+  [key: string]: unknown;
+}
+
 export interface SymbioteConfig {
-  providers: {
-    anthropic?: { apiKey?: string; baseUrl?: string; timeoutMs?: number };
-    // openai provider exists as protocol layer (used by Copilot/Gladius) but not as direct config
-    'github-copilot'?: { baseUrl?: string; timeoutMs?: number };
-    gladius?: { baseUrl?: string; timeoutMs?: number };
-    groq?: { apiKey?: string; baseUrl?: string; model?: string; timeoutMs?: number };
-    ollama?: { baseUrl?: string; model?: string; timeoutMs?: number; contextWindow?: number };
-    [key: string]: Record<string, unknown> | undefined;
+  name?: string;
+  emoji?: string;
+  providers: Record<string, ProviderConfigBlock | undefined> & {
+    anthropic?: ProviderConfigBlock;
+    openai?: ProviderConfigBlock;
+    gemini?: ProviderConfigBlock;
+    groq?: ProviderConfigBlock;
+    xai?: ProviderConfigBlock;
+    nvidia?: ProviderConfigBlock;
+    ollama?: ProviderConfigBlock;
+    gladius?: ProviderConfigBlock;
+    'github-copilot'?: ProviderConfigBlock;
   };
   defaultProvider: string;
   defaultModel: string;
-  /** Ordered fallback provider chain — tried in sequence if primary fails */
   fallbackProviders?: string[];
   maxTokens: number;
   temperature: number;
   maxIterations?: number;
   workspace: string;
-  workspaceRoots?: string[];
   sessionsDir?: string;
+  ownerIds?: string[];
+  apiPort?: number;
+  apiHost?: string;
+  webPort?: number;
+  webHost?: string;
+  allowedOrigins?: string[];
   heartbeat?: HeartbeatConfigBlock;
   timeouts?: Record<string, number>;
   channels?: Record<string, ChannelConfig>;
   budgets?: Record<string, BudgetConfig>;
-  orchestrator?: any;
   adaptiveTemperature?: {
     adaptive?: boolean;
     profile?: Partial<Record<string, number>>;
     default?: number;
     logChanges?: boolean;
   };
+  discord?: DiscordConfigBlock;
+  discordExtra?: DiscordConfigBlock[];
+  whatsapp?: WhatsAppConfigBlock;
+  tools?: {
+    enabled?: boolean;
+  };
 }
 
 const DEFAULT_CONFIG: SymbioteConfig = {
   providers: {},
-  defaultProvider: 'free-ai',
-  defaultModel: 'glm/glm-5.2',
+  defaultProvider: 'github-copilot',
+  defaultModel: 'claude-sonnet-4',
   maxTokens: 8192,
   temperature: 0.7,
-  maxIterations: 100,
+  maxIterations: 50,
   workspace: process.cwd(),
+  ownerIds: [],
+  apiPort: 3006,
+  apiHost: '127.0.0.1',
+  webPort: 3009,
+  webHost: '127.0.0.1',
+  allowedOrigins: [
+    'http://127.0.0.1:3009',
+    'http://localhost:3009',
+  ],
 };
+
+function stripJsonComments(raw: string): string {
+  return raw.replace(
+    /"(?:[^"\\]|\\.)*"|\/\/.*$|\/\*[\s\S]*?\*\//gm,
+    (match) => match.startsWith('"') ? match : ''
+  );
+}
 
 /**
  * Recursively resolve ${ENV_VAR} references in string values.
  */
-function resolveEnvVars(obj: any): any {
+function resolveEnvVars(obj: unknown): unknown {
   if (typeof obj === 'string') {
     return obj.replace(/\$\{(\w+)\}/g, (_, key) => process.env[key] ?? '');
   }
   if (Array.isArray(obj)) return obj.map(resolveEnvVars);
   if (obj && typeof obj === 'object') {
-    const result: any = {};
+    const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj)) result[k] = resolveEnvVars(v);
     return result;
   }
@@ -85,83 +152,64 @@ function resolveEnvVars(obj: any): any {
 }
 
 function resolveEnvKeys(config: SymbioteConfig): SymbioteConfig {
-  // Resolve ${VAR} patterns throughout config
-  config = resolveEnvVars(config);
+  config = resolveEnvVars(config) as SymbioteConfig;
 
-  // Inject API keys from environment if not in config
-  if (!config.providers['free-ai']?.apiKey && process.env.FREEAI_API_KEY) {
-    config.providers['free-ai'] = { ...config.providers['free-ai'], apiKey: process.env.FREEAI_API_KEY };
+  const injectKey = (provider: keyof SymbioteConfig['providers'], envKey: string): void => {
+    const value = process.env[envKey];
+    if (!value) return;
+    if (!config.providers[provider]?.apiKey) {
+      config.providers[provider] = { ...(config.providers[provider] ?? {}), apiKey: value };
+    }
+  };
+
+  injectKey('anthropic', 'ANTHROPIC_API_KEY');
+  injectKey('openai', 'OPENAI_API_KEY');
+  injectKey('gemini', 'GEMINI_API_KEY');
+  injectKey('groq', 'GROQ_API_KEY');
+  injectKey('xai', 'XAI_API_KEY');
+  injectKey('nvidia', 'NVIDIA_API_KEY');
+
+  if (!config.discord?.token && process.env.DISCORD_BOT_TOKEN) {
+    config.discord = { ...(config.discord ?? {}), token: process.env.DISCORD_BOT_TOKEN };
   }
-  if (!config.providers.anthropic?.apiKey && process.env.ANTHROPIC_API_KEY) {
-    config.providers.anthropic = { ...config.providers.anthropic, apiKey: process.env.ANTHROPIC_API_KEY };
+
+  if (process.env.MACH6_API_PORT && !config.apiPort) {
+    config.apiPort = Number(process.env.MACH6_API_PORT);
   }
-  if (!config.providers.openrouter?.apiKey && process.env.OPENROUTER_API_KEY) {
-    config.providers.openrouter = { ...config.providers.openrouter, apiKey: process.env.OPENROUTER_API_KEY };
+  if (process.env.MACH6_PORT && !config.webPort) {
+    config.webPort = Number(process.env.MACH6_PORT);
   }
-  // OpenAI direct API removed — we route through GitHub Copilot
+  if (process.env.MACH6_API_HOST && !config.apiHost) {
+    config.apiHost = process.env.MACH6_API_HOST;
+  }
+  if (process.env.MACH6_WEB_HOST && !config.webHost) {
+    config.webHost = process.env.MACH6_WEB_HOST;
+  }
+
   return config;
-}
-
-function pickWorkspace(workspace: unknown, fallback: string): { workspace: string; workspaceRoots?: string[] } {
-  if (typeof workspace === 'string' && workspace.trim()) {
-    return { workspace };
-  }
-
-  if (Array.isArray(workspace)) {
-    const workspaceRoots = workspace.filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
-    const preferred =
-      workspaceRoots.find((candidate) => fs.existsSync(path.join(candidate, 'SOUL.md')) || fs.existsSync(path.join(candidate, 'IDENTITY.md')))
-      ?? workspaceRoots.find((candidate) => fs.existsSync(candidate))
-      ?? fallback;
-
-    return {
-      workspace: preferred,
-      workspaceRoots: workspaceRoots.length > 0 ? workspaceRoots : undefined,
-    };
-  }
-
-  return { workspace: fallback };
 }
 
 export function loadConfig(configPath?: string): SymbioteConfig {
   const tryPaths = configPath
     ? [configPath]
-    : [
-        path.join(process.cwd(), 'symbiote.json'),
-        path.join(os.homedir(), '.symbiote', 'config.json'),
-      ];
+    : configSearchPaths();
 
   for (const p of tryPaths) {
     try {
-      const raw = fs.readFileSync(p, 'utf-8');
-      // Strip comments but preserve // inside strings (e.g. "http://...")
-      // Strategy: match strings first (preserve), then strip line/block comments
-      const stripped = raw.replace(
-        /"(?:[^"\\]|\\.)*"|\/\/.*$|\/\*[\s\S]*?\*\//gm,
-        (match) => match.startsWith('"') ? match : ''
-      );
-      const parsed = JSON.parse(stripped);
-      const normalizedWorkspace = pickWorkspace(parsed.workspace, DEFAULT_CONFIG.workspace);
-      const runtimeBlock = parsed.runtime ?? {};
-      return resolveEnvKeys({
-        ...DEFAULT_CONFIG,
-        ...parsed,
-        ...runtimeBlock,
-        ...normalizedWorkspace,
-      });
-    } catch { continue; }
+      let raw = fs.readFileSync(p, 'utf-8');
+      if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+      const parsed = JSON.parse(stripJsonComments(raw)) as Partial<SymbioteConfig>;
+      return resolveEnvKeys({ ...DEFAULT_CONFIG, ...parsed, providers: { ...DEFAULT_CONFIG.providers, ...(parsed.providers ?? {}) } });
+    } catch {
+      continue;
+    }
   }
 
   return resolveEnvKeys({ ...DEFAULT_CONFIG });
 }
 
-// Re-export for validator
 export type { SymbioteConfig as SymbioteConfigType };
 
-/**
- * Convert the symbiote.json `adaptiveTemperature` (or top-level `temperature` object) block
- * into a TemperatureConfig for the ATM system.
- */
 export function toTemperatureConfig(config: SymbioteConfig): TemperatureConfig {
   const atm = config.adaptiveTemperature;
   if (!atm || !atm.adaptive) {

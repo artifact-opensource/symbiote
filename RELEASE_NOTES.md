@@ -1,20 +1,35 @@
-# Symbiote Symbiote 3.0 - Release Notes
+# Release Notes - v4.0.0 Apex
 
-## 🚀 Major Changes
-- **Unified Daemon:** Introduced `unified-daemon.ts` to manage the entire runtime stack (Gateway, COMB, HEKTOR, PULSE) as a single entity.
-- **Semantic Initialization:** Implemented VDB-first boot sequence. The system now ensures the Vector Database (HEKTOR) and Memory (COMB) are fully operational before the Gateway opens for requests.
-- **Systemd Integration:** New `symbiote-unified.service` replaces fragmented startup scripts.
-- **Runtime Validation:** Added end-to-end runtime tests to verify service health during boot.
+## Symbiote v4.0.0 Apex - Windows-First Hardening + Packaging Prep
 
-## 🛠️ Technical Improvements
-- Deprecated standalone gateway startup in favor of the Unified Daemon.
-- Optimized boot timings for faster recovery.
-- Updated CLI setup wizard to configure the new unified service.
+**Date:** September 3, 2026
 
-## 📦 Installation
-1. Run `npm install` in `symbiote-core`.
-2. Deploy the systemd unit: `cp systemd/symbiote-unified.service ~/.config/systemd/user/`.
-3. Reload and start: `systemctl --user daemon-reload && systemctl --user enable --now symbiote-unified`.
+This release prepares Symbiote for broader production deployment and public packaging by fixing Windows-first runtime issues, cleaning up cross-platform paths, tightening installer/runtime flows, and refreshing release assets.
 
-**Version:** 3.0.0
-**Tag:** `v3.0.0-symbiote`
+### Windows-First Runtime Fixes
+
+- **Core shell tools now use platform-aware shells** instead of assuming `sh -c`
+- **Background process execution is portable** across Windows, Linux, and macOS
+- **IPC keyring lookup no longer assumes `/etc/mach6`** and now respects portable app-home resolution
+- **Copilot token cache paths are unified** through shared runtime path helpers
+- **Voice reply temp files use `os.tmpdir()`** instead of raw Unix temp paths
+
+### Web Automation & Tooling
+
+- **Playwright sidecar startup now resolves Python portably**
+- **Chromium path is configurable** instead of hardcoded to `/usr/bin/chromium`
+- **Encrypted browser profile permissions are applied only where supported**
+- **Edge TTS execution no longer depends on `/bin/bash` activation flows**
+
+### Installer, Launchers, and Packaging
+
+- Hardened packaged/runtime asset discovery for installer and browser flows
+- Preserved legacy `mach6` compatibility while preparing current Symbiote release assets
+- Updated install guidance to use **`npm install -g symbiote`**
+- Prepared the repository for **v4.0.0 Apex** packaging and maintainer release publishing
+
+### Release Handoff
+
+- **Suggested tag:** `v4.0.0`
+- **Suggested release title:** `v4.0.0 Apex`
+- **Publish note:** create the Git tag and GitHub release from a maintainer environment, then attach these release notes as the release body

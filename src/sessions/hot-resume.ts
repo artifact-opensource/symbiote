@@ -1,5 +1,5 @@
 /**
- * Symbiote v2.0.0 — Session Hot Resume
+ * Mach6 v2.0.0 — Session Hot Resume
  * 
  * Persists active session state to disk on shutdown (or crash) and
  * restores them on startup. This means:
@@ -7,13 +7,14 @@
  * - Active sessions are automatically re-registered
  * - Pending messages are re-queued
  * 
- * State file: .symbiote/sessions/hot-state.json
+ * State file: .mach6/sessions/hot-state.json
  * Written on: graceful shutdown (SIGTERM/SIGINT), periodic checkpoint (every 60s)
  * Read on: gateway startup
  * 
  * @since 2.0.0
  */
 
+import { APP_VERSION } from '../meta/version.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -43,7 +44,7 @@ export interface HotSessionState {
 export interface HotResumeState {
   /** Timestamp of state save */
   savedAt: number;
-  /** Symbiote version that saved the state */
+  /** Mach6 version that saved the state */
   version: string;
   /** Process ID that saved the state */
   pid: number;
@@ -75,7 +76,7 @@ export class HotResumeManager {
     checkpointIntervalMs?: number;
   }) {
     this.stateFile = path.join(opts.sessionsDir, 'hot-state.json');
-    this.version = opts.version ?? '2.0.0';
+    this.version = opts.version ?? APP_VERSION;
     this.provider = opts.provider;
     this.model = opts.model;
 
@@ -166,18 +167,9 @@ export class HotResumeManager {
   }
 
   /** Get sessions that were recently active (within last N minutes) */
-  getResumableSessions(previousState: HotResumeState, maxAgeMinutes = 180): HotSessionState[] {
+  getResumableSessions(previousState: HotResumeState, maxAgeMinutes = 60): HotSessionState[] {
     const cutoff = Date.now() - maxAgeMinutes * 60 * 1000;
-    return previousState.sessions.filter(s => s.lastActivity > cutoff || s.wasActive);
-  }
-
-  /** Rehydrate a recovered session into active tracking. */
-  restoreSession(state: HotSessionState): void {
-    this.activeSessions.set(state.sessionId, {
-      ...state,
-      lastActivity: Date.now(),
-      wasActive: true,
-    });
+    return previousState.sessions.filter(s => s.lastActivity > cutoff);
   }
 
   // ── Lifecycle ────────────────────────────────────────────────────────

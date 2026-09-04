@@ -30,6 +30,7 @@ import { ttsTool } from './builtin/tts.js';
 import { webFetchTool } from './builtin/web-fetch.js';
 import { memorySearchTool } from './builtin/memory.js';
 import { combRecallTool, combStageTool } from './builtin/comb.js';
+import { APP_VERSION } from '../meta/version.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -45,8 +46,8 @@ interface JsonRpcMessage {
 // ── Server State ───────────────────────────────────────────────────────────
 
 const SERVER_NAME = 'symbiote';
-const SERVER_VERSION = '1.3.0';
-const PROTOCOL_VERSION = '3.05-03-26';
+const SERVER_VERSION = APP_VERSION;
+const PROTOCOL_VERSION = '2025-03-26';
 
 let initialized = false;
 const registry = new ToolRegistry();
@@ -65,7 +66,7 @@ for (const tool of [
 const configArg = process.argv.indexOf('--config');
 const configPath = configArg >= 0 && process.argv[configArg + 1]
   ? process.argv[configArg + 1]
-  : path.join(process.cwd(), 'symbiote.json');
+  : path.join(process.cwd(), 'mach6.json');
 
 try {
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));

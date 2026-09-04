@@ -15,7 +15,7 @@
 //
 // Ported from Singularity's cortex/blink.py — same philosophy, TypeScript runtime.
 //
-// v2 (3.06-03-04): PULSE-aware checkpoints
+// v2 (2026-03-04): PULSE-aware checkpoints
 //   - Re-arms after PULSE expansion (wall moved → recalibrate)
 //   - Periodic checkpoint messages every N iterations for long runs
 //   - External kill safety: checkpoints ensure state is staged regularly
@@ -30,10 +30,10 @@ export interface BlinkConfig {
 
 export const DEFAULT_BLINK_CONFIG: BlinkConfig = {
   enabled: true,
-  maxDepth: 32,
+  maxDepth: 5,
   prepareAt: 3,
   cooldownMs: 1000,
-  checkpointInterval: 6,
+  checkpointInterval: 25,
 };
 
 export type BlinkPhase = 'normal' | 'prepare' | 'blinking' | 'resumed' | 'capped';
@@ -103,7 +103,7 @@ export class BlinkController {
   /** Can we do another blink? */
   shouldContinue(): boolean {
     if (!this.config.enabled) return this.state.depth === 0;
-    return this.state.depth < this.config.maxDepth || this.state.phase === 'prepare';
+    return this.state.depth < this.config.maxDepth;
   }
 
   /** Does this agent result require a blink?

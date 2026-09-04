@@ -8,7 +8,7 @@ Get a working agent in under 2 minutes.
 npx symbiote init
 ```
 
-The [interactive wizard](wizard.md) walks you through 6 steps:
+The [guided setup flow](wizard.md) walks you through provider, channel, access, and workspace setup:
 
 1. **Agent Identity** — name, emoji, personality (generates SOUL.md, IDENTITY.md, etc.)
 2. **Provider** — choose from 8 LLM providers (Groq is the default — free, fastest)
@@ -19,14 +19,14 @@ The [interactive wizard](wizard.md) walks you through 6 steps:
 
 Output:
 
-- **`symbiote.json`** — agent configuration
+- **`mach6.json`** — agent configuration
 - **`.env`** — secrets (API keys, bot tokens)
 - **Identity files** — SOUL.md, IDENTITY.md, USER.md, AGENTS.md, HEARTBEAT.md
 
 ## 2. Start the Daemon
 
 ```bash
-node dist/gateway/daemon.js --config=symbiote.json
+node dist/gateway/daemon.js --config=mach6.json
 ```
 
 You'll see the [boot sequence](../core/boot-sequence.md):
@@ -54,7 +54,7 @@ You'll see the [boot sequence](../core/boot-sequence.md):
 ## Manual Setup (Without Wizard)
 
 ```bash
-cp symbiote.example.json symbiote.json
+cp mach6.example.json mach6.json
 cp .env.example .env
 ```
 
@@ -79,7 +79,7 @@ GROQ_API_KEY=gsk_your_key_here
 ```
 
 ```bash
-node dist/index.js --config=symbiote.json
+node dist/index.js --config=mach6.json
 ```
 
 This gives you a CLI agent with file tools, shell access, and web fetch — no Discord or WhatsApp needed.
@@ -89,5 +89,5 @@ This gives you a CLI agent with file tools, shell access, and web fetch — no D
 Same commands. Symbiote is fully cross-platform:
 
 ```powershell
-node dist\gateway\daemon.js --config=symbiote.json
+node dist\gateway\daemon.js --config=mach6.json
 ```

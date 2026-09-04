@@ -33,7 +33,6 @@ export interface SessionContext {
   channelType: string;      // 'discord' | 'whatsapp'
   chatType: 'direct' | 'group';
   senderId: string;
-  chatId: string;
   isOwner: boolean;
 }
 
@@ -61,11 +60,12 @@ export interface SandboxDenial {
 const PRIMARY_ADAPTERS = new Set(['discord-main', 'whatsapp-main']);
 
 export function classifySession(ctx: SessionContext): SessionTier {
-  // Admin: owner anywhere (Ali controls the system regardless of channel type)
+  if (ctx.channelType === 'internal' || ctx.adapterId === 'subagent') {
+    return 'standard';
+  }
   if (ctx.isOwner) {
     return 'admin';
   }
-  // Restricted: non-owner
   return 'restricted';
 }
 
@@ -114,14 +114,14 @@ const noDangerousCommands: SandboxRule = {
     // Patterns that are NEVER allowed for non-admin sessions
     const dangerousPatterns: Array<[RegExp, string]> = [
       // Process/service control
-      [/systemctl\s+.*(restart|stop|start|kill|daemon-reload).*symbiote/i, 'Cannot control Symbiote service'],
+      [/systemctl\s+.*(restart|stop|start|kill|daemon-reload).*mach6/i, 'Cannot control Symbiote service'],
       [/kill\s+(-9\s+)?(\d+|%|\$)/i, 'Cannot kill processes'],
       [/pkill|killall/i, 'Cannot kill processes'],
       
       // Engine file modification via shell
-      [/(?:cat|echo|tee|sed|awk)\s+.*>.*symbiote-core/i, 'Cannot modify Symbiote files via shell'],
-      [/(?:cp|mv|ln)\s+.*symbiote-core\/(src|dist)/i, 'Cannot modify Symbiote files via shell'],
-      [/rm\s+.*symbiote-core/i, 'Cannot delete Symbiote files'],
+      [/(?:cat|echo|tee|sed|awk)\s+.*>.*mach6-core/i, 'Cannot modify Symbiote files via shell'],
+      [/(?:cp|mv|ln)\s+.*mach6-core\/(src|dist)/i, 'Cannot modify Symbiote files via shell'],
+      [/rm\s+.*mach6-core/i, 'Cannot delete Symbiote files'],
       
       // System-level destruction
       [/rm\s+-rf?\s+\/(usr|etc|var|home|boot|sys|proc)/i, 'Cannot delete system directories'],

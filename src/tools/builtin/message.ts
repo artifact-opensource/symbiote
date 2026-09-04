@@ -128,6 +128,16 @@ export function createMessageTool(registry: ChannelRegistry): ToolDefinition {
 
       try {
         const result = await registry.sendToChannel(channel, chatId, outbound);
+        // Check if the adapter actually succeeded (don't blindly return success)
+        if (result && (result as any).success === false) {
+          return JSON.stringify({
+            success: false,
+            action: 'send',
+            channel,
+            chatId,
+            error: (result as any).error || 'Send failed (no error details)',
+          });
+        }
         return JSON.stringify({
           success: true,
           action: 'send',

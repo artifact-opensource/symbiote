@@ -23,7 +23,7 @@ After=network.target
 Type=simple
 User=your-user
 WorkingDirectory=/path/to/symbiote
-ExecStart=/usr/bin/node dist/gateway/daemon.js --config=symbiote.json
+ExecStart=/usr/bin/node dist/gateway/daemon.js --config=mach6.json
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
@@ -61,7 +61,7 @@ Create `~/Library/LaunchAgents/com.symbiote.gateway.plist`:
     <array>
         <string>/usr/local/bin/node</string>
         <string>/path/to/symbiote/dist/gateway/daemon.js</string>
-        <string>--config=symbiote.json</string>
+        <string>--config=mach6.json</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/path/to/symbiote</string>
@@ -82,7 +82,7 @@ launchctl load ~/Library/LaunchAgents/com.symbiote.gateway.plist
 Use [NSSM](https://nssm.cc/) to run as a Windows service:
 
 ```powershell
-nssm install Symbiote "C:\Program Files\nodejs\node.exe" "dist\gateway\daemon.js --config=symbiote.json"
+nssm install Symbiote "C:\Program Files\nodejs\node.exe" "dist\gateway\daemon.js --config=mach6.json"
 nssm set Symbiote AppDirectory "C:\path\to\symbiote"
 nssm start Symbiote
 ```
@@ -119,7 +119,7 @@ Symbiote includes an activity-aware heartbeat scheduler that adapts check freque
 - **Idle** — reduced frequency when no messages are flowing
 - **Sleeping** — minimal checks during quiet hours
 
-Configure quiet hours in `symbiote.json`:
+Configure quiet hours in `mach6.json`:
 
 ```json
 {

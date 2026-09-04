@@ -3,6 +3,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { ToolDefinition } from '../types.js';
+import { shellCommand } from '../../runtime/platform.js';
 
 export interface ManagedProcess {
   id: string;
@@ -25,7 +26,8 @@ export class ProcessManager {
     const id = randomUUID().slice(0, 8);
     const cwd = workdir ?? process.cwd();
 
-    const proc = spawn('sh', ['-c', command], {
+    const shell = shellCommand(command);
+    const proc = spawn(shell.file, shell.args, {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env },

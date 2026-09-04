@@ -31,7 +31,7 @@ async function main() {
 
   // 1. Config
   console.log('── Config ──');
-  const config = loadConfig('symbiote.json');
+  const config = loadConfig('mach6.json');
   assert(!!config.defaultProvider, 'Config loads');
   assert(config.defaultProvider === 'github-copilot', `Provider: ${config.defaultProvider}`);
   assert(config.defaultModel === 'claude-sonnet-4', `Model: ${config.defaultModel}`);
@@ -50,7 +50,7 @@ async function main() {
 
   // 3. Tool Execution (direct)
   console.log('\n── Tool Execution ──');
-  const readResult = await registry.execute('read', { path: 'symbiote.json' });
+  const readResult = await registry.execute('read', { path: 'mach6.json' });
   assert(readResult.includes('github-copilot'), 'read tool executes');
 
   const execResult = await registry.execute('exec', { command: 'echo MACH6_ALIVE' });
@@ -96,8 +96,8 @@ async function main() {
   console.log('\n── Agent Loop (tool use) ──');
   try {
     const messages: Message[] = [
-      { role: 'system', content: 'You are Symbiote smoke test. Use the read tool to read symbiote.json, then respond with the defaultModel value. Be brief.' },
-      { role: 'user', content: 'Read symbiote.json and tell me the defaultModel.' },
+      { role: 'system', content: 'You are Symbiote smoke test. Use the read tool to read mach6.json, then respond with the defaultModel value. Be brief.' },
+      { role: 'user', content: 'Read mach6.json and tell me the defaultModel.' },
     ];
     const provConfig: ProviderConfig = {
       model: config.defaultModel,

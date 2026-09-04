@@ -4,7 +4,7 @@ Symbiote uses [Baileys v7](https://github.com/WhiskeySockets/Baileys) for WhatsA
 
 ## Setup
 
-1. Configure in `symbiote.json`:
+1. Configure in `mach6.json`:
 
 ```jsonc
 {

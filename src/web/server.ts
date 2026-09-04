@@ -9,6 +9,8 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { palette, ok } from '../cli/brand.js';
+import { loadConfig } from '../config/config.js';
+import { APP_VERSION } from '../meta/version.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -73,18 +75,17 @@ let config: Config = {
   apiKeys: {},
 };
 
-// Agent identity (from symbiote.json)
+// Agent identity (from mach6.json)
 let agentName = 'Agent';
 let agentEmoji = '🤖';
 
-// Load config from symbiote.json if exists
-const configPath = path.resolve(process.cwd(), 'symbiote.json');
+const configPath = path.resolve(process.cwd(), 'mach6.json');
+
+// Load config from mach6.json if exists
 try {
-  const raw = fs.readFileSync(configPath, 'utf-8');
-  const loaded = JSON.parse(raw);
+  const loaded = loadConfig();
   if (loaded.name) agentName = loaded.name;
   if (loaded.emoji) agentEmoji = loaded.emoji;
-  // Map symbiote.json fields to webchat config
   if (loaded.defaultProvider) config.provider = loaded.defaultProvider;
   if (loaded.defaultModel) config.model = loaded.defaultModel;
   config = { ...config, ...loaded };
@@ -139,9 +140,9 @@ function matchRoute(pattern: string, pathname: string): Record<string, string> |
 // ── Providers (simulated for now — will integrate real APIs) ───────────────
 
 const PROVIDERS = [
-  { id: 'anthropic', name: 'Anthropic', models: ['claude-sonnet-4-3.050514', 'claude-opus-4-3.050514', 'claude-3-5-haiku-3.041022'] },
+  { id: 'anthropic', name: 'Anthropic', models: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-3-5-haiku-20241022'] },
 
-  { id: 'github-copilot', name: 'GitHub Copilot', models: ['claude-opus-4-6', 'claude-sonnet-4-3.050514', 'gpt-4o', 'o3-mini'] },
+  { id: 'github-copilot', name: 'GitHub Copilot', models: ['claude-opus-4-6', 'claude-sonnet-4-20250514', 'gpt-4o', 'o3-mini'] },
   { id: 'gladius', name: 'Local (Gladius)', models: ['gladius-125m', 'gladius-1b'] },
 ];
 
@@ -191,18 +192,21 @@ async function streamChat(
 
   try {
     // Proxy to real HTTP API (port 3006) which runs through the actual agent pipeline
-    const apiPort = parseInt(process.env.MACH6_API_PORT ?? '3006', 10);
-    const payload = JSON.stringify({ sessionId, message: userMessage });
+    const apiPort = parseInt(process.env.MACH6_API_PORT ?? String((config as any).apiPort ?? process.env.MACH6_PORT ?? 3006), 10);
+    const apiHost = process.env.MACH6_API_HOST ?? String((config as any).apiHost ?? '127.0.0.1');
+    const apiKey = process.env.MACH6_API_KEY ?? process.env.API_KEY ?? '';
+    const payload = JSON.stringify({ sessionId, message: userMessage, senderId: 'webchat-owner', source: 'webchat' });
 
     const apiRes = await new Promise<http.IncomingMessage>((resolve, reject) => {
       const apiReq = http.request({
-        hostname: '127.0.0.1',
+        hostname: apiHost,
         port: apiPort,
-        path: '/api/chat',
+        path: '/api/v1/chat',
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(payload),
+          'Authorization': `Bearer ${apiKey}`,
         },
         timeout: 300000, // 5 min timeout for long agent runs
       }, resolve);
@@ -358,7 +362,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       totalTokens,
       model: config.model,
       provider: config.provider,
-      version: '0.1.0',
+      version: APP_VERSION,
       agentName,
       agentEmoji,
     });
@@ -472,30 +476,6 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return streamChat(res, sessionId, message);
   }
 
-  // ── Graph API (VDB-backed knowledge graph) ─────────────────────────────
-
-  if (method === 'GET' && (pathname === '/api/graph' || pathname === '/api/graph/sessions' || pathname === '/api/graph/stats')) {
-    try {
-      const { VectorDB } = await import('../memory/vdb.js');
-      const vdb = new VectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
-      if (pathname === '/api/graph') {
-        const threshold = parseFloat(url.searchParams.get('threshold') ?? '0.15');
-        const maxNodes = parseInt(url.searchParams.get('max') ?? '500', 10);
-        return json(res, vdb.graph(threshold, maxNodes));
-      }
-      if (pathname === '/api/graph/sessions') {
-        const threshold = parseFloat(url.searchParams.get('threshold') ?? '0.1');
-        return json(res, vdb.sessionGraph(threshold));
-      }
-      if (pathname === '/api/graph/stats') {
-        const stats = vdb.stats();
-        return json(res, { ...stats, generated: Date.now() });
-      }
-    } catch (err) {
-      return json(res, { error: 'Graph unavailable', detail: String(err) }, 500);
-    }
-  }
-
   // GET /api/agents
   if (method === 'GET' && pathname === '/api/agents') {
     return json(res, subAgents);
@@ -514,12 +494,6 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   if (method === 'GET') {
     if (pathname === '/' || pathname === '/index.html') {
       return serveStatic(res, path.join(WEB_DIR, 'index.html'));
-    }
-    if (pathname === '/graph') {
-      return serveStatic(res, path.join(WEB_DIR, 'graph.html'));
-    }
-    if (pathname === '/test') {
-      return serveStatic(res, path.join(WEB_DIR, 'test.html'));
     }
     // Serve other static files
     const safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
@@ -543,7 +517,7 @@ function formatUptime(ms: number): string {
 
 // ── Server ─────────────────────────────────────────────────────────────────
 
-export function startWebServer(port = 3006): http.Server {
+export function startWebServer(port = 3006, host = '127.0.0.1'): http.Server {
   const server = http.createServer((req, res) => {
     handleRequest(req, res).catch(err => {
       console.error(`${palette.dim}  [symbiote-web]${palette.reset}`, err);
@@ -565,8 +539,8 @@ export function startWebServer(port = 3006): http.Server {
   };
   sessions.set(defaultSession.id, defaultSession);
 
-  server.listen(port, '0.0.0.0', () => {
-    console.log(ok(`Web UI → ${palette.cyan}http://0.0.0.0:${port}${palette.reset}`));
+  server.listen(port, host, () => {
+    console.log(ok(`Web UI → ${palette.cyan}http://${host}:${port}${palette.reset}`));
   });
 
   return server;
@@ -575,6 +549,6 @@ export function startWebServer(port = 3006): http.Server {
 // Run directly
 const __filename = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename)) {
-  const port = parseInt(process.env.MACH6_PORT ?? '3006', 10);
+  const port = parseInt(process.env.MACH6_PORT ?? String((config as any).webPort ?? 3009), 10);
   startWebServer(port);
 }

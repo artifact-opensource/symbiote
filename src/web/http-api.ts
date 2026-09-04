@@ -11,6 +11,7 @@
  *   POST /api/v1/relay   — relay to WhatsApp (Option C bridge)
  * 
  * Auth: Bearer token in Authorization header (API_KEY from env/config)
+ * IPC:  HMAC-SHA256 identity verification via x-ipc-* headers
  */
 
 import * as http from 'node:http';
@@ -19,6 +20,7 @@ import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { palette, ok, warn } from '../cli/brand.js';
+import { getIpcIdentity, type IpcVerification } from './ipc-identity.js';
 
 const __http_dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,6 +28,7 @@ const __http_dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export interface HttpApiConfig {
   port: number;
+  host?: string;
   apiKey: string;
   /** CORS origins to allow (default: ['*']) */
   allowedOrigins?: string[];
@@ -35,8 +38,6 @@ export interface HttpApiConfig {
   onRelay?: (target: string, text: string) => Promise<{ success: boolean; error?: string }>;
   /** Get gateway status */
   onHealth?: () => Record<string, unknown>;
-  /** Get VDB instance for graph API */
-  vdb?: () => Promise<import('../memory/vdb.js').VectorDB>;
 }
 
 export interface ChatRequest {
@@ -50,10 +51,11 @@ export interface ChatRequest {
   senderName?: string;
   /** Source identifier (e.g., "gladius-page") */
   source?: string;
-  chatId?: string;
+  /** Verified IPC agent ID (injected by middleware, not from client) */
+  verifiedAgentId?: string;
+  /** Verified IPC agent name */
+  verifiedAgentName?: string;
 }
-
-const WEBCHAT_OWNER_ID = 'webchat-owner';
 
 export interface ChatResponse {
   text: string;
@@ -70,6 +72,13 @@ export class HttpApiServer {
 
   constructor(config: HttpApiConfig) {
     this.config = config;
+    
+    // Log IPC status on creation
+    const ipc = getIpcIdentity();
+    if (ipc) {
+      const agents = ipc.listAgents();
+      console.log(ok(`IPC Identity → ${palette.cyan}${agents.length} agents${palette.reset} in keyring (${agents.map(a => a.id).join(', ')})`));
+    }
   }
 
   async start(): Promise<void> {
@@ -94,8 +103,9 @@ export class HttpApiServer {
           resolve(); // Non-fatal — gateway continues without HTTP API
         }
       });
-      this.server.listen(this.config.port, '0.0.0.0', () => {
-        console.log(ok(`HTTP API → ${palette.cyan}http://0.0.0.0:${this.config.port}/api/v1/${palette.reset}`));
+      const host = this.config.host ?? '127.0.0.1';
+      this.server.listen(this.config.port, host, () => {
+        console.log(ok(`HTTP API → ${palette.cyan}http://${host}:${this.config.port}/api/v1/${palette.reset}`));
         resolve();
       });
     });
@@ -116,7 +126,7 @@ export class HttpApiServer {
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     const pathname = url.pathname;
 
-    // CORS
+    // CORS — include IPC headers in allowed list
     const origin = req.headers.origin ?? '*';
     const allowedOrigins = this.config.allowedOrigins ?? ['*'];
     const allowOrigin = allowedOrigins.includes('*') || allowedOrigins.includes(origin)
@@ -125,7 +135,7 @@ export class HttpApiServer {
 
     res.setHeader('Access-Control-Allow-Origin', allowOrigin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-ipc-agent-id, x-ipc-timestamp, x-ipc-signature');
     res.setHeader('Access-Control-Max-Age', '86400');
 
     if (method === 'OPTIONS') {
@@ -140,8 +150,11 @@ export class HttpApiServer {
       return this.json(res, health);
     }
 
-    // Serve web UI at root (no auth — local only)
+    // Serve web UI at root only for loopback callers
     if (method === 'GET' && (pathname === '/' || pathname === '/index.html')) {
+      if (!this.isLoopbackRequest(req)) {
+        return this.json(res, { error: 'Forbidden' }, 403);
+      }
       const webPaths = [
         path.join(__http_dirname, '..', '..', 'web', 'index.html'),
         path.join(__http_dirname, '..', 'web', 'index.html'),
@@ -157,68 +170,8 @@ export class HttpApiServer {
       }
     }
 
-    // Serve graph page (no auth — local only)
-    if (method === 'GET' && pathname === '/graph') {
-      const webPaths = [
-        path.join(__http_dirname, '..', '..', 'web', 'graph.html'),
-        path.join(__http_dirname, '..', 'web', 'graph.html'),
-        path.join(process.cwd(), 'web', 'graph.html'),
-      ];
-      for (const webPath of webPaths) {
-        try {
-          const html = fs.readFileSync(webPath, 'utf-8');
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-          res.end(html);
-          return;
-        } catch { /* try next */ }
-      }
-      return this.json(res, { error: 'graph.html not found' }, 404);
-    }
-
-    // Graph API endpoints (no auth — local only)
-    if (method === 'GET' && pathname === '/api/graph') {
-      if (!this.config.vdb) return this.json(res, { error: 'VDB not configured' }, 501);
-      try {
-        const vdb = await this.config.vdb();
-        const data = vdb.graph();
-        return this.json(res, data);
-      } catch (err) {
-        return this.json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
-
-    if (method === 'GET' && pathname === '/api/graph/sessions') {
-      if (!this.config.vdb) return this.json(res, { error: 'VDB not configured' }, 501);
-      try {
-        const vdb = await this.config.vdb();
-        const data = vdb.sessionGraph();
-        return this.json(res, data);
-      } catch (err) {
-        return this.json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
-
-    if (method === 'GET' && pathname === '/api/graph/stats') {
-      if (!this.config.vdb) return this.json(res, { error: 'VDB not configured' }, 501);
-      try {
-        const vdb = await this.config.vdb();
-        const graph = vdb.graph();
-        const stats = vdb.stats();
-        return this.json(res, {
-          nodes: graph.nodes.length,
-          edges: graph.edges.length,
-          clusters: graph.clusters,
-          generated: graph.generated,
-          documentCount: stats.documentCount,
-        });
-      } catch (err) {
-        return this.json(res, { error: err instanceof Error ? err.message : String(err) }, 500);
-      }
-    }
-
-    // Auth check — skip for web UI chat path (local-only, served from same origin)
-    const isWebUIPath = pathname === '/api/chat';
-    if (!isWebUIPath && !this.authenticate(req)) {
+    // Auth check
+    if (!this.authenticate(req)) {
       return this.json(res, { error: 'Unauthorized' }, 401);
     }
 
@@ -257,10 +210,29 @@ export class HttpApiServer {
       return this.json(res, { error: 'text field is required' }, 400);
     }
 
-    if (sse && !parsed.senderId) {
-      parsed.senderId = WEBCHAT_OWNER_ID;
-      parsed.chatId = parsed.chatId ?? WEBCHAT_OWNER_ID;
-      parsed.source = parsed.source ?? 'webchat';
+    // ── IPC Identity Verification ──────────────────────────────────────
+    const ipcResult = this.verifyIpc(req.headers, body);
+    
+    if (ipcResult.isIpcRequest) {
+      if (!ipcResult.verified) {
+        // IPC headers present but verification failed — reject
+        console.log(`${palette.dim}  [http-api]${palette.reset} ${palette.red}IPC REJECTED:${palette.reset} ${ipcResult.error}`);
+        return this.json(res, { 
+          error: 'IPC identity verification failed',
+          detail: ipcResult.error 
+        }, 403);
+      }
+
+      // IPC verified — inject identity into the request
+      parsed.verifiedAgentId = ipcResult.agentId;
+      parsed.verifiedAgentName = ipcResult.agentName;
+      
+      // Override senderId with the verified identity (don't trust client-provided senderId for IPC)
+      parsed.senderId = ipcResult.agentId;
+      parsed.senderName = ipcResult.agentName;
+      parsed.source = parsed.source ?? 'ipc';
+
+      console.log(`${palette.dim}  [http-api]${palette.reset} ${palette.green}IPC VERIFIED:${palette.reset} ${palette.cyan}${ipcResult.agentName}${palette.reset} (${ipcResult.agentId})`);
     }
 
     // Default session ID based on source
@@ -268,7 +240,7 @@ export class HttpApiServer {
       parsed.sessionId = `http-${parsed.source ?? 'web'}-${parsed.senderId ?? 'anon'}`;
     }
 
-    console.log(`${palette.dim}  [http-api]${palette.reset} Chat: "${parsed.text.slice(0, 80)}..." ${palette.dim}(session=${parsed.sessionId})${palette.reset}`);
+    console.log(`${palette.dim}  [http-api]${palette.reset} Chat received ${palette.dim}(session=${parsed.sessionId}, chars=${parsed.text.length}${ipcResult.verified ? `, ipc=${ipcResult.agentId}` : ''})${palette.reset}`);
 
     try {
       const startMs = Date.now();
@@ -321,7 +293,7 @@ export class HttpApiServer {
       return this.json(res, { error: 'target and text fields are required' }, 400);
     }
 
-    console.log(`${palette.dim}  [http-api]${palette.reset} Relay to ${palette.cyan}${parsed.target}${palette.reset}: "${parsed.text.slice(0, 80)}..."`);
+    console.log(`${palette.dim}  [http-api]${palette.reset} Relay request ${palette.dim}(target=${parsed.target}, chars=${parsed.text.length})${palette.reset}`);
 
     try {
       const result = await this.config.onRelay(parsed.target, parsed.text);
@@ -332,7 +304,30 @@ export class HttpApiServer {
     }
   }
 
+  // ── IPC Verification ─────────────────────────────────────────────────
+
+  private verifyIpc(
+    headers: http.IncomingHttpHeaders,
+    body: string
+  ): IpcVerification {
+    const ipc = getIpcIdentity();
+    
+    // No IPC configured — treat everything as non-IPC
+    if (!ipc) {
+      return { isIpcRequest: false, verified: false };
+    }
+
+    return ipc.verify(headers as Record<string, string | string[] | undefined>, body);
+  }
+
   // ── Helpers ──────────────────────────────────────────────────────────
+
+  private isLoopbackRequest(req: http.IncomingMessage): boolean {
+    const remote = req.socket.remoteAddress ?? '';
+    return remote === '127.0.0.1'
+      || remote === '::1'
+      || remote === '::ffff:127.0.0.1';
+  }
 
   private authenticate(req: http.IncomingMessage): boolean {
     const auth = req.headers.authorization;

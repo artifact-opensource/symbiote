@@ -12,12 +12,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
 // @ts-ignore — no types for qrcode-terminal
 import qrcode from 'qrcode-terminal';
+
+// Voice middleware — auto-transcribe inbound voice notes, generate voice replies
+import { processVoiceInbound, generateVoiceReply, cleanupVoiceFile } from '../voice/voice-middleware.js';
 // Use global process (don't import — it shadows signal handlers)
 import {
   palette, gradient, versionBanner, kvLine, ok, warn, info,
@@ -43,35 +42,40 @@ import {
 import { ttsTool } from '../tools/builtin/tts.js';
 import { webFetchTool } from '../tools/builtin/web-fetch.js';
 import { memorySearchTool } from '../tools/builtin/memory.js';
-import { combRecallTool, combStageTool, getNativeCombStore } from '../tools/builtin/comb.js';
+import { combRecallTool, combStageTool, setCombVdbHook, flushMessages } from '../tools/builtin/comb.js';
+import { vdbSearchTool, vdbIngestTool, vdbStatsTool } from '../tools/builtin/memory-vdb.js';
+import { webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool, webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool, webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool } from '../tools/builtin/web-browser.js';
 import { createSpawnTool, createSubAgentStatusTool } from '../tools/builtin/spawn.js';
 import { SubAgentManager } from '../sessions/sub-agent.js';
 import { createMessageTool, createTypingTool, createPresenceTool, createDeleteMessageTool, createMarkReadTool } from '../tools/builtin/message.js';
 import { SessionManager } from '../sessions/manager.js';
-import { WorkJournal } from '../sessions/work-journal.js';
 import { buildSystemPrompt } from '../agent/system-prompt.js';
 import { runAgent } from '../agent/runner.js';
+import { ContextMonitor } from '../agent/context-monitor.js';
+import { ContextStore } from '../agent/context-store.js';
 import { PulseBudgetManager } from '../agent/pulse.js';
 import { BlinkController } from '../agent/blink.js';
 import { loadConfig, type SymbioteConfig } from '../config/config.js';
+import { validateAndReport } from '../config/validator.js';
 import type { Provider, ProviderConfig } from '../providers/types.js';
 import { anthropicProvider } from '../providers/anthropic.js';
 import { openaiProvider } from '../providers/openai.js';
 import { githubCopilotProvider } from '../providers/github-copilot.js';
 import { geminiProvider } from '../providers/gemini.js';
-import { ContextMonitor } from '../agent/context-monitor.js';
 import { gladiusProvider } from '../providers/gladius.js';
 import { groqProvider } from '../providers/groq.js';
 import { ollamaProvider } from '../providers/ollama.js';
 import { xaiProvider } from '../providers/xai.js';
-import { openrouterProvider } from '../providers/openrouter.js';
-import { freeaiProvider } from '../providers/freeai.js';
 import type { BusEnvelope, ChannelPolicy, OutboundMessage } from '../channels/types.js';
 import { formatForChannel } from '../channels/formatter.js';
 import { createSandboxedRegistry, type SessionContext } from '../tools/sandbox.js';
 import { HttpApiServer, type ChatRequest, type ChatResponse } from '../web/http-api.js';
 import { startWebServer } from '../web/server.js';
 import { McpBridge } from '../tools/mcp-bridge.js';
+import { MetricsCollector, getMetrics } from '../metrics/collector.js';
+import { HotResumeManager } from '../sessions/hot-resume.js';
+import { ProviderHealthMonitor } from '../providers/health.js';
+import { APP_VERSION } from '../meta/version.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -87,7 +91,7 @@ interface DiscordChannelConfig {
 }
 
 interface GatewayConfig {
-  /** Path to symbiote.json */
+  /** Path to mach6.json */
   configPath?: string;
   /** Channels to enable */
   channels?: {
@@ -106,8 +110,14 @@ interface GatewayConfig {
   ownerIds?: string[];
   /** HTTP API port */
   apiPort?: number;
-  /** Web UI port (defaults to 3009) */
+  /** HTTP API host */
+  apiHost?: string;
+  /** Web UI port */
   webPort?: number;
+  /** Web UI host (default 127.0.0.1, use 0.0.0.0 for LAN access) */
+  webHost?: string;
+  /** Optional QR callback for WhatsApp pairing */
+  onQrCode?: (qr: string) => void;
 }
 
 interface ActiveTurn {
@@ -119,6 +129,8 @@ interface ActiveTurn {
   adapterId: string;
 }
 
+import { nvidiaProvider } from '../providers/nvidia.js';
+
 // ─── Provider Registry ─────────────────────────────────────────────────────
 
 const PROVIDERS = new Map<string, Provider>([
@@ -128,10 +140,9 @@ const PROVIDERS = new Map<string, Provider>([
   ['gemini', geminiProvider],
   ['gladius', gladiusProvider],
   ['groq', groqProvider],
+  ['nvidia', nvidiaProvider],
   ['ollama', ollamaProvider],
   ['xai', xaiProvider],
-  ['openrouter', openrouterProvider],
-  ['free-ai', freeaiProvider],
 ]);
 
 // ─── Gateway ───────────────────────────────────────────────────────────────
@@ -159,6 +170,21 @@ export class SymbioteGateway {
   private adapterPromptFiles = new Map<string, { path: string; label: string }[]>();
   /** Fallback provider chain — tried in order if primary fails */
   private fallbackChain: { name: string; provider: Provider }[] = [];
+  /** Context monitor — proactive context management (warn/compact/emergency) */
+  private contextMonitor: ContextMonitor;
+  /** VDB Pulse — real-time memory indexing every 5s */
+  private vdbWatermarks = new Map<string, number>();
+  private vdbPulseTimer: ReturnType<typeof setInterval> | null = null;
+  private vdbInstance: import('../memory/vdb.js').VectorDB | null = null;
+  /** Context Store — bridges attention (context window) and memory (vdb) */
+  private contextStore: ContextStore | null = null;
+
+  /** v2.0 — Metrics collector: tokens, latency, tools, errors */
+  private metrics: MetricsCollector;
+  /** v2.0 — Hot resume: persist and restore session state across restarts */
+  private hotResume: HotResumeManager;
+  /** v2.0 — Provider health: circuit breaker, latency tracking, health states */
+  private providerHealth: ProviderHealthMonitor;
 
   constructor(gatewayConfig: GatewayConfig) {
     this.gatewayConfig = gatewayConfig;
@@ -199,6 +225,10 @@ export class SymbioteGateway {
         readTool, writeTool, editTool, execTool, imageTool,
         processStartTool, processPollTool, processKillTool, processListTool,
         ttsTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool,
+        vdbSearchTool, vdbIngestTool, vdbStatsTool,
+        webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool,
+        webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool,
+        webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool,
       ]) {
         this.toolRegistry.register(tool);
       }
@@ -218,17 +248,45 @@ export class SymbioteGateway {
 
     // Sessions
     this.sessionManager = new SessionManager(this.config.sessionsDir);
-    const journal = new WorkJournal({
-      dir: this.config.sessionsDir,
-      sessionId: 'gateway',
-      objective: 'Maintain gateway runtime continuity',
-      activeFiles: ['src/gateway/daemon.ts', 'src/sessions/hot-resume.ts', 'src/agent/blink.ts'],
+
+    // v2.0 — Metrics collector
+    this.metrics = getMetrics({
+      metricsDir: path.join(this.config.sessionsDir ?? '.sessions', 'metrics'),
+      version: APP_VERSION,
     });
-    const journal = new WorkJournal({
-      dir: this.config.sessionsDir,
-      sessionId: 'gateway',
-      objective: 'Maintain gateway runtime continuity',
-      activeFiles: ['src/gateway/daemon.ts', 'src/sessions/hot-resume.ts', 'src/agent/blink.ts'],
+
+    // v2.0 — Provider health monitor (circuit breaker + latency tracking)
+    this.providerHealth = new ProviderHealthMonitor();
+
+    // v2.0 — Hot resume manager (session state persistence across restarts)
+    this.hotResume = new HotResumeManager({
+      sessionsDir: this.config.sessionsDir ?? '.sessions',
+      version: APP_VERSION,
+      provider: this.providerName,
+      model: this.model,
+    });
+
+    // Context Monitor — proactive context management
+    // Thresholds: warn 65%, compact 75%, emergency 88%
+    const ws = this.config.workspace;
+    this.contextMonitor = new ContextMonitor({
+      maxContextTokens: 180_000,  // ~200K context, leave headroom
+      warnThreshold: 0.65,
+      compactThreshold: 0.75,
+      emergencyThreshold: 0.88,
+      transcriptDir: path.join(ws || '.', '.sessions', 'transcripts'),
+      onCombStage: async (content: string) => {
+        try {
+          if (this.vdbInstance) {
+            this.vdbInstance.index({
+              id: '', text: content.length > 2000 ? content.slice(0, 2000) : content,
+              source: 'context-monitor', role: 'context', timestamp: Date.now(),
+            });
+          }
+        } catch (e) {
+          console.error('[context-monitor] COMB stage failed:', e);
+        }
+      },
     });
 
     // System prompt (base — rebuilt per-message with channel context)
@@ -282,9 +340,9 @@ export class SymbioteGateway {
   // ── Start ──────────────────────────────────────────────────────────────
 
   async start(): Promise<void> {
-    console.log(versionBanner('1.0.0'));
+    console.log(versionBanner(APP_VERSION));
 
-    const gatewayTitle = gradient('GATEWAY', [138, 43, 226], [0, 229, 255]);
+    const gatewayTitle = gradient('SYMBIOTE', [138, 43, 226], [0, 229, 255]);
     console.log(`  ${palette.bold}${gatewayTitle}${palette.reset}`);
     console.log();
     console.log(kvLine('Provider', `${palette.cyan}${this.providerName}${palette.reset}${palette.dim}/${palette.reset}${palette.white}${this.model}${palette.reset}`));
@@ -314,17 +372,201 @@ export class SymbioteGateway {
     // Start HTTP API server
     await this.startHttpApi();
 
-    // Start Web UI server (bound to 0.0.0.0 for LAN access)
+    // Start Web UI server
     this.startWebUi();
+
+    // Start VDB real-time memory pulse (5s incremental indexing)
+    this.startVdbPulse();
+
+    // v2.0 — Hot Resume: restore previous session state
+    this.restoreHotState();
 
     const elapsed = Date.now() - this.startTime;
     console.log();
     console.log(divider());
-    const readyMsg = gradient('GATEWAY READY', [0, 230, 118], [0, 188, 3.0]);
+    const readyMsg = gradient('SYMBIOTE READY', [0, 230, 118], [0, 188, 212]);
     console.log(`  ${palette.bold}${palette.green}⚡${palette.reset} ${palette.bold}${readyMsg}${palette.reset} ${palette.dim}— ${elapsed}ms${palette.reset}`);
     console.log();
   }
 
+
+  // ── v2.0 Hot Resume ──────────────────────────────────────────────────
+
+  private restoreHotState(): void {
+    try {
+      const state = HotResumeManager.restore(this.config.sessionsDir ?? '.sessions');
+      if (!state) return;
+      
+      const resumable = this.hotResume.getResumableSessions(state, 60);
+      if (resumable.length > 0) {
+        console.log(`${palette.dim}  [hot-resume]${palette.reset} Restored ${resumable.length} session(s) from previous run (${state.reason})`);
+        for (const s of resumable) {
+          console.log(`${palette.dim}    → ${s.sessionId} (${s.channelType}/${s.chatId})${palette.reset}`);
+        }
+      }
+    } catch {
+      // Non-fatal — hot resume is best-effort
+    }
+  }
+
+  // ── VDB Pulse — Real-time memory indexing ────────────────────────────
+
+  /** Start VDB pulse — indexes new messages every 5 seconds */
+  private startVdbPulse(): void {
+    const VDB_PULSE_MS = 5_000;
+
+    this.vdbPulseTimer = setInterval(() => {
+      if (this.shutdownRequested) return;
+      this.vdbPulseFlush().catch(() => { /* non-fatal */ });
+    }, VDB_PULSE_MS);
+
+    // Dont block process exit
+    if (this.vdbPulseTimer.unref) this.vdbPulseTimer.unref();
+    console.log(`${palette.dim}  [vdb]${palette.reset} Pulse active — indexing every ${VDB_PULSE_MS / 1000}s`);
+
+    // Initialize Context Store with vdb
+    this.initContextStore().catch(err => {
+      console.error(`${palette.dim}  [context-store]${palette.reset} Init failed:`, err);
+    });
+  }
+
+  /** Initialize the Context Store — bridges context window and vdb memory */
+  private async initContextStore(): Promise<void> {
+    if (!this.vdbInstance) {
+      const { VectorDB } = await import("../memory/vdb.js");
+      this.vdbInstance = new VectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
+    }
+    this.contextStore = new ContextStore(this.vdbInstance, {
+      retrievalK: 5,
+      retrievalThreshold: 0.15,
+      retrievalBudget: 3000,
+      queryDepth: 3,
+      sessionSource: 'session',
+      sessionId: 'main',
+    });
+
+    // Boot ingestion — load identity files into vdb for retrieval
+    const ws = this.config.workspace || process.cwd();
+    const bootFiles = [
+      'SOUL.md', 'IDENTITY.md', 'AGENTS.md', 'BOOTSTRAP.md', 'TOOLS.md',
+    ];
+    const texts: Array<{ text: string; source: string }> = [];
+    for (const f of bootFiles) {
+      const fp = path.join(ws, f);
+      try {
+        if (fs.existsSync(fp)) {
+          texts.push({ text: fs.readFileSync(fp, 'utf-8'), source: f });
+        }
+      } catch { /* skip */ }
+    }
+
+    // Also load today's and yesterday's memory files
+    const now = new Date();
+    for (let d = 0; d < 2; d++) {
+      const date = new Date(now.getTime() - d * 86400000);
+      const dateStr = date.toISOString().split('T')[0];
+      const memFile = path.join(ws, 'memory', `${dateStr}.md`);
+      try {
+        if (fs.existsSync(memFile)) {
+          texts.push({ text: fs.readFileSync(memFile, 'utf-8'), source: `memory/${dateStr}` });
+        }
+      } catch { /* skip */ }
+    }
+
+    if (texts.length > 0) {
+      this.contextStore.ingestBoot(texts);
+    }
+
+    // Wire COMB→VDB: stage indexes into VDB, recall queries VDB
+    const vdb = this.vdbInstance!;
+    setCombVdbHook(
+      // indexFn
+      (text: string, source: string) => {
+        vdb.index({
+          id: '', text: text.length > 2000 ? text.slice(0, 2000) : text,
+          source, role: 'context', timestamp: Date.now(), sessionId: 'comb',
+        });
+      },
+      // recentFn
+      (source: string, k: number) => vdb.recent(source, k),
+    );
+
+    console.log(`${palette.dim}  [context-store]${palette.reset} ${palette.green}Ready${palette.reset} — memory retrieval active, COMB→VDB wired`);
+  }
+
+  /** Flush new messages from all active sessions to VDB */
+  private async vdbPulseFlush(): Promise<void> {
+    try {
+      // Lazy-init VDB
+      if (!this.vdbInstance) {
+        const { VectorDB } = await import("../memory/vdb.js");
+        this.vdbInstance = new VectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
+      }
+
+      const sessions = this.sessionManager.list();
+      let totalIndexed = 0;
+
+      for (const summary of sessions) {
+        // Only process sessions with new messages since last flush
+        const watermark = this.vdbWatermarks.get(summary.id) ?? 0;
+        if (summary.messageCount <= watermark) continue;
+
+        const session = this.sessionManager.load(summary.id);
+        if (!session) continue;
+
+        // Index only messages after the watermark
+        const newMessages = session.messages.slice(watermark);
+        let indexed = 0;
+
+        for (const msg of newMessages) {
+          if (msg.role === "system") continue;
+          if (msg.role === "tool") continue;
+          if ((msg as any).tool_calls?.length) continue;
+          const text = typeof msg.content === "string" ? msg.content?.trim() : "";
+          if (!text || text.length < 15) continue;
+
+          let source = "session";
+          if (summary.id.includes("whatsapp") || summary.id.includes("@")) source = "whatsapp";
+          else if (summary.id.includes("discord")) source = "discord";
+          else if (summary.id.includes("http") || summary.id.includes("web")) source = "webchat";
+
+          const indexText = text.length > 2000 ? text.slice(0, 2000) : text;
+          const wasIndexed = this.vdbInstance.index({
+            id: "",
+            text: indexText,
+            source,
+            role: msg.role,
+            timestamp: Date.now(),
+            sessionId: summary.id,
+          });
+          if (wasIndexed) indexed++;
+        }
+
+        this.vdbWatermarks.set(summary.id, session.messages.length);
+        totalIndexed += indexed;
+      }
+
+      if (totalIndexed > 0) {
+        console.log(`${palette.dim}  [vdb]${palette.reset} Pulse: +${totalIndexed} memories indexed`);
+      }
+
+      this.vdbInstance.checkIdle();
+    } catch {
+      // Non-fatal — VDB pulse is best-effort
+    }
+  }
+
+  /** Stop VDB pulse */
+  private stopVdbPulse(): void {
+    if (this.vdbPulseTimer) {
+      clearInterval(this.vdbPulseTimer);
+      this.vdbPulseTimer = null;
+    }
+    if (this.vdbInstance) {
+      this.vdbInstance.evict();
+      this.vdbInstance = null;
+    }
+  }
   // ── MCP Servers ────────────────────────────────────────────────────────
 
   private async connectMcpServers(): Promise<void> {
@@ -477,6 +719,7 @@ export class SymbioteGateway {
               qrcode.generate(qr, { small: true }, (rendered: string) => {
                 console.log(rendered);
               });
+              this.gatewayConfig.onQrCode?.(qr);
             },
           },
           policy,
@@ -492,7 +735,8 @@ export class SymbioteGateway {
   // ── HTTP API ───────────────────────────────────────────────────────────
 
   private async startHttpApi(): Promise<void> {
-    const port = (this.gatewayConfig as any).apiPort ?? 3006;
+    const port = this.gatewayConfig.apiPort ?? 3006;
+    const host = this.gatewayConfig.apiHost ?? '127.0.0.1';
     const apiKey = process.env.MACH6_API_KEY || process.env.API_KEY || '';
 
     if (!apiKey) {
@@ -503,7 +747,12 @@ export class SymbioteGateway {
     this.httpApi = new HttpApiServer({
       port,
       apiKey,
-      allowedOrigins: (this.config as any).allowedOrigins ?? ['*'],
+      host,
+      allowedOrigins: this.config.allowedOrigins ?? [
+        `http://${this.gatewayConfig.webHost ?? '127.0.0.1'}:${this.gatewayConfig.webPort ?? 3009}`,
+        'http://127.0.0.1:3009',
+        'http://localhost:3009',
+      ],
       onChat: async (request: ChatRequest): Promise<ChatResponse> => {
         return this.handleHttpChat(request);
       },
@@ -528,8 +777,9 @@ export class SymbioteGateway {
 
   private startWebUi(): void {
     const webPort = this.gatewayConfig.webPort ?? 3009;
+    const webHost = this.gatewayConfig.webHost ?? '127.0.0.1';
     try {
-      this.webServer = startWebServer(webPort);
+      this.webServer = startWebServer(webPort, webHost);
     } catch (err) {
       console.log(warn(`Web UI failed to start — ${(err as Error).message}`));
     }
@@ -551,14 +801,16 @@ export class SymbioteGateway {
           model: this.model,
         });
 
+        const ownerIds = this.gatewayConfig.ownerIds ?? [];
+        const effectiveSenderId = request.verifiedAgentId ?? request.senderId ?? 'http-user';
+
         // Build system prompt
         const turnPrompt = buildSystemPrompt({
           workspace: this.config.workspace,
           tools: this.toolRegistry.list().map(t => t.name),
           channel: 'http',
           chatType: 'direct',
-          senderId: request.senderId ?? 'http-user',
-          chatId: request.chatId ?? (request.senderId ?? "http-user"),
+          senderId: effectiveSenderId,
         });
 
         if (session.messages.length > 0 && session.messages[0].role === 'system') {
@@ -574,17 +826,14 @@ export class SymbioteGateway {
 
         session.messages.push({ role: 'user', content: userContent });
 
-        // Sandbox context — owner HTTP/webchat sessions get admin tool access
-        const ownerIds = this.gatewayConfig.ownerIds ?? [];
-        const normalize = (x: string) => x.trim().toLowerCase();
-        const isOwner = request.senderId ? (ownerIds.map(normalize).includes('*') || ownerIds.map(normalize).includes(normalize(request.senderId))) : false;
+        // Sandbox context — HTTP API users get 'standard' tier (not admin)
+        const isOwner = !!request.verifiedAgentId && (ownerIds.includes('*') || ownerIds.includes(effectiveSenderId));
         const sandboxCtx: SessionContext = {
           sessionId,
           adapterId: 'http-api',
           channelType: 'http',
           chatType: 'direct',
-          senderId: request.senderId ?? 'http-user',
-          chatId: request.chatId ?? (request.senderId ?? "http-user"),
+          senderId: request.verifiedAgentId ?? request.senderId ?? 'http-user',
           isOwner,
         };
         const sandboxedTools = createSandboxedRegistry(this.toolRegistry, sandboxCtx);
@@ -604,8 +853,7 @@ export class SymbioteGateway {
         // Run agent with BLINK continuation
         console.log(`${palette.dim}  [http]${palette.reset} Agent turn for ${palette.violet}${sessionId}${palette.reset}`);
         const startMs = Date.now();
-        const maxIterations = Math.max(this.config.maxIterations ?? 25, this.pulseBudget.getEffectiveCap());
-        const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 14, prepareAt: 3, cooldownMs: 800 });
+        const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
 
         let currentSessionMessages = session.messages;
         let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
@@ -616,7 +864,9 @@ export class SymbioteGateway {
             providerConfig: provConfig,
             toolRegistry: sandboxedTools,
             sessionId,
-            maxIterations,
+            maxIterations: this.pulseBudget.getEffectiveCap(),
+            contextMonitor: this.contextMonitor,
+            contextStore: this.contextStore ?? undefined,
             blinkController: blinkCtrl,
             abortSignal: controller.signal,
             onEvent: (ev) => {
@@ -628,45 +878,16 @@ export class SymbioteGateway {
             onToolEnd: (name) => console.log(`  ${palette.green}✓ ${name}${palette.reset}`),
           });
 
-          // Handle abort — treat as a resumable boundary, not a terminal failure.
+          // Handle abort — save state and break
           if (result.aborted) {
-            console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}Agent aborted${palette.reset} (http). Preserving session state and attempting resume if the session is still active.`);
+            console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}Agent aborted${palette.reset} (http). Preserving session state.`);
             session.messages = result.messages;
-            journal.add('risk', 'Turn aborted; preserving state for resume');
             this.sessionManager.save(session);
-
-            if (blinkCtrl.shouldContinue()) {
-              journal.add('checkpoint', `Blink after ${result.iterations} iterations and ${result.toolCalls.length} tool calls`);
-              blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);
-              const resumeDelay = Math.max(250, blinkCtrl.getCooldownMs());
-              const resumeMessages = [...result.messages];
-              const last = resumeMessages[resumeMessages.length - 1];
-              if (last?.role === 'assistant' && (last.content === '[Max iterations reached]' || last.content === '[Blink depth exceeded]')) {
-                resumeMessages.pop();
-              }
-              if (blinkCtrl.shouldPrepare(1)) {
-                resumeMessages.push({ role: 'assistant', content: blinkCtrl.getCheckpointMessage(result.iterations) });
-              }
-              resumeMessages.push({ role: 'user', content: blinkCtrl.getResumeMessage() });
-              currentSessionMessages = resumeMessages;
-              await new Promise(r => setTimeout(r, resumeDelay));
-              continue;
-            }
-
-            finalResult = {
-              text: '[Blink depth exceeded]',
-              messages: result.messages,
-              toolCalls: result.toolCalls,
-              iterations: result.iterations,
-              maxIterationsHit: false,
-              aborted: true,
-              temperatureHistory: result.temperatureHistory,
-            };
+            finalResult = result;
             break;
           }
 
           if (result.maxIterationsHit && blinkCtrl.needsBlink(true)) {
-            journal.add('checkpoint', `Blink after ${result.iterations} iterations and ${result.toolCalls.length} tool calls`);
             blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);
             console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}⚡ Blink #${blinkCtrl.getState().depth}${palette.reset} (http) — continuing`);
             currentSessionMessages = result.messages;
@@ -676,15 +897,11 @@ export class SymbioteGateway {
                 currentSessionMessages.pop();
               }
             }
-            if (blinkCtrl.shouldPrepare(1)) {
-              currentSessionMessages.push({ role: 'assistant', content: blinkCtrl.getCheckpointMessage(result.iterations) });
-            }
             currentSessionMessages.push({ role: 'user', content: blinkCtrl.getResumeMessage() });
             await new Promise(r => setTimeout(r, blinkCtrl.getCooldownMs()));
             continue;
           }
 
-          journal.add('progress', `Completed turn in ${result.iterations} iterations`);
           blinkCtrl.recordComplete(result.iterations, result.toolCalls.length);
           finalResult = result;
           break;
@@ -699,7 +916,6 @@ export class SymbioteGateway {
           session.messages = finalResult.messages;
           if (finalResult.text && finalResult.text !== '[Max iterations reached]' && finalResult.text !== '[Blink depth exceeded]') {
             session.messages.push({ role: 'assistant', content: finalResult.text });
-            journal.add('progress', 'Assistant response finalized');
           }
           this.sessionManager.save(session);
         }
@@ -746,7 +962,7 @@ export class SymbioteGateway {
 
         // Subscribe to this session
         bus.subscribe(route.sessionId, (envelope) => {
-          void this.handleEnvelope(envelope);
+          this.handleEnvelope(envelope);
         });
 
         // Subscribe to interrupts
@@ -873,10 +1089,22 @@ export class SymbioteGateway {
 
     this.activeTurns.set(sessionId, turn);
 
+    // v2.0 — Track session for hot resume
+    this.hotResume.trackSession({
+      sessionId,
+      channelType: envelope.source.channelType,
+      adapterId: envelope.source.adapterId,
+      chatId: envelope.source.chatId,
+      lastSenderId: envelope.source.senderId,
+      wasActive: true,
+      provider: this.providerName,
+      model: this.model,
+    });
+    this.metrics.recordTurn();
+
     // Build sandbox context for this session
     const ownerIds = this.gatewayConfig.ownerIds ?? [];
-    const normalize = (x: string) => x.trim().toLowerCase();
-    const isOwner = ownerIds.map(normalize).includes(normalize(envelope.source.senderId));
+    const isOwner = ownerIds.includes('*') || ownerIds.includes(envelope.source.senderId);
     const chatType = (envelope.source.chatType === 'channel' || envelope.source.chatType === 'thread' || envelope.source.chatType === 'group' || envelope.source.chatId.includes('@g.') || envelope.metadata.guildId) ? 'group' as const : 'direct' as const;
     const sandboxCtx: SessionContext = {
       sessionId,
@@ -884,7 +1112,6 @@ export class SymbioteGateway {
       channelType: envelope.source.channelType,
       chatType,
       senderId: envelope.source.senderId,
-      chatId: envelope.source.chatId,
       isOwner,
     };
     const sandboxedTools = createSandboxedRegistry(this.toolRegistry, sandboxCtx);
@@ -895,17 +1122,17 @@ export class SymbioteGateway {
     }
     this.channelRegistry.setSessionActive(sessionId, true);
 
-    // ── WhatsApp Social Protocol ──────────────────────────────────────────
-    // Auto mark-read (blue ticks) + acknowledge receipt before processing.
-    // This gives immediate visual feedback that the message was received,
-    // without relying on the typing bubble which can be jarring.
+    // ── WhatsApp Read Receipts ───────────────────────────────────────────
+    // Do NOT auto mark-read here. The agent calls mark_read explicitly
+    // per message, which preserves unread badges / notifications on the
+    // user's phone. Auto-read was eating Ali's notifications (Day 27).
+    // UPDATE (Day 44): Mark read immediately on receipt (before LLM turn) so Ali
+    // sees blue ticks right away. Agent still calls mark_read per message for
+    // any messages it receives mid-session, but this covers the first receipt.
     if (envelope.source.channelType === 'whatsapp' && envelope.metadata.platformMessageId) {
-      const adapter = this.channelRegistry.get(envelope.source.adapterId);
-      if (adapter && typeof (adapter as any).markRead === 'function') {
-        (adapter as any).markRead(
-          envelope.source.chatId,
-          envelope.metadata.platformMessageId
-        ).catch(() => {});
+      const waAdapter = this.channelRegistry.get(envelope.source.adapterId);
+      if (waAdapter && typeof (waAdapter as any).markRead === 'function') {
+        (waAdapter as any).markRead(envelope.source.chatId, envelope.metadata.platformMessageId).catch(() => {});
       }
     }
 
@@ -929,7 +1156,6 @@ export class SymbioteGateway {
         channel: envelope.source.channelType,
         chatType: envelope.source.chatType === 'channel' || envelope.source.chatType === 'thread' || envelope.source.chatType === 'group' || envelope.source.chatId.includes('@g.') ? 'group' : 'direct',
         senderId: envelope.source.senderId,
-        chatId: envelope.source.chatId,
         workspaceFiles: adapterFiles,
       });
       // Replace or insert system prompt (always fresh — workspace files may have changed)
@@ -939,8 +1165,17 @@ export class SymbioteGateway {
         session.messages.unshift({ role: 'system', content: turnPrompt });
       }
 
-      // Add user message
-      const userContent = this.buildUserContent(envelope);
+      // Add user message (with voice transcription if applicable)
+      let userContent = this.buildUserContent(envelope);
+      
+      // Voice middleware: auto-transcribe voice/PTT messages
+      const voiceResult = await processVoiceInbound(envelope);
+      if (voiceResult && !voiceResult.isEmpty) {
+        // Replace media descriptor with transcript — agent sees text, not a file path
+        userContent = userContent.replace(/\[voice,.*?\]/, `[🎤 voice message, ${voiceResult.duration}s]`);
+        userContent += `\n\n${voiceResult.text}`;
+      }
+      
       session.messages.push({ role: 'user', content: userContent });
 
       // Pre-flight context trim: estimate token count and archive if approaching limit
@@ -955,6 +1190,16 @@ export class SymbioteGateway {
         console.log(`${palette.dim}  [gateway]${palette.reset} ${palette.yellow}⚠${palette.reset} Pre-flight trim: ~${estimatedTokens} tokens ${palette.dim}(limit ${TOKEN_LIMIT})${palette.reset}`);
         const archived = this.sessionManager.archive(sessionId, 30);
         console.log(`${palette.dim}  [gateway]${palette.reset} Archived ${archived} messages → ${session.messages.length} remaining`);
+        // Feed archived messages to VDB for persistent memory
+        try {
+          const { VectorDB, ingestSessions } = await import("../memory/vdb.js");
+          const vdb = new VectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
+          const archiveDir = path.join(this.config.sessionsDir ?? ".sessions", "archive");
+          if (fs.existsSync(archiveDir)) {
+            const result = ingestSessions(vdb, archiveDir);
+            if (result.indexed > 0) console.log(`${palette.dim}  [vdb]${palette.reset} Ingested ${result.indexed} new memories from archive`);
+          }
+        } catch { /* non-fatal */ }
         // Reload session after archive
         const trimmed = this.sessionManager.load(sessionId);
         if (trimmed) {
@@ -977,29 +1222,10 @@ export class SymbioteGateway {
       // Run agent with BLINK continuation
       console.log(`\n${palette.dim}  [turn]${palette.reset} ${palette.violet}${sessionId}${palette.reset} ${palette.dim}via${palette.reset} ${envelope.source.channelType}${palette.dim}/${palette.reset}${envelope.source.chatId}`);
       const turnStartTime = Date.now();
-      const maxIterations = Math.max(this.config.maxIterations ?? 25, this.pulseBudget.getEffectiveCap());
-      const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 10, prepareAt: 3, cooldownMs: 1000 });
+      const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
 
       let currentSessionMessages = session.messages;
       let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
-
-      // Proactive context management — warn, compact, COMB stage before overflow
-      const contextMonitor = new ContextMonitor({
-        maxContextTokens: (this.config as any).maxContextTokens ?? 80_000,
-        warnThreshold: 0.65,
-        compactThreshold: 0.75,
-        emergencyThreshold: 0.88,
-        transcriptDir: path.join(this.config.sessionsDir ?? '.sessions', 'transcripts'),
-        onCombStage: async (content: string) => {
-          try {
-            const store = getNativeCombStore(this.config.workspace);
-            store.stage(content, 'context-monitor');
-            console.log(`  [context-monitor] Auto-staged ${content.length} chars to COMB`);
-          } catch (err) {
-            console.error(`  [context-monitor] COMB stage failed:`, err);
-          }
-        },
-      });
 
       // Build the agent runner options factory (reused for fallback)
       const makeRunOpts = (useProvider: Provider, useConfig: ProviderConfig) => ({
@@ -1007,9 +1233,9 @@ export class SymbioteGateway {
         providerConfig: useConfig,
         toolRegistry: sandboxedTools,
         sessionId,
-        contextMonitor,
-        maxContextTokens: (this.config as any).maxContextTokens ?? 80_000,
-        maxIterations,
+        maxIterations: this.pulseBudget.getEffectiveCap(),
+        contextMonitor: this.contextMonitor,
+        contextStore: this.contextStore ?? undefined,
         blinkController: blinkCtrl,
         abortSignal: controller.signal,
         onEvent: (ev: any) => {
@@ -1035,10 +1261,24 @@ export class SymbioteGateway {
       // Helper: run agent with fallback chain
       const runWithFallback = async (msgs: typeof currentSessionMessages): Promise<Awaited<ReturnType<typeof runAgent>>> => {
         try {
-          return await runAgent(msgs, makeRunOpts(this.provider, provConfig));
+          const turnStartTime = Date.now();
+          const result = await runAgent(msgs, makeRunOpts(this.provider, provConfig));
+          // v2.0 — Record provider success metrics
+          this.providerHealth.recordSuccess(this.providerName, Date.now() - turnStartTime);
+          return result;
         } catch (primaryErr) {
+          // v2.0 — Record primary provider failure
+          this.providerHealth.recordFailure(this.providerName, primaryErr instanceof Error ? primaryErr.message : String(primaryErr));
+          this.metrics.recordProviderError(this.providerName, primaryErr instanceof Error ? primaryErr.message : String(primaryErr));
+
           // Try each fallback provider in order
           for (const fb of this.fallbackChain) {
+            // v2.0 — Skip providers with open circuit breaker
+            if (!this.providerHealth.isAvailable(fb.name)) {
+              console.log(`${palette.dim}  [fallback]${palette.reset} ${palette.red}${fb.name} circuit open${palette.reset} — skipping`);
+              continue;
+            }
+
             console.log(`${palette.dim}  [fallback]${palette.reset} ${palette.yellow}Primary ${this.providerName} failed${palette.reset}: ${primaryErr instanceof Error ? primaryErr.message : primaryErr}`);
             console.log(`${palette.dim}  [fallback]${palette.reset} Trying ${palette.cyan}${fb.name}${palette.reset}...`);
             try {
@@ -1050,11 +1290,16 @@ export class SymbioteGateway {
                 systemPrompt: this.systemPrompt,
                 ...fbCfg,
               };
+              const fbStartTime = Date.now();
               const result = await runAgent(msgs, makeRunOpts(fb.provider, fbProvConfig));
               console.log(`${palette.dim}  [fallback]${palette.reset} ${palette.green}${fb.name} succeeded${palette.reset}`);
+              // v2.0 — Record fallback success
+              this.providerHealth.recordSuccess(fb.name, Date.now() - fbStartTime);
               return result;
             } catch (fbErr) {
               console.log(`${palette.dim}  [fallback]${palette.reset} ${palette.red}${fb.name} also failed${palette.reset}: ${fbErr instanceof Error ? fbErr.message : fbErr}`);
+              // v2.0 — Record fallback failure
+              this.providerHealth.recordFailure(fb.name, fbErr instanceof Error ? fbErr.message : String(fbErr));
               // Continue to next fallback
             }
           }
@@ -1157,14 +1402,55 @@ export class SymbioteGateway {
 
         console.log(`${palette.dim}  [send]${palette.reset} → ${envelope.source.adapterId}/${envelope.source.chatId} ${palette.dim}(${responseText.length} chars)${palette.reset}`);
         try {
-          const sendResult = await this.channelRegistry.send(
-            envelope.source.adapterId,
-            envelope.source.chatId,
-            {
-              content: responseText,
-              replyToId: envelope.metadata.platformMessageId,
-            },
-          );
+          // Voice middleware: if original message was voice, send voice reply
+          if ((envelope as any)._isVoice && envelope.source.channelType === 'whatsapp') {
+            console.log(`${palette.dim}  [voice]${palette.reset} Generating voice reply...`);
+            const voicePath = await generateVoiceReply(responseText);
+            if (voicePath) {
+              // Send voice note
+              await this.channelRegistry.send(
+                envelope.source.adapterId,
+                envelope.source.chatId,
+                {
+                  content: '',
+                  media: [{
+                    type: 'voice' as any,
+                    mimeType: 'audio/ogg; codecs=opus',
+                    path: voicePath,
+                  }],
+                  replyToId: envelope.metadata.platformMessageId,
+                },
+              );
+              console.log(`${palette.dim}  [voice]${palette.reset} ${palette.green}voice reply sent${palette.reset}`);
+              // Also send text for accessibility
+              await this.channelRegistry.send(
+                envelope.source.adapterId,
+                envelope.source.chatId,
+                { content: responseText },
+              );
+              cleanupVoiceFile(voicePath);
+            } else {
+              // TTS failed — fall back to text only
+              console.log(`${palette.dim}  [voice]${palette.reset} ${palette.yellow}TTS failed, sending text only${palette.reset}`);
+              await this.channelRegistry.send(
+                envelope.source.adapterId,
+                envelope.source.chatId,
+                {
+                  content: responseText,
+                  replyToId: envelope.metadata.platformMessageId,
+                },
+              );
+            }
+          } else {
+            const sendResult = await this.channelRegistry.send(
+              envelope.source.adapterId,
+              envelope.source.chatId,
+              {
+                content: responseText,
+                replyToId: envelope.metadata.platformMessageId,
+              },
+            );
+          }
           console.log(`${palette.dim}  [send]${palette.reset} ${palette.green}delivered${palette.reset}`);
         } catch (sendErr) {
           console.error(`  ${palette.red}✗ [send]${palette.reset} ${sendErr}`);
@@ -1271,20 +1557,11 @@ export class SymbioteGateway {
    * Global: every Symbiote instance (AVA, Aria, future) gets this automatically.
    */
   private async flushCombOnShutdown(tailMessages = 4): Promise<void> {
-    const ws = this.config.workspace;
-    const python = path.join(ws, '.hektor-env', 'bin', 'python3');
-    const flushScript = path.join(ws, '.ava-memory', 'flush.py');
-    const hasPythonComb = fs.existsSync(python) && fs.existsSync(flushScript);
-
     try {
-      // Collect the last N non-system messages from all recent sessions
       const sessionSummaries = this.sessionManager.list();
       const now = Date.now();
-      const RECENCY_WINDOW = 24 * 60 * 60 * 1000; // Only flush sessions active in last 24h
+      const RECENCY_WINDOW = 24 * 60 * 60 * 1000;
       let flushedCount = 0;
-
-      // Use native COMB store (works universally — no Python needed)
-      const nativeStore = getNativeCombStore(ws);
 
       for (const summary of sessionSummaries) {
         if (now - summary.updatedAt > RECENCY_WINDOW) continue;
@@ -1293,48 +1570,16 @@ export class SymbioteGateway {
         if (!session || session.messages.length === 0) continue;
 
         const sessionLabel = summary.label ?? summary.id;
-
-        if (hasPythonComb) {
-          // Python COMB path (richer: chain integrity, HEKTOR integration)
-          const convMessages = session.messages.filter((m: any) => m.role !== 'system' && m.role !== 'tool');
-          const tail = convMessages.slice(-tailMessages);
-          if (tail.length === 0) continue;
-
-          const lines: string[] = [`[Session: ${sessionLabel}]`];
-          for (const msg of tail) {
-            const role = msg.role === 'assistant' ? 'AVA' : msg.role === 'user' ? 'Human' : msg.role;
-            let content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-            if (content.length > 500) content = content.slice(0, 500) + '... [truncated]';
-            lines.push(`${role}: ${content}`);
-          }
-
-          try {
-            const timestamp = new Date().toISOString();
-            const combContent = `[Auto-flush at shutdown — ${timestamp}]\n${lines.join('\n')}`;
-            await execFileAsync(python, [flushScript, 'stage', combContent], {
-              encoding: 'utf-8', timeout: 10000, cwd: ws,
-            });
-            flushedCount++;
-          } catch (pyErr) {
-            // Python failed — fall through to native
-            nativeStore.flushMessages(sessionLabel, session.messages, tailMessages);
-            flushedCount++;
-          }
-        } else {
-          // Native COMB (universal — zero dependencies)
-          nativeStore.flushMessages(sessionLabel, session.messages, tailMessages);
-          flushedCount++;
-        }
+        flushMessages(sessionLabel, session.messages, tailMessages);
+        flushedCount++;
       }
 
       if (flushedCount > 0) {
-        const method = hasPythonComb ? 'Python COMB' : 'native COMB';
-        console.log(`${palette.dim}  [comb]${palette.reset} ${palette.green}Auto-flushed${palette.reset} ${flushedCount} session(s) → ${method}`);
+        console.log(`${palette.dim}  [comb]${palette.reset} ${palette.green}Auto-flushed${palette.reset} ${flushedCount} session(s) → VDB`);
       } else {
         console.log(`${palette.dim}  [comb]${palette.reset} No recent sessions to flush`);
       }
     } catch (err) {
-      // Never let COMB flush failure block shutdown
       console.error(`${palette.dim}  [comb]${palette.reset} ${palette.red}Auto-flush failed${palette.reset}: ${err instanceof Error ? err.message : err}`);
     }
   }
@@ -1371,7 +1616,13 @@ export class SymbioteGateway {
       }
 
       presenceManager.stopAll();
+      this.stopVdbPulse();
       this.heartbeat.stop();
+
+      // v2.0 — Save session state for hot resume + flush metrics
+      this.hotResume.shutdown();
+      this.metrics.flush();
+
       console.log(`${palette.dim}  [gateway]${palette.reset} Shutdown complete.`);
       process.exit(0);
     };
@@ -1385,22 +1636,32 @@ export class SymbioteGateway {
       process.on('SIGUSR1', () => {
         console.log(`${palette.dim}  [gateway]${palette.reset} ${palette.cyan}SIGUSR1${palette.reset} — reloading config...`);
         try {
-          this.config = loadConfig(this.gatewayConfig.configPath);
-          this.providerName = this.config.defaultProvider;
-          this.provider = PROVIDERS.get(this.providerName)!;
-          this.model = this.config.defaultModel;
-          // Rebuild fallback chain
-          this.fallbackChain = [];
-          if (this.config.fallbackProviders?.length) {
-            for (const fbName of this.config.fallbackProviders) {
+          const nextConfig = loadConfig(this.gatewayConfig.configPath);
+          if (!validateAndReport(nextConfig)) {
+            throw new Error('Configuration validation failed');
+          }
+          const nextProviderName = nextConfig.defaultProvider;
+          const nextProvider = PROVIDERS.get(nextProviderName);
+          if (!nextProvider) {
+            throw new Error(`Unknown provider: ${nextProviderName}`);
+          }
+          const nextFallbackChain: { name: string; provider: Provider }[] = [];
+          if (nextConfig.fallbackProviders?.length) {
+            for (const fbName of nextConfig.fallbackProviders) {
               const fbProvider = PROVIDERS.get(fbName);
-              if (fbProvider) this.fallbackChain.push({ name: fbName, provider: fbProvider });
+              if (fbProvider) nextFallbackChain.push({ name: fbName, provider: fbProvider });
             }
           }
-          this.systemPrompt = buildSystemPrompt({
-            workspace: this.config.workspace,
+          const nextSystemPrompt = buildSystemPrompt({
+            workspace: nextConfig.workspace,
             tools: this.toolRegistry.list().map(t => t.name),
           });
+          this.config = nextConfig;
+          this.providerName = nextProviderName;
+          this.provider = nextProvider;
+          this.model = nextConfig.defaultModel;
+          this.fallbackChain = nextFallbackChain;
+          this.systemPrompt = nextSystemPrompt;
           console.log(`${palette.dim}  [gateway]${palette.reset} Provider: ${palette.cyan}${this.providerName}/${this.model}${palette.reset}${this.fallbackChain.length > 0 ? ` → fallback: ${this.fallbackChain.map(f => f.name).join(' → ')}` : ''}`);
           console.log(`${palette.dim}  [gateway]${palette.reset} System prompt refreshed ${palette.dim}(${this.systemPrompt.length} chars)${palette.reset}`);
           console.log(ok('Config reloaded successfully'));
@@ -1415,53 +1676,68 @@ export class SymbioteGateway {
 
   status() {
     return {
+      version: APP_VERSION,
       uptime: Date.now() - this.startTime,
+      uptimeHuman: this.formatUptime(Date.now() - this.startTime),
       provider: `${this.providerName}/${this.model}`,
       channels: this.channelRegistry.list(),
       activeTurns: this.activeTurns.size,
       sessions: this.sessionManager.list().length,
       tools: this.toolRegistry.list().length,
+      // v2.0 additions
+      providerHealth: this.providerHealth.getAllHealth(),
+      metrics: this.metrics.snapshot(),
+      memory: {
+        rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
+        heap: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      },
+      pid: process.pid,
     };
+  }
+
+  private formatUptime(ms: number): string {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const h = Math.floor(m / 60);
+    const d = Math.floor(h / 24);
+    if (d > 0) return `${d}d ${h % 24}h ${m % 60}m`;
+    if (h > 0) return `${h}h ${m % 60}m`;
+    if (m > 0) return `${m}m ${s % 60}s`;
+    return `${s}s`;
   }
 }
 
 // ─── CLI Entry ─────────────────────────────────────────────────────────────
 
 export async function startGateway(configPath?: string): Promise<SymbioteGateway> {
-  // Load gateway config from symbiote.json or env
+  // Load gateway config from symbiote config or env
   const config = loadConfig(configPath);
+  if (!validateAndReport(config)) {
+    throw new Error('Configuration validation failed');
+  }
 
-  // Build gateway config from environment + symbiote.json
-  // NOTE: Discord/WhatsApp settings live under the `communication` block in
-  // symbiote.json (see communication.discord / communication.whatsapp), NOT
-  // top-level `discord`/`whatsapp` keys. Fall back to top-level for backward
-  // compatibility with older configs that didn't nest under `communication`.
-  const communication = (config as any).communication ?? {};
-  const discordCfg = communication.discord ?? (config as any).discord ?? {};
-  const whatsappCfg = communication.whatsapp ?? (config as any).whatsapp ?? {};
-  const discordExtraCfg = (config as any).discordExtra ?? communication.discordExtra ?? [];
-
+  // Build gateway config from environment + symbiote config
   const gatewayConfig: GatewayConfig = {
     configPath,
     ownerIds: (config as any).ownerIds ?? [],
     channels: {
       discord: {
-        enabled: (discordCfg.enabled ?? true) && (!!process.env.DISCORD_BOT_TOKEN || !!discordCfg.token),
-        token: process.env.DISCORD_BOT_TOKEN ?? discordCfg.token ?? '',
-        botId: discordCfg.botId ?? process.env.DISCORD_CLIENT_ID,
-        adapterId: discordCfg.adapterId ?? 'discord-main',
-        policy: discordCfg.policy,
+        enabled: !!process.env.DISCORD_BOT_TOKEN || !!(config as any).discord?.token,
+        token: process.env.DISCORD_BOT_TOKEN ?? (config as any).discord?.token ?? '',
+        botId: (config as any).discord?.botId,
+        adapterId: (config as any).discord?.adapterId ?? 'discord-main',
+        policy: (config as any).discord?.policy,
       },
       whatsapp: {
-        enabled: !!whatsappCfg.enabled,
-        authDir: whatsappCfg.authDir ?? path.join(os.homedir(), '.symbiote', 'whatsapp-auth'),
-        phoneNumber: whatsappCfg.phoneNumber,
-        autoRead: whatsappCfg.autoRead ?? true,
-        policy: whatsappCfg.policy,
+        enabled: !!(config as any).whatsapp?.enabled,
+        authDir: (config as any).whatsapp?.authDir ?? path.join(os.homedir(), '.mach6', 'whatsapp-auth'),
+        phoneNumber: (config as any).whatsapp?.phoneNumber,
+        autoRead: (config as any).whatsapp?.autoRead ?? true,
+        policy: (config as any).whatsapp?.policy,
       },
     },
     // Additional Discord bot instances
-    discordExtra: (discordExtraCfg ?? []).map((extra: any) => ({
+    discordExtra: ((config as any).discordExtra ?? []).map((extra: any) => ({
       enabled: extra.enabled !== false,
       token: extra.token ?? '',
       botId: extra.botId,
@@ -1469,7 +1745,10 @@ export async function startGateway(configPath?: string): Promise<SymbioteGateway
       policy: extra.policy,
       promptFiles: extra.promptFiles,
     })),
-    apiPort: (config as any).apiPort ?? 3006,
+    apiPort: config.apiPort ?? 3006,
+    apiHost: config.apiHost ?? '127.0.0.1',
+    webPort: config.webPort ?? 3009,
+    webHost: config.webHost ?? '127.0.0.1',
   };
 
   const gateway = new SymbioteGateway(gatewayConfig);

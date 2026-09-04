@@ -8,7 +8,7 @@ dist/
 
 # Secrets & local config — never commit
 .env
-symbiote.json
+mach6.json
 
 # Keep templates — these ARE committed
 !.env.example
@@ -32,8 +32,8 @@ whatsapp-auth/
 .ava/
 comb/
 hektor/
-symbiote-core/
-symbiote.json.bak
+mach6-core/
+mach6.json.bak
 
 # Agent identity files — per-instance, never commit
 IDENTITY.md
@@ -55,22 +55,5 @@ scarlet-start.bat
 # Archive/staging (local session data)
 archive/
 staging/
--e 
-# Webapp production build — committed for deployment
-!webapp/dist/
-
-# Runtime data and memory
-.ava-memory/
-.vdb/
-.mcp/
-.pulse/
-.vendored-libs/
-mach6-core/
-
-# Backups and old versions
-*.bak
-webapp_old/
-webapp_old_backup_*/
-.archived-webapp/
-.env.archive
-sessions-backup-20260815T150357Z.tar.gz
+web/index.html.bak
+dist-symbiote-backup/

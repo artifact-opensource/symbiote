@@ -6,7 +6,7 @@ Symbiote starts with a structured boot sequence. Each step runs in order with a 
 
 | Step | Description | Timeout | Required |
 |------|-------------|---------|----------|
-| `config-load` | Load and parse `symbiote.json` | 5s | ✅ Yes |
+| `config-load` | Load and parse `mach6.json` | 5s | ✅ Yes |
 | `config-validate` | Validate all config fields | 5s | ✅ Yes |
 | `comb-recall` | Recall operational memory | 15s | ❌ No |
 | `hektor-warm` | Warm HEKTOR search index | 60s | ❌ No |
