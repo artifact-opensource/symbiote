@@ -413,7 +413,7 @@ function ensureSession() {
 }
 
 function createSession() {
-  var id = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+  var id = 'sess_' + Date.now() + '_' + secureId();
   var sessions = loadSessions();
   sessions.unshift({ id: id, title: 'New conversation', preview: '', created: Date.now() });
   saveSessions(sessions);
@@ -421,6 +421,18 @@ function createSession() {
   renderSessions();
   renderChat();
   closePanels();
+}
+
+function secureId() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID().replace(/-/g, '').slice(0, 10);
+  }
+  if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+    var bytes = new Uint8Array(6);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, function(b){ return b.toString(16).padStart(2, '0'); }).join('');
+  }
+  return String(Date.now());
 }
 
 function deleteSession(id, ev) {
