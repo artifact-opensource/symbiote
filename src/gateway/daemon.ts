@@ -929,6 +929,13 @@ export class SymbioteGateway {
           text: finalResult.text ?? '',
           sessionId,
           durationMs: Date.now() - startMs,
+          iterations: totalIter,
+          toolCalls: finalResult.toolCalls,
+          temperatureHistory: finalResult.temperatureHistory?.map((entry) => ({
+            iteration: entry.iteration,
+            category: entry.category,
+            temperature: entry.temperature,
+          })),
         });
       } catch (err) {
         reject(err);

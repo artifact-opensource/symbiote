@@ -62,6 +62,12 @@ export interface ChatResponse {
   sessionId: string;
   /** How long the agent took */
   durationMs?: number;
+  /** Iterations consumed by the turn */
+  iterations?: number;
+  /** Tool calls executed by the turn */
+  toolCalls?: Array<{ name: string; input: Record<string, unknown>; result: string }>;
+  /** Per-iteration reasoning/temperature classification */
+  temperatureHistory?: Array<{ iteration: number; category: string; temperature: number }>;
 }
 
 // ── Server ─────────────────────────────────────────────────────────────────
@@ -255,7 +261,15 @@ export class HttpApiServer {
           'Connection': 'keep-alive',
         });
         res.write(`data: ${JSON.stringify({ type: 'text', content: response.text })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'done', message: { latencyMs: response.durationMs } })}\n\n`);
+        res.write(`data: ${JSON.stringify({
+          type: 'done',
+          message: {
+            latencyMs: response.durationMs,
+            iterations: response.iterations ?? 0,
+            toolCalls: response.toolCalls ?? [],
+            temperatureHistory: response.temperatureHistory ?? [],
+          },
+        })}\n\n`);
         res.end();
       } else {
         // JSON format for API clients
@@ -263,6 +277,9 @@ export class HttpApiServer {
           text: response.text,
           sessionId: response.sessionId,
           durationMs: response.durationMs,
+          iterations: response.iterations,
+          toolCalls: response.toolCalls,
+          temperatureHistory: response.temperatureHistory,
         });
       }
     } catch (err) {

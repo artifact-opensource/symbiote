@@ -33,16 +33,14 @@ interface Message {
   tokensOut?: number;
   latencyMs?: number;
   toolCalls?: ToolCall[];
+  iterations?: number;
+  temperatureHistory?: Array<{ iteration: number; category: string; temperature: number }>;
 }
 
 interface ToolCall {
-  id: string;
   name: string;
-  input: string;
-  output?: string;
-  status: 'running' | 'done' | 'error';
-  startedAt: number;
-  finishedAt?: number;
+  input: Record<string, unknown>;
+  result: string;
 }
 
 interface Config {
@@ -230,6 +228,7 @@ async function streamChat(
 
     // Forward SSE events from real API to webchat client
     let fullContent = '';
+    let doneMeta: { latencyMs?: number; iterations?: number; toolCalls?: ToolCall[]; temperatureHistory?: Array<{ iteration: number; category: string; temperature: number }> } = {};
     let buffer = '';
 
     apiRes.on('data', (chunk: Buffer) => {
@@ -252,7 +251,7 @@ async function streamChat(
             // Forward tool call events as-is
             res.write(`data: ${JSON.stringify(data)}\n\n`);
           } else if (data.type === 'done') {
-            // We'll send our own done event below
+            doneMeta = data.message ?? {};
           }
         } catch { /* skip unparseable lines */ }
       }
@@ -286,7 +285,10 @@ async function streamChat(
       timestamp: Date.now(),
       tokensIn: userMsg.tokensIn,
       tokensOut,
-      latencyMs: latency,
+      latencyMs: doneMeta.latencyMs ?? latency,
+      toolCalls: Array.isArray(doneMeta.toolCalls) ? doneMeta.toolCalls : [],
+      iterations: typeof doneMeta.iterations === 'number' ? doneMeta.iterations : undefined,
+      temperatureHistory: Array.isArray(doneMeta.temperatureHistory) ? doneMeta.temperatureHistory : [],
     };
     session.messages.push(assistantMsg);
     session.updatedAt = Date.now();
@@ -380,7 +382,13 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 
   // GET /api/config
   if (method === 'GET' && pathname === '/api/config') {
-    return json(res, { ...config, apiKeys: redactKeys(config.apiKeys) });
+    return json(res, {
+      ...config,
+      apiKeys: redactKeys(config.apiKeys),
+      agentName,
+      agentEmoji,
+      version: APP_VERSION,
+    });
   }
 
   // PUT /api/config
