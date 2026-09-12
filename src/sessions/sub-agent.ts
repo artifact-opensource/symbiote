@@ -75,7 +75,7 @@ export class SubAgentManager {
       tools: sandboxedTools.list().map(t => t.name),
       extraContext: `You are a sub-agent spawned for a specific task. Complete it and provide a concise result.
 
-IMPORTANT: You have a maximum of ${config.maxIterations ?? 25} iterations. When you see a warning about approaching the limit, immediately wrap up and return your best result so far. Do NOT let yourself hit the wall — provide partial results rather than nothing.
+IMPORTANT: You have a maximum of ${config.maxIterations ?? 999999} iterations. When you see a warning about approaching the limit, immediately wrap up and return your best result so far. Do NOT let yourself hit the wall — provide partial results rather than nothing.
 
 Task: ${config.task}`,
     });
@@ -97,7 +97,7 @@ Task: ${config.task}`,
     providerConfig: ProviderConfig,
     toolRegistry: ToolExecutor,
   ): Promise<void> {
-    const maxIter = config.maxIterations ?? 25;
+    const maxIter = config.maxIterations ?? 999999;
 
     // Create a policy engine for this sub-agent so it gets iteration warnings
     const policyEngine = new PolicyEngine();

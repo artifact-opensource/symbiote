@@ -93,7 +93,7 @@ async function simulateAgentTurn(envelope: BusEnvelope): Promise<{
     providerConfig: provConfig,
     toolRegistry,
     sessionId,
-    maxIterations: 10,
+    maxIterations: 999999,
     onToolStart: (name, input) => {
       console.log(`    ⚡ Tool: ${name}(${JSON.stringify(input).slice(0, 80)})`);
     },

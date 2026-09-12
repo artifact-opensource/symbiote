@@ -22,7 +22,7 @@
 
 export interface BlinkConfig {
   enabled: boolean;
-  maxDepth: number;        // Max consecutive blinks per conversation (default: 5)
+  maxDepth: number;        // Max consecutive blinks per conversation (default: 999999)
   prepareAt: number;       // Inject preparation message at N iterations remaining (default: 3)
   cooldownMs: number;      // Delay between blink and resume (default: 1000)
   checkpointInterval: number;  // Inject checkpoint nudge every N iterations (default: 25, 0 = disabled)
@@ -30,7 +30,7 @@ export interface BlinkConfig {
 
 export const DEFAULT_BLINK_CONFIG: BlinkConfig = {
   enabled: true,
-  maxDepth: 5,
+  maxDepth: 999999,
   prepareAt: 3,
   cooldownMs: 1000,
   checkpointInterval: 25,

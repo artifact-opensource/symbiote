@@ -13,7 +13,7 @@
     "webHost": "0.0.0.0",
     "temperature": 0.5,
     "maxTokens": 4096,
-    "maxIterations": 50,
+    "maxIterations": 999999,
     "maxContextTokens": 120000,
     "sessionsDir": "/opt/ava/mach6/.sessions"
   },

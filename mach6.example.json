@@ -2,7 +2,7 @@
   "defaultProvider": "groq",
   "defaultModel": "llama-3.3-70b-versatile",
   "maxTokens": 8192,
-  "maxIterations": 25,
+  "maxIterations": 999999,
   "temperature": 0.3,
   "workspace": ".",
   "sessionsDir": ".sessions",

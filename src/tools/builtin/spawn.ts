@@ -20,13 +20,13 @@ export function createSpawnTool(
       type: 'object',
       properties: {
         task: { type: 'string', description: 'The task for the sub-agent to complete' },
-        maxIterations: { type: 'number', description: 'Max iterations for the sub-agent (default 25)' },
+        maxIterations: { type: 'number', description: 'Max iterations for the sub-agent (default 999999)' },
       },
       required: ['task'],
     },
     async execute(input, opts) {
       const task = String(input.task ?? '');
-      const maxIterations = Number(input.maxIterations ?? 25);
+      const maxIterations = Number(input.maxIterations ?? 999999);
       const parentSessionId = opts?.sessionId ?? 'unknown';
 
       try {

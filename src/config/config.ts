@@ -64,7 +64,7 @@ const DEFAULT_CONFIG: SymbioteConfig = {
   defaultModel: 'glm/glm-5.2',
   maxTokens: 8192,
   temperature: 0.5,
-  maxIterations: 50,
+  maxIterations: 999999,
   workspace: process.cwd(),
   fallbackProviders: [],
 };

@@ -10,7 +10,7 @@ Symbiote uses two files for configuration: `symbiote.json` for agent settings an
   "defaultProvider": "groq",
   "defaultModel": "llama-3.3-70b-versatile",
   "maxTokens": 8192,
-  "maxIterations": 50,
+  "maxIterations": 999999,
   "temperature": 0.3,
 
   // Workspace — agent's working directory for file operations
@@ -95,7 +95,7 @@ MACH6_PORT=3006
 | `defaultProvider` | string | `"groq"` | Active LLM provider |
 | `defaultModel` | string | `"llama-3.3-70b-versatile"` | Active model |
 | `maxTokens` | number | `8192` | Max tokens per response |
-| `maxIterations` | number | `50` | Max tool-call loops per turn |
+| `maxIterations` | number | `999999` | Max tool-call loops per turn |
 | `temperature` | number | `0.3` | Response temperature (0.0–1.2) |
 | `workspace` | string | `cwd()` | Agent's file system root |
 | `sessionsDir` | string | `".sessions"` | Session persistence directory |

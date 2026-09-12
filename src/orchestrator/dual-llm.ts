@@ -509,7 +509,7 @@ Important:
       const pendingToolCalls: ToolCall[] = [];
       const toolInputBuffers = new Map<string, string>();
       let iterations = 0;
-      const maxIterations = 10;
+      const maxIterations = 999999;
 
       const resultPromise = (async () => {
         while (iterations < maxIterations) {

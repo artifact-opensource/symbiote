@@ -286,7 +286,7 @@ class Wizard {
 
     const config: WizardConfig = {
       provider: '', model: '', apiKey: '', workspace: process.cwd(),
-      temperature: 0.3, maxTokens: 8192, maxIterations: 50, apiPort: 3006,
+      temperature: 0.3, maxTokens: 8192, maxIterations: 999999, apiPort: 3006,
       apiSecret: crypto.randomBytes(32).toString('hex'),
       discord: { enabled: false, token: '', botId: '', siblingBotIds: [] },
       whatsapp: { enabled: false, phoneNumber: '', authDir: path.join(os.homedir(), '.symbiote', 'whatsapp-auth') },

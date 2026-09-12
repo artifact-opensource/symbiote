@@ -15,11 +15,11 @@ This is automatic — no configuration needed. The agent doesn't know it's happe
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `DEFAULT_CAP` | 20 | Starting iteration budget |
-| `EXPANDED_CAP` | 100 | Budget after expansion |
-| `EXPAND_THRESHOLD` | 18 | Expand when this iteration is reached |
+| `DEFAULT_CAP` | 999999 | Starting iteration budget |
+| `EXPANDED_CAP` | 999999 | Budget after expansion |
+| `EXPAND_THRESHOLD` | 999999 | Expand when this iteration is reached |
 | `REVERT_WINDOW` | 3 | Check this many recent sessions |
-| `REVERT_THRESHOLD` | 10 | If all recent sessions < this, revert |
+| `REVERT_THRESHOLD` | 999999 | If all recent sessions < this, revert |
 
 ## State Persistence
 

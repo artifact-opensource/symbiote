@@ -109,7 +109,7 @@ async function main() {
       provider: githubCopilotProvider,
       providerConfig: provConfig,
       toolRegistry: registry,
-      maxIterations: 5,
+      maxIterations: 999999,
       onToolStart: (name) => console.log(`    ⚡ Tool: ${name}`),
       onToolEnd: (name, res) => console.log(`    ✓ ${name}: ${res.slice(0, 60).split('\n')[0]}...`),
     });

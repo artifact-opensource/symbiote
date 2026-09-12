@@ -9,7 +9,7 @@ When an agent approaches its iteration budget, Blink ensures continuity. Instead
 1. **Prepare** — At `prepareAt` iterations remaining (default: 3), a system message tells the agent to keep working normally
 2. **Blink** — The agent exhausts its budget. The daemon catches this, records the blink, and spawns a fresh turn on the same session
 3. **Resume** — The new turn inherits the full conversation history. A resume message tells the agent its blink depth and total iteration count
-4. **Repeat** — Up to `maxDepth` consecutive blinks (default: 5)
+4. **Repeat** — Up to `maxDepth` consecutive blinks (default: 999999)
 
 The user sees one continuous conversation. The iteration budget is the only thing that resets.
 
@@ -21,7 +21,7 @@ In `symbiote.json`:
 {
   "blink": {
     "enabled": true,
-    "maxDepth": 5,
+    "maxDepth": 999999,
     "prepareAt": 3,
     "cooldownMs": 1000,
     "checkpointInterval": 25
@@ -32,7 +32,7 @@ In `symbiote.json`:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `enabled` | `true` | Enable/disable Blink |
-| `maxDepth` | `5` | Max consecutive blinks per conversation |
+| `maxDepth` | `999999` | Max consecutive blinks per conversation |
 | `prepareAt` | `3` | Inject preparation message at N iterations remaining |
 | `cooldownMs` | `1000` | Delay between blink and resume (ms) |
 | `checkpointInterval` | `25` | Inject checkpoint nudge every N iterations (0 = disabled) |

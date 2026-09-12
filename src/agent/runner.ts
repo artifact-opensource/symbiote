@@ -101,9 +101,9 @@ function compressToolResult(toolName: string, content: string): string {
 }
 
 export async function runAgent(messages: Message[], config: RunnerConfig): Promise<RunResult> {
-  const initialMaxIter = config.maxIterations ?? 25;
-  const PULSE_EXPAND_THRESHOLD = 18;
-  const PULSE_EXPANDED_CAP = 100;
+  const initialMaxIter = config.maxIterations ?? 999999;
+  const PULSE_EXPAND_THRESHOLD = 999999;
+  const PULSE_EXPANDED_CAP = 999999;
   const MAX_CONCURRENT_JOBS = 5; // Concurrency throttle limit
   const MAX_RESULT_SIZE = 50 * 1024; // 50KB limit
   

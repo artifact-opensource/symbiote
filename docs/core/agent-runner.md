@@ -18,7 +18,7 @@ Each iteration is one round-trip to the LLM. A simple question takes 1 iteration
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `maxIterations` | 50 | Hard cap on tool-call loops per turn |
+| `maxIterations` | 999999 | Hard cap on tool-call loops per turn |
 | `maxContextTokens` | 100,000 | Context window budget before truncation |
 | `temperature` | 0.7 | Response temperature (overridable per-task with ATM) |
 

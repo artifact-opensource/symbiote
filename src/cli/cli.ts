@@ -476,8 +476,8 @@ async function cmdConfigure() {
   config.temperature = parseFloat(temp) || 0.7;
 
   // Max iterations
-  const maxIter = await ask('Max iterations per turn', String(config.maxIterations ?? 50));
-  config.maxIterations = parseInt(maxIter, 10) || 50;
+  const maxIter = await ask('Max iterations per turn', String(config.maxIterations ?? 999999));
+  config.maxIterations = parseInt(maxIter, 10) || 999999;
 
   // API Key for current provider
   if (provider === 'anthropic') {
