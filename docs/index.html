@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Symbiote — Persistent AI Agent Framework</title>
+    <title>SYMBIOTE</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -38,9 +38,11 @@
     <aside class="fixed left-0 top-0 h-screen w-16 border-r border-neutral-900 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-between py-8">
         <div></div>
         <div class="flex flex-col items-center gap-8 text-neutral-500">
-            <a href="#hero" class="hover:text-white transition-colors" title="Terminal"><i class="fa-solid fa-terminal text-sm"></i></a>
-            <a href="https://github.com/artifact-opensource/symbiote" target="_blank" class="hover:text-white transition-colors" title="GitHub"><i class="fa-brands fa-github text-sm"></i></a>
-            <a href="#install" class="hover:text-white transition-colors" title="Install"><i class="fa-solid fa-download text-sm"></i></a>
+            <a href="https://www.artifactvirtual.com" target="_blank" class="flex items-center justify-center group" title="Artifact Virtual">
+                <img src="/assets/av-mark-white.png" onerror="this.onerror=null; this.src='../assets/av-mark-white.png';" alt="Artifact Virtual" class="w-[17px] h-[17px] object-contain opacity-50 group-hover:opacity-100 transition-opacity">
+            </a>
+            <a href="https://github.com/artifact-opensource" target="_blank" class="hover:text-white transition-colors" title="GitHub"><i class="fa-brands fa-github text-sm"></i></a>
+            <a href="https://github.com/artifact-opensource/symbiote/archive/refs/heads/master.zip" class="hover:text-white transition-colors" title="Download ZIP"><i class="fa-solid fa-download text-sm"></i></a>
         </div>
         <div></div>
     </aside>
@@ -49,9 +51,17 @@
     <aside class="fixed right-0 top-0 h-screen w-16 border-l border-neutral-900 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-between py-8">
         <div></div>
         <div class="flex flex-col items-center gap-8 text-neutral-500">
-            <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="System Live"></div>
-            <a href="https://github.com/artifact-opensource/symbiote" target="_blank" class="hover:text-white transition-colors" title="Code Branch"><i class="fa-solid fa-code-branch text-sm"></i></a>
-            <a href="https://github.com/artifact-opensource/symbiote" target="_blank" class="hover:text-white transition-colors" title="Documentation"><i class="fa-solid fa-book text-sm"></i></a>
+            <!-- Green glowing status indicator with hover tooltip -->
+            <div class="relative group flex items-center justify-center cursor-default">
+                <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>
+                <!-- Tooltip -->
+                <div class="absolute right-full mr-3 px-2 py-1 bg-neutral-900 border border-neutral-800 text-neutral-300 text-[11px] font-mono rounded shadow-xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150 z-50 flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    <span id="version-text">v4.0.0</span>
+                </div>
+            </div>
+            <a href="https://github.com/artifact-opensource/symbiote" target="_blank" class="hover:text-white transition-colors" title="Repository"><i class="fa-solid fa-code-branch text-sm"></i></a>
+            <a href="https://artifactvirtual.gitbook.io/symbiote/" target="_blank" class="hover:text-white transition-colors" title="Documentation"><i class="fa-solid fa-book text-sm"></i></a>
         </div>
         <div></div>
     </aside>
@@ -61,11 +71,6 @@
         
         <!-- Background Ambient Glow -->
         <div class="absolute w-[240px] h-[240px] sm:w-[350px] sm:h-[350px] md:w-[600px] md:h-[600px] bg-gradient-to-tr from-neutral-900 to-neutral-800 rounded-full blur-3xl opacity-20 -z-10 pointer-events-none"></div>
-
-        <!-- Logo -->
-        <div class="mb-8 flex items-center justify-center">
-            <img src="../assets/av-black-logo-removebg-preview.png" alt="Artifact Virtual Logo" class="w-16 h-16 sm:w-20 sm:h-20 object-contain invert brightness-200">
-        </div>
 
         <!-- Main Headline -->
         <h1 class="text-3xl sm:text-5xl md:text-7xl font-light tracking-tight max-w-4xl leading-[1.15] mb-4 sm:mb-6">
@@ -97,6 +102,50 @@
             <a href="https://github.com/artifact-opensource/symbiote/blob/main/LICENSE" target="_blank" class="hover:text-neutral-400">MIT License</a>
         </div>
     </footer>
+
+    <script>
+        // Dynamically fetch version from README.md or fallback to package.json / tags
+        async function fetchVersion() {
+            try {
+                // Try fetching README.md to parse badge version
+                const readmeRes = await fetch('../README.md');
+                if (readmeRes.ok) {
+                    const text = await readmeRes.text();
+                    const match = text.match(/Version-([0-9.]+)/i);
+                    if (match && match[1]) {
+                        document.getElementById('version-text').textContent = 'v' + match[1];
+                        return;
+                    }
+                }
+            } catch (e) {
+                // Ignore and proceed to fallback
+            }
+
+            try {
+                // Fallback: try package.json
+                const pkgRes = await fetch('../package.json');
+                if (pkgRes.ok) {
+                    const pkg = await pkgRes.json();
+                    if (pkg.version) {
+                        document.getElementById('version-text').textContent = 'v' + pkg.version;
+                        return;
+                    }
+                }
+            } catch (e) {
+                // Fallback: GitHub Releases / Tags API
+                try {
+                    const ghRes = await fetch('https://api.github.com/repos/artifact-opensource/symbiote/releases/latest');
+                    if (ghRes.ok) {
+                        const data = await ghRes.json();
+                        if (data.tag_name) {
+                            document.getElementById('version-text').textContent = data.tag_name.startsWith('v') ? data.tag_name : 'v' + data.tag_name;
+                        }
+                    }
+                } catch (err) {}
+            }
+        }
+        fetchVersion();
+    </script>
 
 </body>
 </html>
