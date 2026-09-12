@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Symbiote — Persistent AI Agent Framework</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #000000;
+            color: #ffffff;
+            font-family: 'JetBrains Mono', monospace;
+            overflow-x: hidden;
+        }
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #000000;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #222222;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="bg-black text-white min-h-screen flex flex-col justify-between selection:bg-white selection:text-black">
+
+    <!-- LEFT SIDEBAR -->
+    <aside class="fixed left-0 top-0 h-screen w-16 border-r border-neutral-900 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-between py-8">
+        <div class="flex flex-col items-center gap-6">
+            <div class="w-8 h-8 rounded-lg bg-white text-black flex items-center justify-center font-bold text-xs tracking-tighter shadow-sm">
+                SY
+            </div>
+        </div>
+        <div class="flex flex-col items-center gap-8 text-neutral-500">
+            <a href="#hero" class="hover:text-white transition-colors" title="Terminal"><i class="fa-solid fa-terminal text-sm"></i></a>
+            <a href="https://github.com/artifact-opensource/symbiote" target="_blank" class="hover:text-white transition-colors" title="GitHub"><i class="fa-brands fa-github text-sm"></i></a>
+            <a href="#install" class="hover:text-white transition-colors" title="Install"><i class="fa-solid fa-download text-sm"></i></a>
+        </div>
+        <div class="flex flex-col items-center text-neutral-700 text-[10px]">
+            <span>v1.0</span>
+        </div>
+    </aside>
+
+    <!-- RIGHT SIDEBAR -->
+    <aside class="fixed right-0 top-0 h-screen w-16 border-l border-neutral-900 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-between py-8">
+        <div class="flex flex-col items-center gap-6 text-neutral-700 text-[10px]">
+            <span class="w-8 h-8 rounded-lg border border-neutral-900 bg-neutral-950 flex items-center justify-center text-neutral-400">
+                <i class="fa-solid fa-shield-halving text-xs"></i>
+            </span>
+        </div>
+        <div class="flex flex-col items-center gap-8 text-neutral-500">
+            <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" title="System Live"></div>
+            <a href="https://github.com/artifact-opensource/symbiote" target="_blank" class="hover:text-white transition-colors" title="Code Branch"><i class="fa-solid fa-code-branch text-sm"></i></a>
+            <a href="https://github.com/artifact-opensource/symbiote" target="_blank" class="hover:text-white transition-colors" title="Documentation"><i class="fa-solid fa-book text-sm"></i></a>
+        </div>
+        <div class="flex flex-col items-center text-neutral-700 text-[10px]">
+            <span class="text-[9px] tracking-widest text-neutral-600">SYS</span>
+        </div>
+    </aside>
+
+    <!-- MAIN HERO CONTENT -->
+    <main id="hero" class="flex-1 flex flex-col items-center justify-center px-6 md:px-24 ml-16 mr-16 min-h-screen text-center relative">
+        
+        <!-- Background Ambient Glow -->
+        <div class="absolute w-[300px] h-[300px] md:w-[600px] md:h-[600px] bg-gradient-to-tr from-neutral-900 to-neutral-800 rounded-full blur-3xl opacity-20 -z-10 pointer-events-none"></div>
+
+        <!-- Pill Badge -->
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-neutral-800 bg-neutral-950 text-xs text-neutral-400 mb-8 tracking-wider shadow-inner">
+            <span class="w-1.5 h-1.5 rounded-full bg-white"></span>
+            ARTIFACT OPENSOURCE / SYMBIOTE
+        </div>
+
+        <!-- Main Headline -->
+        <h1 class="text-4xl md:text-7xl font-light tracking-tight max-w-4xl leading-[1.1] mb-6">
+            Persistent AI agents.<br><span class="font-normal text-neutral-300">Zero overhead.</span>
+        </h1>
+
+        <!-- Subheading -->
+        <p class="text-neutral-400 text-sm md:text-base max-w-xl font-light leading-relaxed mb-10">
+            An ultra-lightweight framework for orchestrating stateful, persistent AI agents directly from your machine. Zero heavy abstractions. Pure execution.
+        </p>
+
+        <!-- Command Install Box -->
+        <div id="install" class="w-full max-w-md bg-neutral-950 border border-neutral-800 rounded-lg p-2.5 flex items-center justify-between text-left mb-8 shadow-2xl">
+            <div class="flex items-center gap-3 pl-3 overflow-hidden">
+                <i class="fa-solid fa-terminal text-neutral-500 text-xs"></i>
+                <code class="text-xs md:text-sm text-neutral-200 truncate font-mono">git clone https://github.com/artifact-opensource/symbiote</code>
+            </div>
+            <button onclick="navigator.clipboard.writeText('git clone https://github.com/artifact-opensource/symbiote'); this.innerText='COPIED'; setTimeout(() => this.innerText='COPY', 2000);" class="bg-white text-black hover:bg-neutral-200 text-xs font-medium px-3 py-1.5 rounded transition-colors shrink-0">
+                COPY
+            </button>
+        </div>
+
+        <!-- Action Links -->
+        <div class="flex items-center gap-6 text-xs text-neutral-400">
+            <a href="https://github.com/artifact-opensource/symbiote" target="_blank" class="hover:text-white transition-colors flex items-center gap-2">
+                <i class="fa-brands fa-github"></i> View Repository
+            </a>
+            <span class="text-neutral-800">/</span>
+            <a href="https://github.com/artifact-opensource/symbiote#readme" target="_blank" class="hover:text-white transition-colors flex items-center gap-2">
+                <i class="fa-solid fa-book-open"></i> Read Docs
+            </a>
+        </div>
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="ml-16 mr-16 py-6 border-t border-neutral-900 text-center text-neutral-600 text-[11px] flex flex-col md:flex-row justify-between items-center px-8">
+        <div>&copy; 2026 Artifact Open Source. All rights reserved.</div>
+        <div class="flex gap-4 mt-2 md:mt-0">
+            <a href="https://github.com/artifact-opensource/symbiote" target="_blank" class="hover:text-neutral-400">GitHub</a>
+            <a href="https://github.com/artifact-opensource/symbiote/blob/main/LICENSE" target="_blank" class="hover:text-neutral-400">MIT License</a>
+        </div>
+    </footer>
+
+</body>
+</html>
