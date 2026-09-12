@@ -19,10 +19,10 @@ import type { BusEnvelope } from '../channels/types.js';
 const execAsync = promisify(exec);
 
 // Python environments
-const HEKTOR_PYTHON = '/home/adam/workspace/.hektor-env/bin/python3';
-const VOICE_PYTHON = '/home/adam/workspace/.ava-voice/venv/bin/python3';
-const VOICE_DIR = '/home/adam/workspace/voice';
-const SPEAK_SCRIPT = '/home/adam/workspace/.ava-voice/speak.py';
+const HEKTOR_PYTHON = 'python3';
+const VOICE_PYTHON = 'python3';
+const VOICE_DIR = './voice';
+const SPEAK_SCRIPT = './speak.py';
 
 // ─── Inbound: Voice → Text ─────────────────────────────────────────────
 

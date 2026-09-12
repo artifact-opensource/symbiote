@@ -605,7 +605,7 @@ export class SymbioteGateway {
         console.log(`${palette.dim}  [http]${palette.reset} Agent turn for ${palette.violet}${sessionId}${palette.reset}`);
         const startMs = Date.now();
         const maxIterations = Math.max(this.config.maxIterations ?? 25, this.pulseBudget.getEffectiveCap());
-        const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 14, prepareAt: 3, cooldownMs: 800 });
+        const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 500, prepareAt: 3, cooldownMs: 800 });
 
         let currentSessionMessages = session.messages;
         let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
@@ -978,7 +978,7 @@ export class SymbioteGateway {
       console.log(`\n${palette.dim}  [turn]${palette.reset} ${palette.violet}${sessionId}${palette.reset} ${palette.dim}via${palette.reset} ${envelope.source.channelType}${palette.dim}/${palette.reset}${envelope.source.chatId}`);
       const turnStartTime = Date.now();
       const maxIterations = Math.max(this.config.maxIterations ?? 25, this.pulseBudget.getEffectiveCap());
-      const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 10, prepareAt: 3, cooldownMs: 1000 });
+      const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 500, prepareAt: 3, cooldownMs: 1000 });
 
       let currentSessionMessages = session.messages;
       let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;

@@ -1,0 +1,99 @@
+{
+  "apiPort": 3006,
+  "defaultModel": "bbl/gpt-5.4-mini",
+  "defaultProvider": "free-ai",
+  "discord": {
+    "botId": "${DISCORD_CLIENT_ID}",
+    "enabled": true,
+    "policy": {
+      "allowedGroups": [],
+      "allowedSenders": [
+        193011943382974466,
+        1520403264762282075,
+        1520406825353085092,
+        1520408504274518147,
+        1520407159324672073,
+        1520407680454365284,
+        1520408074119282859
+      ],
+      "dmPolicy": "allowlist",
+      "groupPolicy": "mention-only",
+      "requireMention": true
+    },
+    "siblingBotIds": [
+      1520403264762282075,
+      1520406825353085092,
+      1520408504274518147,
+      1520407159324672073,
+      1520407680454365284,
+      1520408074119282859,
+      193011943382974466
+    ],
+    "token": "${DISCORD_BOT_TOKEN}"
+  },
+  "maxIterations": 25,
+  "maxTokens": 8192,
+  "ownerIds": [
+    "193011943382974466"
+  ],
+  "providers": {
+    "anthropic": {},
+    "artifact-engine": {
+      "baseUrl": "http://localhost:8080/v1",
+      "defaultModel": "raven-v1-ollama.gguf",
+      "enabled": true,
+      "timeoutMs": 300000
+    },
+    "github-copilot": {},
+    "gladius": {
+      "baseUrl": "http://127.0.0.1:8741"
+    },
+    "gemini": {},
+    "groq": {
+      "baseUrl": "https://api.groq.com/openai"
+    },
+    "nvidia": {},
+    "ollama": {
+      "baseUrl": "http://127.0.0.1:11434"
+    },
+    "openrouter": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "enabled": true
+    },
+    "openai": {},
+    "xai": {}
+  },
+  "sessionsDir": ".sessions",
+  "temperature": 0.3,
+  "whatsapp": {
+    "authDir": "~/.symbiote/whatsapp-auth",
+    "autoRead": true,
+    "enabled": false,
+    "policy": {
+      "allowedGroups": [],
+      "allowedSenders": [
+        193011943382974466,
+        1520403264762282075,
+        1520406825353085092,
+        1520408504274518147,
+        1520407159324672073,
+        1520407680454365284,
+        1520408074119282859
+      ],
+      "dmPolicy": "allowlist",
+      "groupPolicy": "mention-only"
+    }
+  },
+  "workspace": ".",
+  "communication": {
+    "discord": {
+      "toolProgress": true,
+      "reactionMoods": {
+        "positive": "\ud83d\udc4d",
+        "negative": "\ud83d\udc4e",
+        "neutral": "\ud83d\udc40"
+      },
+      "reactions": true
+    }
+  }
+}

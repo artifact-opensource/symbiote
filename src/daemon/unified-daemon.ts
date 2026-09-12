@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { createServer, Server } from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
+import { BlinkController, DEFAULT_BLINK_CONFIG, BLINK_PREPARE_MESSAGE } from '../agent/blink';
 
 
 /**
@@ -20,6 +21,7 @@ interface ServiceConfig {
 }
 
 class UnifiedDaemon {
+    private blink = new BlinkController(DEFAULT_BLINK_CONFIG);
     private services: Map<string, { process: any, config: ServiceConfig }> = new Map();
     private bootSequence: string[] = ['hektor', 'mcp', 'xmcp', 'comb', 'pulse', 'gateway'];
 
@@ -83,6 +85,7 @@ class UnifiedDaemon {
         }
         
         console.info('Symbiote 3.0: All systems operational. VDB-first boot complete.');
+        console.info(`[Blink] Controller armed. Enabled=${(this.blink as any).config?.enabled ?? 'N/A'}, maxDepth=${(this.blink as any).config?.maxDepth}, prepareAt=${(this.blink as any).config?.prepareAt}`);
     }
 
     private async startService(id: string, config: ServiceConfig): Promise<void> {

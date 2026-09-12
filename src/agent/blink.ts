@@ -30,7 +30,7 @@ export interface BlinkConfig {
 
 export const DEFAULT_BLINK_CONFIG: BlinkConfig = {
   enabled: true,
-  maxDepth: 32,
+  maxDepth: 500,
   prepareAt: 3,
   cooldownMs: 1000,
   checkpointInterval: 6,
