@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Session, SessionSummary, SessionMetadata } from './types.js';
 
-const DEFAULT_DIR = '.symbiote/sessions';
+const DEFAULT_DIR = '.mach6/sessions';
 
 function defaultMetadata(): SessionMetadata {
   return { messageCount: 0, tokenUsage: { input: 0, output: 0 }, toolsUsed: {}, depth: 0 };

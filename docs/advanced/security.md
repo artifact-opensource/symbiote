@@ -50,7 +50,7 @@ Requests without a valid token receive `401 Unauthorized`.
 
 ## Secrets Management
 
-- API keys and tokens live in `.env`, never in `symbiote.json`
+- API keys and tokens live in `.env`, never in `mach6.json`
 - Config values support `${ENV_VAR}` interpolation
 - `.env` should be in `.gitignore` (the example file is `.env.example`)
 

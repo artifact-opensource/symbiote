@@ -61,3 +61,8 @@ Each sub-agent gets its own session with:
 - Independent message history
 - Sandboxed tool access
 - Depth limit (max 3 levels)
+
+
+## Hot Resume
+
+Sessions survive gateway restarts via the [Hot Resume](hot-resume.md) system. Active sessions are checkpointed to disk every 60 seconds and on clean exit, then restored automatically on boot.

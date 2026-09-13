@@ -21,7 +21,7 @@ const checks = [
   ['TOOLS.md',      'HEKTOR'],
   ['HEARTBEAT.md',  'HEARTBEAT_OK'],
   ['WORKFLOW_AUTO.md', 'Phoenix'],
-  ['Today memory',  '3.06-03.02'],
+  ['Today memory',  '2026-02-22'],
   ['Runtime',       'whatsapp'],
   ['Tools',         'read, write, exec, edit'],
 ];

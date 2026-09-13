@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import type { ToolDefinition } from '../types.js';
+import { preferredAppPath } from '../../runtime/platform.js';
 
 // ── Copilot token resolution (mirrors github-copilot.ts provider) ──
 
@@ -21,7 +22,7 @@ interface CachedToken {
 let cachedToken: CachedToken | null = null;
 
 function tokenCachePath(): string {
-  return path.join(os.homedir(), '.symbiote', 'credentials', 'github-copilot.token.json');
+  return preferredAppPath('credentials', 'github-copilot.token.json');
 }
 
 function loadCachedToken(): CachedToken | null {

@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process';
 import { getProcessManager } from './process.js';
 import type { ToolDefinition } from '../types.js';
+import { isWindows, shellCommand, wrapPtyCommand } from '../../runtime/platform.js';
 
 export const execTool: ToolDefinition = {
   name: 'exec',
@@ -12,7 +13,7 @@ export const execTool: ToolDefinition = {
     properties: {
       command: { type: 'string', description: 'Shell command to execute' },
       workdir: { type: 'string', description: 'Working directory (defaults to cwd)' },
-      timeout: { type: 'number', description: 'Timeout in seconds (default 120, ignored if background)' },
+      timeout: { type: 'number', description: 'Timeout in seconds (default 30, ignored if background)' },
       background: { type: 'boolean', description: 'Run in background (returns process ID)' },
       pty: { type: 'boolean', description: 'Wrap in pseudo-TTY via script command' },
     },
@@ -26,10 +27,10 @@ export const execTool: ToolDefinition = {
 
     // Self-kill guard: prevent AVA from stopping/restarting her own service or rewriting the ava script
     const SELF_KILL_PATTERNS = [
-      /systemctl\s+(stop|restart|disable)\s+symbiote/i,
-      /kill\s+.*symbiote|pkill.*symbiote/i,
-      />\s*.*\bsymbiote\b.*$/,
-      /write.*\bsymbiote\b.*\bbin\b/i,
+      /systemctl\s+(stop|restart|disable)\s+mach6/i,
+      /kill\s+.*mach6|pkill.*mach6/i,
+      />\s*.*\bmach6\b.*$/,
+      /write.*\bmach6\b.*\bbin\b/i,
     ];
     for (const pat of SELF_KILL_PATTERNS) {
       if (pat.test(command)) {
@@ -44,19 +45,21 @@ export const execTool: ToolDefinition = {
       return JSON.stringify({ processId: p.id, pid: p.pid, status: 'running' });
     }
 
-    const timeoutMs = ((input.timeout as number) ?? 120) * 1000;
+    const timeoutMs = ((input.timeout as number) ?? 30) * 1000;
 
     // PTY wrapping: use `script` to allocate a pseudo-terminal
-    const actualCommand = pty
-      ? `script -qec ${JSON.stringify(command)} /dev/null`
-      : command;
+    const actualCommand = pty ? wrapPtyCommand(command) : command;
+    const shell = shellCommand(actualCommand);
 
     return new Promise<string>((resolve) => {
       const chunks: Buffer[] = [];
-      const proc = spawn('sh', ['-c', actualCommand], {
+      const proc = spawn(shell.file, shell.args, {
         cwd: workdir,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, TERM: pty ? 'xterm-256color' : (process.env.TERM ?? 'dumb') },
+        env: {
+          ...process.env,
+          TERM: pty && !isWindows() ? 'xterm-256color' : (process.env.TERM ?? 'dumb'),
+        },
       });
 
       const timer = setTimeout(() => {

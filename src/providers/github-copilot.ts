@@ -6,6 +6,7 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
 import { openaiProvider } from './openai.js';
+import { preferredAppPath } from '../runtime/platform.js';
 
 /** Resolve the user home directory cross-platform */
 function homeDir(): string {
@@ -24,7 +25,7 @@ interface CachedToken {
 let cachedToken: CachedToken | null = null;
 
 function tokenCachePath(): string {
-  return path.join(homeDir(), '.symbiote', 'credentials', 'github-copilot.token.json');
+  return preferredAppPath('credentials', 'github-copilot.token.json');
 }
 
 function loadCachedToken(): CachedToken | null {

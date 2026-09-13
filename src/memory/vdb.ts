@@ -67,31 +67,6 @@ export interface VDBStats {
   sources: Record<string, number>;
 }
 
-// ── Graph Types ──────────────────────────────────────────────────────────
-
-export interface GraphNode {
-  id: string;
-  label: string;
-  source: string;
-  sessionId?: string;
-  timestamp: number;
-  cluster: number;
-  connections: number;
-}
-
-export interface GraphEdge {
-  source: string;
-  target: string;
-  weight: number;
-}
-
-export interface GraphData {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  clusters: number;
-  generated: number;
-}
-
 // ── Tokenizer (lightweight, no deps) ─────────────────────────────────────
 
 const STOP_WORDS = new Set([
@@ -249,6 +224,23 @@ export class VectorDB {
       });
   }
 
+  /** Get the k most recent documents from a specific source (chronological). */
+  recent(source: string, k = 10): Array<{ text: string; timestamp: number; id: string }> {
+    this.ensureLoaded();
+    this.lastAccess = Date.now();
+
+    const matching: Array<{ text: string; timestamp: number; id: string }> = [];
+    for (const doc of this.docs!.values()) {
+      if (doc.source === source) {
+        matching.push({ text: doc.text, timestamp: doc.timestamp, id: doc.id });
+      }
+    }
+
+    // Sort by timestamp descending (most recent first), take k
+    matching.sort((a, b) => b.timestamp - a.timestamp);
+    return matching.slice(0, k);
+  }
+
   /** Get stats. */
   stats(): VDBStats {
     this.ensureLoaded();
@@ -268,252 +260,6 @@ export class VectorDB {
       lastIndexed: Math.max(0, ...[...this.docs!.values()].map(d => d.timestamp)),
       sources,
     };
-  }
-
-  /** Build a knowledge graph from document similarities. */
-  graph(threshold = 0.15, maxNodes = 500): GraphData {
-    this.ensureLoaded();
-    this.lastAccess = Date.now();
-
-    const allDocs = [...this.docs!.values()];
-    // Sample if too many docs
-    const docs = allDocs.length > maxNodes
-      ? this.sampleDocs(allDocs, maxNodes)
-      : allDocs;
-    const n = docs.length;
-    if (n === 0) return { nodes: [], edges: [], clusters: 0, generated: Date.now() };
-
-    // Compute TF-IDF magnitudes
-    const mags = new Float64Array(n);
-    for (let i = 0; i < n; i++) {
-      let m = 0;
-      for (let k = 0; k < docs[i].tfidf.length; k++) {
-        const v = docs[i].tfidf[k];
-        if (v !== undefined && v !== 0) m += v * v;
-      }
-      mags[i] = Math.sqrt(m);
-    }
-
-    // Build edges via pairwise cosine similarity
-    const edges: GraphEdge[] = [];
-    const connCount = new Map<string, number>();
-    for (let i = 0; i < n; i++) {
-      if (mags[i] === 0) continue;
-      for (let j = i + 1; j < n; j++) {
-        if (mags[j] === 0) continue;
-        const sim = this.cosineSim(docs[i].tfidf, docs[j].tfidf, mags[i], mags[j]);
-        if (sim > threshold) {
-          edges.push({ source: docs[i].id, target: docs[j].id, weight: sim });
-          connCount.set(docs[i].id, (connCount.get(docs[i].id) ?? 0) + 1);
-          connCount.set(docs[j].id, (connCount.get(docs[j].id) ?? 0) + 1);
-        }
-      }
-    }
-
-    // K-means clustering
-    const k = Math.max(2, Math.ceil(Math.sqrt(n / 2)));
-    const clusters = this.kMeansClusters(docs, k);
-
-    const nodes: GraphNode[] = docs.map((doc, i) => ({
-      id: doc.id,
-      label: doc.text.slice(0, 80).replace(/\n/g, ' '),
-      source: doc.source,
-      sessionId: doc.sessionId,
-      timestamp: doc.timestamp,
-      cluster: clusters[i],
-      connections: connCount.get(doc.id) ?? 0,
-    }));
-
-    return { nodes, edges, clusters: k, generated: Date.now() };
-  }
-
-  /** Build a session-level graph (each node = session, edges = avg similarity). */
-  sessionGraph(threshold = 0.1): GraphData {
-    this.ensureLoaded();
-    this.lastAccess = Date.now();
-
-    // Group docs by sessionId
-    const sessionDocs = new Map<string, StoredDocument[]>();
-    for (const doc of this.docs!.values()) {
-      const sid = doc.sessionId ?? 'orphan';
-      if (!sessionDocs.has(sid)) sessionDocs.set(sid, []);
-      sessionDocs.get(sid)!.push(doc);
-    }
-
-    const sessionIds = [...sessionDocs.keys()];
-    const n = sessionIds.length;
-    if (n === 0) return { nodes: [], edges: [], clusters: 0, generated: Date.now() };
-
-    // Compute centroid TF-IDF for each session (average of doc vectors)
-    const centroids: Map<string, number[]> = new Map();
-    const centroidMags: Map<string, number> = new Map();
-    for (const [sid, docs] of sessionDocs) {
-      const centroid: number[] = [];
-      for (const doc of docs) {
-        for (let k = 0; k < doc.tfidf.length; k++) {
-          const v = doc.tfidf[k];
-          if (v !== undefined && v !== 0) {
-            centroid[k] = (centroid[k] ?? 0) + v / docs.length;
-          }
-        }
-      }
-      centroids.set(sid, centroid);
-      let mag = 0;
-      for (let k = 0; k < centroid.length; k++) {
-        const v = centroid[k];
-        if (v !== undefined && v !== 0) mag += v * v;
-      }
-      centroidMags.set(sid, Math.sqrt(mag));
-    }
-
-    // Build edges
-    const edges: GraphEdge[] = [];
-    const connCount = new Map<string, number>();
-    for (let i = 0; i < n; i++) {
-      const ai = centroids.get(sessionIds[i])!;
-      const mi = centroidMags.get(sessionIds[i])!;
-      if (mi === 0) continue;
-      for (let j = i + 1; j < n; j++) {
-        const aj = centroids.get(sessionIds[j])!;
-        const mj = centroidMags.get(sessionIds[j])!;
-        if (mj === 0) continue;
-        const sim = this.cosineSim(ai, aj, mi, mj);
-        if (sim > threshold) {
-          edges.push({ source: sessionIds[i], target: sessionIds[j], weight: sim });
-          connCount.set(sessionIds[i], (connCount.get(sessionIds[i]) ?? 0) + 1);
-          connCount.set(sessionIds[j], (connCount.get(sessionIds[j]) ?? 0) + 1);
-        }
-      }
-    }
-
-    // Cluster
-    const k = Math.max(2, Math.ceil(Math.sqrt(n / 2)));
-    // Create pseudo-docs for clustering
-    const pseudoDocs = sessionIds.map(sid => {
-      const docs = sessionDocs.get(sid)!;
-      return {
-        tfidf: centroids.get(sid)!,
-        text: docs[0].text,
-        source: docs[0].source,
-      };
-    });
-    const clusters = this.kMeansRaw(pseudoDocs.map(d => d.tfidf), k);
-
-    const nodes: GraphNode[] = sessionIds.map((sid, i) => {
-      const docs = sessionDocs.get(sid)!;
-      const latest = docs.reduce((a, b) => a.timestamp > b.timestamp ? a : b);
-      return {
-        id: sid,
-        label: `${sid.slice(0, 30)} (${docs.length} msgs)`,
-        source: docs[0].source,
-        sessionId: sid,
-        timestamp: latest.timestamp,
-        cluster: clusters[i],
-        connections: connCount.get(sid) ?? 0,
-      };
-    });
-
-    return { nodes, edges, clusters: k, generated: Date.now() };
-  }
-
-  // ── Graph helpers ────────────────────────────────────────────────────
-
-  private cosineSim(a: number[], b: number[], magA: number, magB: number): number {
-    let dot = 0;
-    const len = Math.max(a.length, b.length);
-    for (let i = 0; i < len; i++) {
-      const va = a[i], vb = b[i];
-      if (va !== undefined && va !== 0 && vb !== undefined && vb !== 0) {
-        dot += va * vb;
-      }
-    }
-    return magA > 0 && magB > 0 ? dot / (magA * magB) : 0;
-  }
-
-  private sampleDocs(docs: StoredDocument[], max: number): StoredDocument[] {
-    // Stratified sample: keep recent + random
-    const sorted = [...docs].sort((a, b) => b.timestamp - a.timestamp);
-    const recent = sorted.slice(0, Math.floor(max * 0.3));
-    const rest = sorted.slice(Math.floor(max * 0.3));
-    const needed = max - recent.length;
-    // Fisher-Yates partial shuffle
-    for (let i = 0; i < Math.min(needed, rest.length); i++) {
-      const j = i + Math.floor(Math.random() * (rest.length - i));
-      [rest[i], rest[j]] = [rest[j], rest[i]];
-    }
-    return [...recent, ...rest.slice(0, needed)];
-  }
-
-  private kMeansClusters(docs: StoredDocument[], k: number, iters = 20): number[] {
-    return this.kMeansRaw(docs.map(d => d.tfidf), k, iters);
-  }
-
-  private kMeansRaw(vectors: number[][], k: number, iters = 20): number[] {
-    const n = vectors.length;
-    if (n <= k) return vectors.map((_, i) => i % k);
-
-    // Init centroids: k-means++ style
-    const centroids: number[][] = [];
-    const used = new Set<number>();
-    let first = Math.floor(Math.random() * n);
-    centroids.push([...vectors[first]]); used.add(first);
-
-    for (let c = 1; c < k; c++) {
-      let maxDist = -1, bestIdx = 0;
-      for (let i = 0; i < n; i++) {
-        if (used.has(i)) continue;
-        let minD = Infinity;
-        for (const cent of centroids) {
-          const d = this.vecDist(vectors[i], cent);
-          if (d < minD) minD = d;
-        }
-        if (minD > maxDist) { maxDist = minD; bestIdx = i; }
-      }
-      centroids.push([...vectors[bestIdx]]); used.add(bestIdx);
-    }
-
-    const assignments = new Int32Array(n);
-
-    for (let iter = 0; iter < iters; iter++) {
-      // Assign
-      for (let i = 0; i < n; i++) {
-        let bestC = 0, bestD = Infinity;
-        for (let c = 0; c < k; c++) {
-          const d = this.vecDist(vectors[i], centroids[c]);
-          if (d < bestD) { bestD = d; bestC = c; }
-        }
-        assignments[i] = bestC;
-      }
-      // Update centroids
-      const counts = new Float64Array(k);
-      const sums: number[][] = centroids.map(() => []);
-      for (let i = 0; i < n; i++) {
-        const c = assignments[i];
-        counts[c]++;
-        const v = vectors[i];
-        const s = sums[c];
-        for (let j = 0; j < v.length; j++) {
-          if (v[j] !== undefined && v[j] !== 0) {
-            s[j] = (s[j] ?? 0) + v[j];
-          }
-        }
-      }
-      for (let c = 0; c < k; c++) {
-        if (counts[c] === 0) continue;
-        centroids[c] = sums[c].map(v => (v ?? 0) / counts[c]);
-      }
-    }
-    return [...assignments];
-  }
-
-  private vecDist(a: number[], b: number[]): number {
-    let sum = 0;
-    const len = Math.max(a.length, b.length);
-    for (let i = 0; i < len; i++) {
-      const d = (a[i] ?? 0) - (b[i] ?? 0);
-      sum += d * d;
-    }
-    return sum;
   }
 
   /** Evict from memory. Data stays on disk. */

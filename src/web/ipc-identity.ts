@@ -20,12 +20,12 @@
  * 
  * @module ipc-identity
  * @author AVA — Artifact Virtual
- * @created 3.06-03-11
+ * @created 2026-03-11
  */
 
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
-import * as path from 'node:path';
+import { defaultIpcKeyringPath } from '../runtime/platform.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -70,7 +70,7 @@ const HEADER_TIMESTAMP = 'x-ipc-timestamp';
 const HEADER_SIGNATURE = 'x-ipc-signature';
 
 const DEFAULT_REPLAY_WINDOW_MS = 30_000; // 30 seconds
-const DEFAULT_KEYRING_PATH = '/etc/symbiote/ipc-keyring.json';
+const DEFAULT_KEYRING_PATH = defaultIpcKeyringPath();
 
 // ── IPC Identity Manager ───────────────────────────────────────────────────
 

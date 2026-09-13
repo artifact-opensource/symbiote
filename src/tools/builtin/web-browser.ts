@@ -3,9 +3,11 @@
 // Browser launches lazily on first call, closes after 5min idle.
 
 import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ToolDefinition } from '../types.js';
+import { appHomeDir, pythonCommand } from '../../runtime/platform.js';
 
 const __filename_esm = fileURLToPath(import.meta.url);
 const __dirname_esm = dirname(__filename_esm);
@@ -24,11 +26,29 @@ function ensureSidecar(): ChildProcess {
     return sidecar;
   }
 
-  const sidecarPath = resolve(__dirname_esm, '..', '..', 'src', 'web', 'browser-sidecar.py');
+  const sidecarCandidates = [
+    resolve(__dirname_esm, '..', '..', '..', 'web', 'browser-sidecar.py'),
+    resolve(__dirname_esm, '..', '..', 'src', 'web', 'browser-sidecar.py'),
+    resolve(process.cwd(), 'web', 'browser-sidecar.py'),
+  ];
+  const sidecarPath = sidecarCandidates.find((candidate) => {
+    try {
+      return !!candidate && existsSync(candidate);
+    } catch {
+      return false;
+    }
+  });
+  if (!sidecarPath) {
+    throw new Error('browser-sidecar.py not found. Ensure the web/ directory is present in the installation.');
+  }
 
-  sidecar = spawn('python3', [sidecarPath], {
+  const python = pythonCommand(sidecarPath);
+  sidecar = spawn(python.file, python.args, {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      SYMBIOTE_HOME: process.env.SYMBIOTE_HOME ?? appHomeDir(),
+    },
   });
 
   sidecar.stdout!.on('data', (chunk: Buffer) => {

@@ -19,7 +19,7 @@ Symbiote supports 8 LLM providers through a unified streaming interface. Provide
 
 ## Configuration
 
-Register providers in `symbiote.json`:
+Register providers in `mach6.json`:
 
 ```json
 {

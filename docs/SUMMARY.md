@@ -6,7 +6,7 @@
 
 * [Installation](getting-started/installation.md)
 * [Quick Start](getting-started/quick-start.md)
-* [Setup Wizard](getting-started/wizard.md)
+* [Setup Flow](getting-started/wizard.md)
 * [Configuration](getting-started/configuration.md)
 
 ## Core Concepts
@@ -15,6 +15,9 @@
 * [Message Bus](core/message-bus.md)
 * [Agent Runner](core/agent-runner.md)
 * [Sessions](core/sessions.md)
+* [VDB — Embedded Memory](core/vdb.md)
+* [Voice Pipeline](core/voice.md)
+* [Context Monitor](core/context-monitor.md)
 * [Blink — Seamless Continuation](core/blink.md)
 * [Pulse — Adaptive Budget](core/pulse.md)
 * [COMB — Memory Persistence](core/comb.md)
@@ -25,6 +28,7 @@
 
 * [Discord](channels/discord.md)
 * [WhatsApp](channels/whatsapp.md)
+* [Web UI (Webchat)](channels/webchat.md)
 * [HTTP API](channels/http-api.md)
 
 ## Providers
@@ -42,6 +46,7 @@
 ## Tools
 
 * [Built-in Tools](tools/built-in.md)
+* [Web Automation](tools/web-automation.md)
 * [Tool Policy Engine](tools/policy.md)
 * [MCP Bridge](tools/mcp-bridge.md)
 

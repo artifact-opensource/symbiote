@@ -5,8 +5,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type { ToolDefinition } from '../types.js';
+import { isWindows } from '../../runtime/platform.js';
 
 const TTS_OUTPUT_DIR = path.join(os.tmpdir(), 'symbiote-tts');
 
@@ -24,6 +25,30 @@ function getWorkspace(): string {
   return process.env.MACH6_WORKSPACE ?? process.cwd();
 }
 
+function resolveEdgeTtsCommand(workspace: string): string {
+  const configured = process.env.SYMBIOTE_EDGE_TTS_BIN ?? process.env.MACH6_EDGE_TTS_BIN;
+  if (configured) return configured;
+
+  const candidates = isWindows()
+    ? [
+        path.join(workspace, '.hektor-env', 'Scripts', 'edge-tts.exe'),
+        path.join(workspace, '.venv', 'Scripts', 'edge-tts.exe'),
+        'edge-tts.exe',
+        'edge-tts',
+      ]
+    : [
+        path.join(workspace, '.hektor-env', 'bin', 'edge-tts'),
+        path.join(workspace, '.venv', 'bin', 'edge-tts'),
+        'edge-tts',
+      ];
+
+  for (const candidate of candidates) {
+    if (!candidate.includes(path.sep) || fs.existsSync(candidate)) return candidate;
+  }
+
+  return 'edge-tts';
+}
+
 async function edgeTTS(text: string, voice: string, speed: number, filepath: string): Promise<boolean> {
   const edgeVoice = EDGE_VOICES[voice] ?? EDGE_VOICES.nova;
   // Speed: edge-tts uses percentage like "+20%" or "-10%"
@@ -31,8 +56,17 @@ async function edgeTTS(text: string, voice: string, speed: number, filepath: str
   const ws = getWorkspace();
 
   try {
-    const cmd = `source ${ws}/.hektor-env/bin/activate && edge-tts --voice "${edgeVoice}" --rate="${speedPct}" --text "${text.replace(/"/g, '\\"').replace(/\n/g, ' ')}" --write-media "${filepath}"`;
-    execSync(cmd, { encoding: 'utf-8', timeout: 60_000, shell: '/bin/bash', stdio: 'pipe' });
+    const edgeTtsCommand = resolveEdgeTtsCommand(ws);
+    execFileSync(edgeTtsCommand, [
+      '--voice', edgeVoice,
+      '--rate', speedPct,
+      '--text', text.replace(/\r?\n/g, ' '),
+      '--write-media', filepath,
+    ], {
+      encoding: 'utf-8',
+      timeout: 60_000,
+      stdio: 'pipe',
+    });
     return fs.existsSync(filepath) && fs.statSync(filepath).size > 0;
   } catch {
     return false;
@@ -66,7 +100,7 @@ export const ttsTool: ToolDefinition = {
       // Also generate OGG opus (required for WhatsApp voice notes)
       const oggPath = filepath.replace('.mp3', '.ogg');
       try {
-        execSync(`ffmpeg -y -i "${filepath}" -codec:a libopus -b:a 64k "${oggPath}"`, { stdio: 'pipe', timeout: 30_000 });
+        execFileSync('ffmpeg', ['-y', '-i', filepath, '-codec:a', 'libopus', '-b:a', '64k', oggPath], { stdio: 'pipe', timeout: 30_000 });
       } catch { /* mp3 still works for non-WhatsApp */ }
 
       const size = fs.statSync(filepath).size;

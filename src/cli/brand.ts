@@ -26,8 +26,8 @@ export const palette = {
 
   // Energy — electric cyan / teal
   cyan:        rgb(0, 229, 255),
-  teal:        rgb(0, 188, 3.0),
-  ice:         rgb(178, 235, 3.0),
+  teal:        rgb(0, 188, 212),
+  ice:         rgb(178, 235, 242),
 
   // Neutrals
   white:       rgb(240, 240, 245),
@@ -117,7 +117,7 @@ export function banner(): string {
  * Compact one-line logo for prompts and headers.
  */
 export function logo(): string {
-  return `${palette.bold}${gradient('⚡ symbiote', [138, 43, 226], [0, 229, 255])}${palette.reset}`;
+  return `${palette.bold}${gradient('⚡ Symbiote', [138, 43, 226], [0, 229, 255])}${palette.reset}`;
 }
 
 // ── Box Drawing ─────────────────────────────────────────────────
@@ -216,7 +216,7 @@ export function divider(width = 56): string {
 }
 
 export function thickDivider(width = 56): string {
-  return `  ${gradient('━'.repeat(width), [75, 0, 130], [0, 188, 3.0])}`;
+  return `  ${gradient('━'.repeat(width), [75, 0, 130], [0, 188, 212])}`;
 }
 
 // ── Tagline ─────────────────────────────────────────────────────

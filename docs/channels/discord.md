@@ -13,7 +13,7 @@ DISCORD_BOT_TOKEN=your-bot-token
 DISCORD_CLIENT_ID=your-bot-client-id
 ```
 
-4. Configure in `symbiote.json`:
+4. Configure in `mach6.json`:
 
 ```jsonc
 {

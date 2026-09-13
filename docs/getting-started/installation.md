@@ -9,7 +9,7 @@
 ## From npm
 
 ```bash
-npm install -g symbiote-core
+npm install -g symbiote
 ```
 
 ## From Source
@@ -32,7 +32,7 @@ npx symbiote --version
 The package ships with:
 
 - **`.env.example`** — template for all environment variables (API keys, tokens)
-- **`symbiote.example.json`** — template for agent configuration
+- **`mach6.example.json`** — template for agent configuration
 - **`symbiote-gateway.service`** — systemd unit file for Linux deployments
 - **`symbiote.sh` / `symbiote.ps1`** — start scripts for Linux/macOS and Windows
 
@@ -40,15 +40,15 @@ Environment variables are auto-loaded from `.env` via the built-in dotenv loader
 
 ## Next Steps
 
-1. Run the [setup wizard](wizard.md): `npx symbiote init`
+1. Run the [guided setup flow](wizard.md): `npx symbiote init` or double-click `install.command` / `install.cmd`
 2. Follow the [Quick Start](quick-start.md)
 
 ## Platform Support
 
 | Platform | Status |
 |----------|--------|
-| Linux (x64, arm64) | ✅ Fully supported |
-| macOS (Intel, Apple Silicon) | ✅ Fully supported |
-| Windows (x64) | ✅ Fully supported |
+| Linux (x64, arm64) | ✅ Supported |
+| macOS (Intel, Apple Silicon) | ✅ Supported |
+| Windows (x64) | ✅ Supported |
 
-Symbiote uses `os.tmpdir()` and `os.homedir()` for all path resolution — zero hardcoded Unix paths. The same codebase runs everywhere without modification.
+Symbiote resolves temp, home, config, and credential paths through platform-aware runtime helpers. Legacy `mach6` paths remain supported for compatibility, while new installs use the current Symbiote runtime assets.

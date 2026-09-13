@@ -18,8 +18,6 @@ import { gladiusProvider } from './providers/gladius.js';
 import { groqProvider } from './providers/groq.js';
 import { ollamaProvider } from './providers/ollama.js';
 import { xaiProvider } from './providers/xai.js';
-import { freeaiProvider } from './providers/freeai.js';
-import { qwenProvider } from './providers/qwen.js';
 import type { Provider, ProviderConfig } from './providers/types.js';
 import { ToolRegistry } from './tools/registry.js';
 import { readTool } from './tools/builtin/read.js';
@@ -43,6 +41,7 @@ import {
   sectionHeader, ok, warn, info, kvLine, divider, thickDivider,
   versionBanner, box,
 } from './cli/brand.js';
+import { APP_VERSION } from './meta/version.js';
 
 // ─── Provider registry ───
 const providers = new Map<string, Provider>([
@@ -53,8 +52,6 @@ const providers = new Map<string, Provider>([
   ['groq', groqProvider],
   ['ollama', ollamaProvider],
   ['xai', xaiProvider],
-  ['free-ai', freeaiProvider],
-  ['qwen', qwenProvider],
 ]);
 
 // ─── Main ───
@@ -118,7 +115,7 @@ async function main() {
 
   // ── Branded CLI Header ──────────────────────────────────────
 
-  console.log(versionBanner('1.0.0'));
+  console.log(versionBanner(APP_VERSION));
 
   const providerDisplay = `${palette.cyan}${currentProvider!.name}${palette.reset}${palette.dim}/${palette.reset}${palette.white}${currentModel}${palette.reset}`;
   const toolCount = `${palette.gold}${registry.list().length}${palette.reset}`;

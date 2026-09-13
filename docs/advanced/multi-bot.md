@@ -4,7 +4,7 @@ Symbiote supports running multiple bot instances in the same Discord server with
 
 ## Sibling Bot IDs
 
-Register other bots in your `symbiote.json`:
+Register other bots in your `mach6.json`:
 
 ```json
 {

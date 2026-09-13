@@ -1,19 +1,23 @@
 # Symbiote Releases
 
-## Latest: v1.6.0 (March 7, 3.06)
-Native Gemini provider, 8 LLM providers, multi-user deployment. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for details.
+## Latest: v4.0.0 Apex (September 3, 2026)
+Windows-first production hardening release with cross-platform shell/path fixes, installer and launcher cleanup, packaged distribution prep, refreshed release assets, and a rebuilt static landing experience.
 
 ## All Releases
 
 | Version | Date | Highlights |
 |---------|------|-----------|
-| **v1.6.0** | Mar 7, 3.06 | Native Gemini, 8 providers, multi-user, de-branded UI |
-| **v1.5.0** | Mar 6, 3.06 | Blink, Pulse, COMB, 7 providers, agent wizard |
-| **v1.4.0** | Mar 5, 3.06 | MCP server, anti-loop, degradation protection |
-| **v1.3.0** | Mar 3, 3.06 | Multi-bot coordination, ATM, sibling yield |
-| **v1.2.0** | Feb 28, 3.06 | Multi-bot coordination, echo loop prevention |
-| **v1.1.0** | Feb 28, 3.06 | Brand kit, CLI wizard, first npm publish |
-| **v1.0.0** | Feb 28, 3.06 | First stable: Discord, WhatsApp, HTTP API, 18 tools, 4 providers |
+| **v4.0.0 Apex** | Sep 3, 2026 | Windows-first runtime fixes, installer cleanup, packaging prep, docs + landing overhaul |
+| **v3.0.0 Apex** | Aug 23, 2026 | Production hardening, desktop installer UI, CLI install overhaul, release alignment |
+| **v2.1.0** | Mar 12, 2026 | Circuit breaker failover, hot resume, metrics, health endpoint |
+| **v2.0.0** | Mar 12, 2026 | Rebrand, IPC identity, Playwright tools, VDB, voice, installers |
+| **v1.6.0** | Mar 7, 2026 | Native Gemini, 8 providers, multi-user deployment |
+| **v1.5.0** | Mar 6, 2026 | Blink, Pulse, COMB, 7 providers |
+| **v1.4.0** | Mar 5, 2026 | MCP server, anti-loop, degradation protection |
+| **v1.3.0** | Mar 3, 2026 | Multi-bot coordination, ATM, sibling yield |
+| **v1.2.0** | Feb 28, 2026 | Multi-bot coordination, echo loop prevention |
+| **v1.1.0** | Feb 28, 2026 | Brand kit, first-time setup flow, first npm publish |
+| **v1.0.0** | Feb 28, 2026 | First stable: Discord, WhatsApp, HTTP API, 18 tools, 4 providers |
 
 ## Changelog
 

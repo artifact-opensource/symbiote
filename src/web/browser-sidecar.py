@@ -16,8 +16,8 @@ from typing import Optional
 # Playwright imports
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
-CHROMIUM_PATH = '/usr/bin/chromium'
-SYMBIOTE_DIR = Path.home() / '.symbiote'
+CHROMIUM_PATH = os.environ.get('SYMBIOTE_CHROMIUM_PATH') or os.environ.get('MACH6_CHROMIUM_PATH')
+SYMBIOTE_DIR = Path(os.environ.get('SYMBIOTE_HOME') or os.environ.get('MACH6_HOME') or (Path.home() / '.symbiote'))
 PROFILES_DIR = SYMBIOTE_DIR / 'profiles'
 SCREENSHOTS_DIR = SYMBIOTE_DIR / 'screenshots'
 DOWNLOADS_DIR = SYMBIOTE_DIR / 'downloads'
@@ -40,7 +40,8 @@ class EncryptionManager:
                 else:
                     k = Fernet.generate_key()
                     key_path.write_bytes(k)
-                    key_path.chmod(0o600)
+                    if os.name != 'nt':
+                        key_path.chmod(0o600)
                     self.fernet = Fernet(k)
             self.available = True
         except ImportError:
@@ -70,13 +71,15 @@ class BrowserEngine:
 
     def _ensure_browser(self):
         if not self.browser or not self.browser.is_connected():
-            self.browser = self.pw.chromium.launch(
-                headless=True,
-                executable_path=CHROMIUM_PATH,
-                args=['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
-                      '--disable-extensions', '--disable-background-networking',
-                      '--disable-sync', '--disable-translate', '--no-first-run']
-            )
+            launch_opts = {
+                'headless': True,
+                'args': ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
+                         '--disable-extensions', '--disable-background-networking',
+                         '--disable-sync', '--disable-translate', '--no-first-run']
+            }
+            if CHROMIUM_PATH:
+                launch_opts['executable_path'] = CHROMIUM_PATH
+            self.browser = self.pw.chromium.launch(**launch_opts)
 
     def _get_context(self, profile: str) -> BrowserContext:
         if profile in self.contexts:
@@ -134,7 +137,8 @@ class BrowserEngine:
             profile_dir = PROFILES_DIR / profile
             cookies_file = profile_dir / 'cookies.enc'
             cookies_file.write_bytes(encrypted)
-            cookies_file.chmod(0o600)
+            if os.name != 'nt':
+                cookies_file.chmod(0o600)
         except Exception:
             pass
 

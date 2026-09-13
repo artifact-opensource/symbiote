@@ -1,0 +1,18 @@
+[Unit]
+Description=Symbiote AI Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/symbiote
+EnvironmentFile=%h/symbiote/.env
+ExecStart=/usr/bin/node %h/symbiote/dist/gateway/daemon.js --config=%h/symbiote/mach6.json
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=symbiote
+
+[Install]
+WantedBy=multi-user.target
