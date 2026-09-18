@@ -6,7 +6,7 @@
 
 * [Installation](getting-started/installation.md)
 * [Quick Start](getting-started/quick-start.md)
-* [Setup Flow](getting-started/wizard.md)
+* [Setup Wizard](getting-started/wizard.md)
 * [Configuration](getting-started/configuration.md)
 
 ## Core Concepts
@@ -15,9 +15,6 @@
 * [Message Bus](core/message-bus.md)
 * [Agent Runner](core/agent-runner.md)
 * [Sessions](core/sessions.md)
-* [VDB — Embedded Memory](core/vdb.md)
-* [Voice Pipeline](core/voice.md)
-* [Context Monitor](core/context-monitor.md)
 * [Blink — Seamless Continuation](core/blink.md)
 * [Pulse — Adaptive Budget](core/pulse.md)
 * [COMB — Memory Persistence](core/comb.md)
@@ -28,7 +25,6 @@
 
 * [Discord](channels/discord.md)
 * [WhatsApp](channels/whatsapp.md)
-* [Web UI (Webchat)](channels/webchat.md)
 * [HTTP API](channels/http-api.md)
 
 ## Providers
@@ -42,11 +38,16 @@
 * [GitHub Copilot](providers/github-copilot.md)
 * [Ollama](providers/ollama.md)
 * [Gladius](providers/gladius.md)
+* [OpenRouter](providers/openrouter.md)
+* [NVIDIA](providers/nvidia.md)
+* [Qwen](providers/qwen.md)
+* [AIHorde](providers/aihorde.md)
+* [FreeAI](providers/freeai.md)
+* [OmniRoute](providers/omniroute.md)
 
 ## Tools
 
 * [Built-in Tools](tools/built-in.md)
-* [Web Automation](tools/web-automation.md)
 * [Tool Policy Engine](tools/policy.md)
 * [MCP Bridge](tools/mcp-bridge.md)
 
@@ -55,6 +56,7 @@
 * [Sub-Agents](advanced/sub-agents.md)
 * [Multi-Bot Coordination](advanced/multi-bot.md)
 * [Adaptive Temperature](advanced/adaptive-temperature.md)
+* [Meta-Cognitive Upgrade](advanced/meta-cognitive-upgrade.md)
 * [Production Deployment](advanced/production.md)
 * [Security](advanced/security.md)
 

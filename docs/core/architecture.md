@@ -1,17 +1,18 @@
 # Architecture
 
-Symbiote is a single-process agent framework. Every component — channels, routing, sessions, tools, providers, memory, voice, and the web UI — runs in one Node.js daemon.
+Symbiote is a single-process agent framework. Every component — channels, routing, sessions, tools, providers, and the web UI — runs in one Node.js daemon.
 
 ## Data Flow
 
 ```
 Channels → Router → Message Bus → Agent Runner → LLM Provider
-  ↑                      ↑              ↑              ↓
-Discord              Priority Queue    VDB         Response
-WhatsApp             Coalescing     (persistent      ↓
-HTTP API             Interrupts      memory)     Voice Pipeline
-Web UI               Backpressure                    ↓
-                                                  Channel
+   ↑                                    ↓          ↑
+   └──────────── Response ──────────────┘          │
+        ↑                                          │
+   ┌────┴──────────────────────────────────────────┘
+   │ Meta-Cognitive Layer (async, non-blocking)
+   │ SARSI · Curator · Meta^n · MEA · PARC
+   └──────────────────────────────────→ (learning feedback)
 ```
 
 ```mermaid
@@ -20,7 +21,6 @@ graph LR
         D[Discord]
         W[WhatsApp]
         H[HTTP API]
-        UI[Web UI]
     end
 
     subgraph Router
@@ -33,55 +33,50 @@ graph LR
 
     subgraph Agent
         A[Runner · Tools · Abort · Iterate]
-        CM[Context Monitor]
-    end
-
-    subgraph Memory
-        V[VDB · BM25 + TF-IDF]
-        C[COMB · Session Memory]
     end
 
     subgraph Provider
         P[LLM Provider · Hot-swappable]
     end
 
-    subgraph Voice
-        STT[STT · faster-whisper]
-        TTS[TTS · Edge TTS]
+    subgraph Meta[Meta-Cognitive Layer]
+        S[SARSI Self-Model]
+        C[Curator]
+        M[Meta^n Loop]
+        ME[MEA Audit]
+        PA[PARC Router]
     end
+
+    UI[Web UI :3006] -->|SSE| Q
 
     D --> R
     W --> R
     H --> R
-    UI -->|SSE| R
     R --> Q
-    Q --> STT
-    STT --> A
-    A --> CM
-    CM --> A
+    Q --> A
     A --> P
-    A --> V
-    A --> C
-    A --> TTS
     P --> LLM((LLM))
+    PA -.->|preRoute| A
+    A -.->|postDeliver| S
+    S -.-> C
+    C -.-> M
+    M -.->|validated changes| S
+    ME -.->|audit gate| A
 ```
 
 ## Layers
 
 | Layer | Responsibility |
 |-------|---------------|
-| **Channels** | Platform adapters (Discord, WhatsApp, HTTP, Web UI). Receive messages, send responses. Adapter pattern — adding a new platform means implementing one interface. |
+| **Channels** | Platform adapters (Discord, WhatsApp, HTTP). Receive messages, send responses. Adapter pattern — adding a new platform means implementing one interface. |
 | **Router** | Policy enforcement, deduplication, JID normalization, interrupt detection, priority classification. Sits between channels and the bus. |
 | **Message Bus** | Priority queue with interrupt bypass, message coalescing (merges rapid-fire messages), and backpressure management. The nervous system. |
 | **Agent Runner** | The agentic loop — sends context to the LLM, processes tool calls, iterates until the model produces a final response or hits the iteration limit. |
-| **Context Monitor** | Real-time token tracking with progressive thresholds (70% warn, 80% compact, 90% emergency). Auto-compacts context before overflow. |
-| **Providers** | LLM backends — Groq, Anthropic, OpenAI, Gemini, xAI, GitHub Copilot, Ollama, Gladius. Hot-swappable mid-session. All implement the same `Provider` interface. |
-| **Tools** | 24 built-in tools + MCP bridge for external tool servers. Sandboxed per-session via the policy engine. |
-| **VDB** | Embedded persistent memory — BM25 + TF-IDF hybrid search, JSONL storage, lazy loading, real-time pulse indexing. Zero external dependencies. |
-| **COMB** | Cross-session observation memory bank. Lossless context preservation across restarts. |
-| **Voice** | Voice middleware — inbound STT (faster-whisper) and outbound TTS (Edge TTS, 6 voices). Transparent to the agent. |
+| **Providers** | LLM backends — GitHub Copilot, Anthropic, OpenAI, Gladius. Hot-swappable mid-session. All implement the same `Provider` interface. |
+| **Tools** | 18 built-in tools + MCP bridge for external tool servers. Sandboxed per-session via the policy engine. |
 | **Sessions** | Persistent conversation state with TTL. Sub-agent spawning up to depth 3. Each session has its own tool sandbox. |
-| **Web UI** | Built-in interface at `:3009` with SSE streaming, session management, config panel, and tool call visualization. Single HTML file, no build step. |
+| **Web UI** | Built-in interface at `:3006` with SSE streaming, session management, and config panel. Single HTML file, no build step. |
+| **Meta-Cognitive** | Self-improvement loop — SARSI (self-model), Curator (pattern review), Meta^n (recursive improvement), MEA (audit gate), PARC (adaptive routing). All async, non-blocking, wrapped in try/catch. |
 
 ## Design Principles
 
@@ -102,27 +97,30 @@ Each channel adapter uses the platform's native SDK (discord.js, Baileys) with f
 ```
 symbiote/
 ├── src/
-│   ├── agent/          # Runner, context manager, system prompt builder, context monitor
+│   ├── agent/          # Runner, context manager, system prompt builder, MEA audit
 │   ├── boot/           # Boot sequence & validation
 │   ├── channels/       # Adapter pattern — Discord, WhatsApp, router, bus
 │   │   ├── bus.ts      # Priority queue, coalescing, interrupts
 │   │   ├── router.ts   # Policy, dedup, JID normalization, priority
 │   │   └── adapters/   # Discord (discord.js), WhatsApp (Baileys v7)
-│   ├── cli/            # Guided setup flow, branding
+│   ├── cli/            # Interactive setup wizard, branding
 │   ├── config/         # Config loader, validator, env interpolation
 │   ├── cron/           # Cron budget management
+│   ├── curator/        # Background review — pattern detection, rule proposals
 │   ├── formatters/     # Platform-aware markdown formatting
 │   ├── gateway/        # Persistent daemon — signals, hot-reload, turns
 │   ├── heartbeat/      # Activity-aware periodic health checks
-│   ├── memory/         # VDB embedded persistent memory + index integrity
-│   ├── providers/      # LLM providers — Groq, Anthropic, OpenAI, Gemini, xAI, Copilot, Ollama, Gladius
+│   ├── memory/         # Index integrity checks
+│   ├── meta/           # Meta^n — recursive self-improvement loop
+│   ├── orchestrator/   # PARC adaptive routing + integration hooks
+│   ├── providers/      # LLM providers — Copilot, Anthropic, OpenAI, Gladius
+│   ├── sarsi/          # Self-Aware Routing & Self-Improvement self-model
 │   ├── security/       # Input sanitization
 │   ├── sessions/       # Session store, queue, sub-agents
-│   ├── tools/          # 24 built-in tools, policy engine, registry, MCP bridge, MCP server
-│   ├── voice/          # Voice middleware — STT (faster-whisper) + TTS pipeline
-│   └── web/            # Web UI server (SSE streaming, static serving, IPC identity)
+│   ├── tools/          # 18 built-in tools, policy engine, registry, MCP bridge
+│   └── web/            # Web UI server (SSE streaming, static serving)
 ├── web/                # Web UI (single HTML file)
-├── mach6.example.json  # Example config
+├── symbiote.example.json  # Example config
 ├── .env.example        # Example environment variables
 ├── symbiote.sh            # Linux/macOS start script
 ├── symbiote.ps1           # Windows start script

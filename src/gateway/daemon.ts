@@ -76,6 +76,7 @@ import { MetricsCollector, getMetrics } from '../metrics/collector.js';
 import { HotResumeManager } from '../sessions/hot-resume.js';
 import { ProviderHealthMonitor } from '../providers/health.js';
 import { APP_VERSION } from '../meta/version.js';
+import { preRoute, postDeliver } from '../orchestrator/integration.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -855,6 +856,16 @@ export class SymbioteGateway {
         const startMs = Date.now();
         const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
 
+        // ── PARC: Pre-route — determine optimal provider based on SARSI rules ──
+        let parcDecision: { provider: string; model: string; taskType: string; confidence: number; ruleId: string; reasoning: string } | null = null;
+        try {
+          const decision = preRoute(request.text, request.source ?? 'http', request.text.length);
+          parcDecision = decision;
+          console.log(`${palette.dim}  [parc]${palette.reset} ${decision.taskType} → ${decision.provider}/${decision.model} (conf: ${decision.confidence.toFixed(2)})`);
+        } catch {
+          // Non-critical — use existing provider selection
+        }
+
         let currentSessionMessages = session.messages;
         let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
 
@@ -924,6 +935,33 @@ export class SymbioteGateway {
         const blinkState = blinkCtrl.getState();
         const totalIter = blinkState.depth > 0 ? blinkState.totalIterations : finalResult.iterations;
         this.pulseBudget.recordSession(totalIter);
+
+        // ── PARC: Post-delivery assessment + learning (async, non-blocking) ──
+        try {
+          postDeliver(parcDecision ?? {
+            taskType: 'simple_qa',
+            provider: 'unknown',
+            model: 'unknown',
+            ruleId: 'fallback',
+            confidence: 0.5,
+            reasoning: 'No pre-route decision (fallback)',
+          }, {
+            channel: request.source ?? 'http',
+            userMessage: request.text,
+            contextLength: request.text.length,
+          }, {
+            text: finalResult.text ?? '',
+            toolCalls: finalResult.toolCalls ?? [],
+            iterations: totalIter,
+            aborted: finalResult.aborted ?? false,
+            maxIterationsHit: finalResult.maxIterationsHit ?? false,
+            tokensUsed: (finalResult as any).tokensUsed,
+            latencyMs: Date.now() - startMs,
+            hadErrors: (finalResult as any).hadErrors,
+          }, true);
+        } catch {
+          // Non-critical — don't let meta-cognitive layer break delivery
+        }
 
         resolve({
           text: finalResult.text ?? '',
@@ -1459,6 +1497,29 @@ export class SymbioteGateway {
             );
           }
           console.log(`${palette.dim}  [send]${palette.reset} ${palette.green}delivered${palette.reset}`);
+
+          // ── PARC: Post-delivery assessment + learning (async, non-blocking) ──
+          try {
+            const msgText = envelope.payload.text ?? '';
+            const channelName = envelope.source.adapterId ?? 'unknown';
+            const decision = preRoute(msgText, channelName, msgText.length);
+            postDeliver(decision, {
+              channel: channelName,
+              userMessage: msgText,
+              contextLength: msgText.length,
+            }, {
+              text: responseText,
+              toolCalls: finalResult?.toolCalls ?? [],
+              iterations: finalResult?.iterations ?? 0,
+              aborted: finalResult?.aborted ?? false,
+              maxIterationsHit: finalResult?.maxIterationsHit ?? false,
+              tokensUsed: (finalResult as any)?.tokensUsed,
+              latencyMs: (finalResult as any)?.latencyMs,
+              hadErrors: (finalResult as any)?.hadErrors,
+            }, true);
+          } catch {
+            // Non-critical — don't let meta-cognitive layer break delivery
+          }
         } catch (sendErr) {
           console.error(`  ${palette.red}✗ [send]${palette.reset} ${sendErr}`);
         }

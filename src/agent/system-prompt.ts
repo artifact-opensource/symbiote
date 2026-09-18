@@ -4,6 +4,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { getSarsiPrompt } from '../sarsi/index.js';
 import os from 'node:os';
 
 export interface SystemPromptParams {
@@ -141,6 +142,16 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
     '- Write to memory files — mental notes don\'t survive restarts.',
     '- Each user message starts with <<message_id=ID>>. Use this ID for reactions (message tool with action="react") and mark_read.',
   ].join('\n'));
+
+  // ── SARSI: Inject self-model into system prompt ──
+  try {
+    const sarsiPrompt = getSarsiPrompt();
+    if (sarsiPrompt) {
+      parts.push(`## SARSI Self-Model\n\n${sarsiPrompt}`);
+    }
+  } catch {
+    // Non-critical — system prompt works without SARSI
+  }
 
   return parts.join('\n');
 }

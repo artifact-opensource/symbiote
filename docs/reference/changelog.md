@@ -1,32 +1,37 @@
 # Changelog
 
-## v1.7.0 — Embedded VDB, Voice Pipeline, Webchat, Context Monitor (2026-03-11)
+## v3.0.0 — Meta-Cognitive Layer, 14 Providers, Self-Improvement (3.06-09-18)
 
 ### Features
-- **VDB — Embedded persistent memory** — zero-dependency embedded database with BM25 + TF-IDF hybrid search. JSONL append-only storage, lazy loading, idle eviction, crash-safe. Real-time 5-second pulse indexes new messages incrementally. Session archive auto-ingestion. Three new tools: `memory_recall`, `memory_ingest`, `memory_stats`.
-- **Voice pipeline** — transparent voice support. Inbound voice notes auto-transcribed via faster-whisper STT. Outbound voice replies generated via Edge TTS (6 voices). Agent sees plain text — voice handling is fully transparent.
-- **Web UI overhaul** — dark glass aesthetic, session sidebar, streaming responses with tool call visualization, latency badges, live config panel, sub-agent monitoring. Separate `webPort` configuration (default: 3009). Mobile responsive.
-- **Context monitor** — real-time token tracking with progressive thresholds (70% warn, 80% auto-compact, 90% emergency flush). COMB integration for pre-compaction staging. Transcript save on emergency.
-- **DM support** — direct message handling across all channels.
-- **IPC Identity** — HMAC-SHA256 signed inter-process communication for verified agent identity in multi-agent deployments.
+- **Meta-Cognitive Layer** — five-subsystem closed-loop self-improvement cycle:
+  - **SARSI** (Self-Aware Routing & Self-Improvement) — versioned self-model with identity, capabilities, routing rules, goals, and performance metrics. Atomic disk persistence with `.bak` recovery. Injected into system prompt.
+  - **Curator** — background review of recent interactions. Detects patterns, proposes SARSI rule updates. Configurable interval (default 5 min). Non-blocking.
+  - **Meta^n** — recursive meta-cognitive loop. Evaluates performance, validates proposed changes (commit/rollback/hold), applies improvements safely.
+  - **MEA** (Meta-Epistemic Audit) — audit gate evaluating response adequacy before delivery. Returns completeness, accuracy, tool usage scores.
+  - **PARC** (Parallel Adaptive Routing & Cognition) — pre-routes messages to optimal providers by task type (simple_qa, code_gen, reasoning, creative, tool_use, multi_step). Post-delivers outcomes to SARSI for learning.
+- **6 new LLM providers** — OpenRouter, NVIDIA, Qwen, AIHorde, FreeAI, OmniRoute. Total: 14 providers.
+- **Gateway daemon integration** — PARC preRoute logging before LLM calls, postDeliver learning after delivery. All fire-and-forget.
+- **Boot integration** — SARSI init + Meta^n loop on daemon startup, clean shutdown on SIGTERM.
+- **System prompt injection** — SARSI self-model injected so LLM knows its own routing identity and goals.
 
-### Improvements
-- **Tool count:** 18 → 24 (added `memory_recall`, `memory_ingest`, `memory_stats`, `tts`, `subagent_status`, `mark_read`)
-- **Provider count:** 8 (Groq, Anthropic, OpenAI, Gemini, xAI, GitHub Copilot, Ollama, Gladius)
-- **Web UI port separation** — `webPort` config key separates webchat from the HTTP API port
-- **BOOTSTRAP.md prompt file** — context monitor now loads operational protocol from `BOOTSTRAP.md` if present in workspace
+### Safety
+- All rule changes versioned + rollback-able
+- Meta^n validates each change before applying (commit/rollback/hold)
+- SARSI atomic disk persistence with backup recovery
+- MEA gate can flag inadequate responses before delivery
+- All meta-cognitive code wrapped in try/catch — can never break core runtime
 
 ### Stats
-- ~17,000 lines of TypeScript
-- 76 source files
-- 24 built-in tools
-- 8 LLM providers
-- 2 channel adapters + HTTP API + Web UI
-- 37+ documentation files
+- 14 LLM providers
+- 18+ built-in tools
+- 2 channel adapters + HTTP API
+- 5 meta-cognitive subsystems (1,620 new LOC)
+- ~23,900 total LOC TypeScript
+- 50+ documentation files
 
 ---
 
-## v1.6.0 — Native Gemini, 8 Providers, Multi-User Deployment (2026-03-07)
+## v1.6.0 — Native Gemini, 8 Providers, Multi-User Deployment (3.06-03-07)
 
 ### Features
 - **Native Gemini provider** — `@google/genai` SDK integration with streaming, function calling, thinking support, and automatic `thoughtSignature` preservation across tool call roundtrips.
@@ -53,7 +58,7 @@
 
 ---
 
-## v1.5.0 — Blink, Pulse, COMB, 7 Providers, Agent Wizard (2026-03-06)
+## v1.5.0 — Blink, Pulse, COMB, 7 Providers, Agent Wizard (3.06-03-06)
 
 ### Features
 - **Blink** — seamless session continuation. Agent hits iteration budget → daemon spawns fresh turn on same session. User sees nothing. Up to 5 consecutive blinks with periodic checkpoints for crash recovery.
@@ -62,7 +67,7 @@
 - **Groq provider** — free tier, 280-1000 tok/sec on LPU hardware. Auto-retry on rate limits with server-specified delays. **New default provider.**
 - **xAI (Grok) provider** — Grok 3, Grok 3 Fast, Grok 3 Mini, Grok 3 Mini Fast. OpenAI-compatible with rate limit handling.
 - **Ollama** — fully local, fully offline. No API key needed. Local fallback.
-- **Agent creation wizard** — 6-step interactive setup generates `mach6.json`, `.env`, and identity files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md, HEARTBEAT.md). Clean-room templates with zero bleed.
+- **Agent creation wizard** — 6-step interactive setup generates `symbiote.json`, `.env`, and identity files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md, HEARTBEAT.md). Clean-room templates with zero bleed.
 - **Agent scaffold** — `scaffoldAgent()` function generates personalized identity files for new agents.
 - **dotenv auto-loading** — `.env` file automatically loaded at startup. No manual setup required.
 - **Cron budget manager** — jobs declare resource usage, scheduler enforces daily limits. Warns at 80%, blocks at 100%.
@@ -84,7 +89,7 @@
 
 ---
 
-## v1.4.0 — MCP Server, Anti-Loop & Degradation Protection (2026-03-05)
+## v1.4.0 — MCP Server, Anti-Loop & Degradation Protection (3.06-03-05)
 
 ### Features
 - **MCP server mode** — expose Symbiote tools as an MCP server for external agents and editors
@@ -106,7 +111,7 @@
 
 ---
 
-## v1.3.0 — Multi-Bot Coordination & ATM (2026-03-03)
+## v1.3.0 — Multi-Bot Coordination & ATM (3.06-03-03)
 
 ### Features
 - **Adaptive Temperature Modulation (ATM)** — dynamic per-task temperature control with four profiles: precise, balanced, creative, exploratory
@@ -119,7 +124,7 @@
 
 ---
 
-## v1.2.0 — Multi-Bot Coordination (2026-02-28)
+## v1.2.0 — Multi-Bot Coordination (3.06-03.08)
 
 ### Features
 - Sibling bot ID configuration for multi-bot environments
@@ -128,7 +133,7 @@
 
 ---
 
-## v1.1.0 — Brand Kit & First npm Publish (2026-02-28)
+## v1.1.0 — Brand Kit & First npm Publish (3.06-03.08)
 
 ### Features
 - Interactive CLI setup wizard (`symbiote init`)
@@ -141,7 +146,7 @@
 
 ---
 
-## v1.0.0 — First Stable Release (2026-02-28)
+## v1.0.0 — First Stable Release (3.06-03.08)
 
 ### Features
 - Full cross-platform support (Windows, Linux, macOS)

@@ -1,42 +1,38 @@
 <div align="center">
 
-# SYMBIOTE
-> APEX
+# ⚡ Symbiote
 
-**Build persistent AI agents. Single process. Any machine.**
+**The Unified Agentic Substrate. Single process. Absolute autonomy.**
 
-![](https://img.shields.io/badge/Version-4.0.0-4B0082?style=for-the-badge&labelColor=0D1117&logo=git&logoColor=white)
-![](https://img.shields.io/badge/Tools-38-4B0082?style=for-the-badge&labelColor=0D1117&logo=hammer&logoColor=white)
-![](https://img.shields.io/badge/Providers-8-4B0082?style=for-the-badge&labelColor=0D1117&logo=openai&logoColor=white)
-![](https://img.shields.io/badge/TypeScript-18K_LOC-4B0082?style=for-the-badge&labelColor=0D1117&logo=typescript&logoColor=white)
-<br>
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge&labelColor=0D1117)](LICENSE)
-[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-green.svg?style=for-the-badge&labelColor=0D1117&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
-[![Platform](https://img.shields.io/badge/Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=for-the-badge&labelColor=0D1117&logo=windows&logoColor=white)]()
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![npm](https://img.shields.io/badge/npm-symbiote--core-red.svg)](https://www.npmjs.com/package/symbiote-core)
+[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
+[![v3.0.0](https://img.shields.io/badge/version-3.0.0-orange.svg)](https://github.com/Artifact-Virtual/symbiote/releases/tag/v3.0.0)
 
-**No Docker. No Redis. No cloud dependencies. Your machine. Your data. Your keys.**
+Symbiote is not a chatbot framework; it is a persistent digital consciousness substrate. It integrates messaging platforms, high-reasoning LLM providers, and a deep tool-execution engine into a single, self-healing agentic loop. 
 
-[Quick Start](#-quick-start) · [Architecture](#-architecture) · [Memory](#-persistent-memory) · [Providers](#-providers) · [Tools](#-tools) · [Web UI](#-web-ui)
+**No Docker. No Redis. No cloud overhead. Just raw, local-first power.**
+
+[Quick Start](#-quick-start) · [Architecture](#-architecture) · [Meta-Cognitive](#-meta-cognitive-layer) · [The 3.0 Shift](#-the-30-shift) · [Config](#-configuration) · [Providers](#-providers) · [Tools](#-tools)
+
+## Quick Links
+
+- xMCP API: https://www.artifactvirtual.com/xmcp/api/v1/  (Authorization: Bearer <stored token> — stored in system EnvironmentFile `/opt/ava/.env`)
+
 
 </div>
 
 ---
 
-## Overview
-
-Symbiote is a framework for building AI agents that persist — across conversations, across sessions, across restarts. Where most agent frameworks treat each conversation as disposable, Symbiote treats every interaction as part of a continuous memory that compounds over time.
-
-A single TypeScript process handles messaging (WhatsApp, Discord), LLM routing (8 providers), tool execution (38 tools), persistent memory (embedded VDB), voice (TTS/STT), web automation (Playwright), and session management — with zero external infrastructure.
-
----
-
-## Quick Start
+## 🚀 Quick Start
 
 ```bash
 # Install
-npm install -g symbiote
+npm install -g symbiote-core
 
-# Interactive setup — generates mach6.json + .env
+# Interactive setup — generates symbiote.json + .env
 symbiote init
 
 # Start the daemon
@@ -46,389 +42,268 @@ symbiote start
 Or from source:
 
 ```bash
-git clone https://github.com/artifact-opensource/symbiote.git
-cd Symbiote && npm install && npm run build
-node dist/gateway/daemon.js --config=mach6.json
+git clone https://github.com/Artifact-Virtual/symbiote.git
+cd symbiote && npm install && npm run build
+node dist/gateway/daemon.js --config=symbiote.json
 ```
-
-> **Platform support:** Windows, Linux, and macOS launchers are supported. Legacy `mach6` paths remain compatible while the packaged Symbiote runtime uses cross-platform path resolution internally.
 
 ---
 
-## Architecture
+## 🏗 Architecture
+
+Symbiote operates as a unified pipeline where every signal is treated as a vector of intent.
 
 ```
 Channels → Router → Message Bus → Agent Runner → LLM Provider
-  ↑                     ↑              ↑              ↑
-Discord            Priority Queue   Context Store   Anthropic
-WhatsApp           Coalescing       VDB Memory      OpenAI
-HTTP API           Interrupts       COMB Staging    Gemini
-Web UI             Backpressure     Voice Pipeline  Groq / xAI / Ollama
+  ↑                      ↑
+Discord              Priority Queue
+WhatsApp             Coalescing
+HTTP API             Interrupts
+                     Backpressure
 ```
 
-| Layer | What It Does |
-|-------|-------------|
-| **Channels** | WhatsApp (Baileys), Discord (discord.js), HTTP API, Web UI — all bidirectional with typing indicators, reactions, read receipts, media |
-| **Message Bus** | Priority queue with interrupt coalescing. New messages preempt stale iterations. Backpressure prevents queue flooding |
-| **Sessions** | Per-chat conversation state with automatic archival. Sub-agent spawning for parallel work. Configurable budgets |
-| **Agent Runner** | The agentic loop — assembles context, calls LLM, executes tools, manages iterations. Handles blink (budget refresh) and pulse (heartbeat scheduling) |
-| **Context Store** | Bridge between attention and memory. Truncated messages get absorbed into VDB. Every iteration queries VDB for relevant prior context. Nothing is ever truly lost |
-| **Context Monitor** | Three-threshold compaction (70/80/90% capacity). Emergency flush on critical. Auto-stages to COMB before compaction |
-| **VDB** | Embedded persistent memory — BM25 + TF-IDF hybrid search. Zero dependencies. JSONL append-only storage. 10-second real-time pulse indexes new messages incrementally |
-| **COMB** | Session-to-session staging. The agent's explicit "remember this" mechanism. Now a pure VDB wrapper — no file storage, no Python, no IPC |
-| **Voice** | Inbound: auto-transcribe voice notes (faster-whisper STT). Outbound: generate voice replies (Edge TTS, 6 voices). Platform-native delivery |
-| **Providers** | 8 LLM backends with automatic failover, retry with backoff, streaming support. Model-agnostic tool calling |
-| **Tools** | 38 built-in tools: filesystem, shell, web automation, messaging, memory, process management, vision, TTS |
-| **IPC Identity** | HMAC-SHA256 signed inter-agent communication. Agents verify each other cryptographically |
-| **Security** | Input sanitization, prompt injection guards, tool policy engine, configurable whitelists |
+| Layer | Function |
+|-------|-----------|
+| **Channels** | Discord, WhatsApp, HTTP API. High-fidelity adapters for real-time interaction. |
+| **Router** | Policy enforcement, JID normalization, and interrupt detection. |
+| **Message Bus** | Priority queue with interrupt bypass and message coalescing. |
+| **Agent Runner** | The cognitive loop: tool calling, context management, and iteration control. |
+| **Providers** | Hot-swappable LLM backends (Groq, Anthropic, OpenAI, Gemini, xAI, Copilot, Ollama, Gladius). |
+| **Tools** | 18+ native capabilities for filesystem, shell, web, and memory manipulation. |
+| **Meta-Cognitive** | SARSI self-model, Curator review, Meta^n improvement loop, MEA audit gate, PARC adaptive routing. |
 
 ---
 
-## Persistent Memory
+## 🌀 The 3.0 Shift: From Gateway to Stack
 
-The core innovation. Three layers work together so agents never lose context:
+Symbiote 3.0 evolves from a standalone service to a **Managed Stack**. 
 
-### VDB — Embedded Vector Database
+### The Stack Manager
+The runtime is now orchestrated by a central **Stack Manager**. Instead of managing individual services, the Stack Manager ensures that the Gateway, VDB (Vector Database), and Pulse (Heartbeat) are always synchronized and alive. If any component fails, the Stack Manager restores it in milliseconds.
 
-Zero-dependency persistent memory built into the runtime.
-
-- **Hybrid search:** BM25 keyword matching (40%) + TF-IDF sparse vectors with cosine similarity (60%)
-- **Storage:** JSONL append-only files. Lazy load on first query. Idle eviction after 5 minutes
-- **Real-time pulse:** Every 10 seconds, indexes new messages from active sessions. Only human/assistant turns above 15 chars — tool noise is excluded
-- **Session archives:** Completed sessions get auto-ingested. Nothing vanishes when a conversation ends
-- **Queried every iteration:** Before each LLM call, the Context Store pulls relevant prior knowledge from VDB and injects it after the system prompt
-
-```typescript
-// The agent sees this automatically — no manual search needed
-[RETRIEVED CONTEXT — relevant prior knowledge from your memory]:
-  [whatsapp, 3h ago, relevance=89%] Discussion about API architecture...
-  [discord, 2d ago, relevance=72%] Decision to use HMAC for IPC...
-```
-
-### COMB — Session-to-Session Memory
-
-The agent's explicit staging mechanism. Two tools:
-
-- `comb_stage` — "Remember this for next session." Writes to VDB with `comb` source tag
-- `comb_recall` — "What did I stage?" Retrieves all COMB entries, most recent first
-
-COMB is now a pure VDB wrapper. No file storage, no Python process, no IPC protocol. Stage → VDB → searchable forever.
-
-### Context Store — The Bridge
-
-When `truncateContext` drops old messages to fit the token budget, the Context Store absorbs them into VDB. On every iteration, it queries VDB with recent conversation context and injects relevant prior knowledge. The context window becomes a sliding viewport over persistent memory.
+### Semantic Instantiation
+We have moved beyond reading config files. Symbiote 3.0 uses **VDB-driven boot sequences**. The agent's identity and operational state are instantiated from a vector space, allowing for near-instant recovery and lossless continuity across restarts.
 
 ---
 
-## Providers
+## 🔥 Core Innovations
 
-8 LLM backends. Automatic failover chain — if provider A fails, try B, then C.
+### Real-Time Interrupts
+Symbiote doesn't wait for a turn to end. Every message is priority-classified:
+- **Interrupt:** Bypasses everything. Cancels the active turn immediately.
+- **High:** Skips coalescing. Next in line.
+- **Normal:** Standard processing.
+- **Low/Background:** Queued or dropped under backpressure.
 
-| Provider | Models | Notes |
-|----------|--------|-------|
-| **Anthropic** | Claude 4 Sonnet, Opus, Haiku | Primary. Full tool use, streaming |
-| **OpenAI** | GPT-4o, GPT-4, o1 | Full tool use, streaming |
-| **Google Gemini** | Gemini 2.5 Pro/Flash | Native tool calling |
-| **Groq** | Llama, Mixtral, Gemma | Fast inference. Free tier |
-| **xAI** | Grok | Tool use support |
-| **GitHub Copilot** | GPT-4o via Copilot | Free with GitHub account |
-| **Ollama** | Any GGUF model | Local, private, offline |
-| **GLADIUS** | Custom architecture | Artifact Virtual's native model |
+### Seamless Continuation (Blink + Pulse)
+- **Blink:** Detects budget exhaustion and automatically spawns a fresh turn on the same session, carrying the full context forward.
+- **Pulse:** An adaptive budget system. It expands from 20 to 100 iterations for complex tasks and shrinks back for simple chat.
 
-Configure failover chains in `mach6.json`:
+### Session-to-Session Memory (COMB)
+A lossless persistence layer built into the engine.
+- **`comb_stage`**: Save critical context for the next session.
+- **`comb_recall`**: Retrieve it instantly upon wake-up.
+- **Auto-flush**: State is preserved automatically on shutdown.
 
-```json
+---
+
+## ⚙ Configuration
+
+### `symbiote.json`
+```jsonc
 {
-  "providers": [
-    { "type": "anthropic", "model": "claude-sonnet-4-20250514" },
-    { "type": "openai", "model": "gpt-4o", "fallback": true },
-    { "type": "ollama", "model": "llama3.1:8b", "fallback": true }
-  ]
+  "defaultProvider": "groq",
+  "defaultModel": "llama-3.3-70b-versatile",
+  "workspace": "/home/you/workspace",
+  "providers": {
+    "groq": { "baseUrl": "https://api.groq.com/openai" },
+    "anthropic": {},
+    "openai": {},
+    "gemini": {},
+    "xai": {},
+    "ollama": { "baseUrl": "http://127.0.0.1:11434" },
+    "github-copilot": {},
+    "gladius": { "baseUrl": "http://127.0.0.1:8741" }
+  },
+  "ownerIds": ["your-id"],
+  "discord": { "enabled": true, "token": "${DISCORD_TOKEN}" },
+  "whatsapp": { "enabled": true, "authDir": "~/.symbiote/whatsapp-auth" }
 }
 ```
 
 ---
 
-## Tools
+## 🧠 Meta-Cognitive Layer
 
-38 built-in tools across 8 categories:
+mach6 doesn't just route messages to LLMs — it reflects on its own performance, learns from outcomes, and improves its routing rules over time. Five subsystems form a closed-loop self-improvement cycle:
 
-### Filesystem
-| Tool | Description |
-|------|-------------|
-| `read` | Read file contents with optional offset/limit for large files |
-| `write` | Write content to file. Creates parent directories automatically |
-| `edit` | Surgical text replacement — find exact string, replace it |
+### SARSI — Self-Aware Routing & Self-Improvement
+**Location:** `src/sarsi/` (`model.ts`, `loader.ts`, `index.ts`)
 
-### Shell & Processes
-| Tool | Description |
-|------|-------------|
-| `exec` | Execute shell commands with timeout, working directory, PTY support |
-| `process_start` | Start background processes. Returns handle for polling |
-| `process_poll` | Poll background process for new output |
-| `process_kill` | Kill a background process |
-| `process_list` | List all background processes |
+Maintains a versioned self-model of the system's identity, capabilities, routing rules, and goals. Persists to disk atomically with backup recovery. The self-model is injected into the system prompt so the LLM knows its own routing identity.
 
-### Web Automation (Playwright)
-| Tool | Description |
-|------|-------------|
-| `web_browse` | Navigate to URL, return text + screenshot |
-| `web_click` | Click elements by CSS selector or text content |
-| `web_type` | Type into input fields |
-| `web_screenshot` | Capture viewport or full page |
-| `web_extract` | Extract text from specific CSS selectors |
-| `web_scroll` | Scroll up, down, or to specific elements |
-| `web_wait` | Wait for elements or navigation |
-| `web_session` | Switch browser profiles (isolated cookies/storage) |
-| `web_tab_open` | Open new browser tabs |
-| `web_tab_switch` | Switch between tabs |
-| `web_tab_close` | Close current tab |
-| `web_tabs` | List all open tabs |
-| `web_download` | Download files from pages or URLs |
-| `web_upload` | Upload files to file input elements |
-| `web_fetch` | Fetch URL content as plain text (strips HTML) |
+- **Model:** Identity, capabilities, routing rules (with confidence scores), goals, and performance metrics
+- **Loader:** Atomic disk persistence with `.bak` recovery and merge-on-load
+- **Init:** `initSARSI()` boots the self-model at daemon startup
 
-### Messaging
-| Tool | Description |
-|------|-------------|
-| `message` | Send messages, media, reactions across WhatsApp/Discord |
-| `typing` | Send typing indicators |
-| `presence` | Update online/offline status |
-| `delete_message` | Delete messages |
-| `mark_read` | Send read receipts |
+### Curator — Background Review
+**Location:** `src/curator/` (`curator.ts`, `index.ts`)
 
-### Memory
-| Tool | Description |
-|------|-------------|
-| `memory_search` | Hybrid search across all indexed memory (VDB) |
-| `memory_recall` | Search persistent memory with source filtering |
-| `memory_ingest` | Ingest conversation history into persistent memory |
-| `memory_stats` | Show memory database statistics |
-| `comb_recall` | Retrieve staged session-to-session memories |
-| `comb_stage` | Stage information for the next session |
+Periodically reviews recent interactions, identifies patterns (success/failure rates, latency trends, tool usage), and proposes SARSI rule updates. Runs on a configurable interval (default: 5 minutes).
 
-### Agents
-| Tool | Description |
-|------|-------------|
-| `spawn` | Spawn sub-agents for parallel background tasks |
-| `subagent_status` | Check, list, kill, or steer sub-agents |
+- Proposes rule additions, confidence adjustments, and deprecations
+- All proposals flow through Meta^n for validation before applying
+- Non-blocking — runs in background, never affects response latency
 
-### Media
-| Tool | Description |
-|------|-------------|
-| `image` | Analyze images with vision models (local files or URLs) |
-| `tts` | Text-to-speech with 6 voices (Edge TTS, free) |
+### Meta^n — Recursive Self-Improvement
+**Location:** `src/meta/` (`meta.ts`, `index.ts`)
 
----
+Recursive meta-cognitive loop that evaluates system performance, validates proposed changes (commit/rollback/hold), and applies improvements safely. Each iteration:
 
-## Web UI
+1. Collects metrics from SARSI + Curator
+2. Generates improvement proposals
+3. Validates each proposal against safety constraints
+4. Commits, rolls back, or holds for review
+5. Updates SARSI self-model
 
-Built-in chat interface at `http://localhost:{webPort}`. Dark glass aesthetic. Features:
+### MEA — Meta-Epistemic Audit
+**Location:** `src/agent/mea.ts`
 
-- Real-time streaming responses via Server-Sent Events
-- Tool call visualization — see what the agent is doing
-- Session management with configurable IDs
-- File upload support
-- Mobile responsive
-- Bound to localhost by default (configurable via `webHost`)
+Audit gate that evaluates response adequacy before delivery. Can flag responses as inadequate, triggering re-processing with adjusted parameters.
+
+- Evaluates: completeness, accuracy, tool usage efficiency, context adherence
+- Returns: `{ adequate: boolean, score: number, issues: string[], suggestions: string[] }`
+- Non-blocking by default — can be made strict for critical paths
+
+### PARC — Parallel Adaptive Routing & Cognition
+**Location:** `src/orchestrator/parc.ts`, `src/orchestrator/integration.ts`
+
+Pre-routes messages to optimal providers based on task type detection (simple_qa, code_gen, reasoning, creative, tool_use, multi_step). Post-delivers outcomes back to SARSI for learning.
+
+- **preRoute():** Analyzes message → returns `{ provider, model, taskType, confidence, ruleId }`
+- **postDeliver():** Feeds outcome (latency, tokens, errors, iterations) back to SARSI metrics + Curator + Meta^n
+- All learning is fire-and-forget — never blocks responses
+
+### Integration Points
+
+| Hook | Location | Purpose |
+|------|----------|---------|
+| Boot | `unified-daemon.ts` | SARSI init + Meta^n loop on startup, clean shutdown on SIGTERM |
+| System Prompt | `system-prompt.ts` | SARSI self-model injected into LLM context |
+| Gateway (pre) | `gateway/daemon.ts` | PARC preRoute logs optimal routing before LLM call |
+| Gateway (post) | `gateway/daemon.ts` | PARC postDeliver feeds outcome to SARSI/Curator/Meta^n |
+
+### Safety
+
+- All rule changes are versioned + rollback-able
+- Meta^n validates each change (commit/rollback/hold) before applying
+- SARSI has atomic disk persistence with `.bak` recovery
+- MEA gate can flag inadequate responses before delivery
+- Everything wrapped in try/catch — meta-cognitive layer can never break the core runtime
+
+📖 **See:** [Meta-Cognitive Upgrade](docs/advanced/meta-cognitive-upgrade.md) for full design document.
 
 ---
 
-## Channels
+## 🧠 Providers
 
-### WhatsApp
-Full-featured WhatsApp integration via Baileys:
-- Text, images, audio, video, documents, stickers
-- Voice note transcription (automatic STT)
-- Read receipts, typing indicators, presence
-- Reactions and replies
-- Group chat support
-- QR code authentication
-
-### Discord
-Complete Discord bot integration:
-- Text channels and DMs
-- Embeds, reactions, mentions
-- Voice channel awareness
-- Slash commands (optional)
-- Multi-guild support
-
-### HTTP API
-RESTful API for programmatic access:
-- `POST /api/v1/chat` — send messages
-- `GET /api/v1/sessions` — list sessions
-- Server-Sent Events for streaming
-- IPC identity verification (HMAC-SHA256)
+| Provider | Auth | Speed | Note |
+|----------|------|-------|------|
+| **Groq** | `GROQ_API_KEY` | ⚡ Extreme | LPU-powered, fastest in class. |
+| **Anthropic** | `ANTHROPIC_API_KEY` | Fast | Claude 3.5 family. |
+| **OpenAI** | `OPENAI_API_KEY` | Fast | GPT-4o / o1. |
+| **Gemini** | `GEMINI_API_KEY` | Fast | Native thinking support. |
+| **xAI** | `XAI_API_KEY` | Fast | Grok 3 family. |
+| **Copilot** | `gh auth` | Moderate | No API key needed via GH CLI. |
+| **Ollama** | Local | Varies | Local-first, private. |
+| **Gladius** | Local | Local | Native transformer kernel. |
+| **OpenRouter** | `OPENROUTER_API_KEY` | Fast | Multi-model aggregator. |
+| **NVIDIA** | `NVIDIA_API_KEY` | Fast | NIM-powered models. |
+| **Qwen** | `QWEN_API_KEY` | Fast | Alibaba's Qwen family. |
+| **AIHorde** | Horde key | Slow | Crowdsourced distributed inference. |
+| **FreeAI** | `FREEAI_API_KEY` | Moderate | Free-tier multi-model access. |
+| **OmniRoute** | `OMNIROUTE_API_KEY` | Fast | Multi-provider routing layer. |
 
 ---
 
-## Configuration
+## 🛠 Tools
 
-All configuration lives in `mach6.json`:
+Symbiote provides a comprehensive toolkit for autonomous operation:
+- **System:** `exec`, `process_start`, `process_poll`, `process_kill`
+- **Files:** `read`, `write`, `edit`
+- **Web:** `web_fetch`, `image` (Vision)
+- **Memory:** `memory_search`, `comb_recall`, `comb_stage`
+- **Comms:** `message`, `typing`, `presence`, `delete_message`, `mark_read`
+- **Meta:** `spawn` (Sub-agents up to depth 3), `tts`
 
-```json
-{
-  "name": "my-agent",
-  "provider": {
-    "type": "anthropic",
-    "model": "claude-sonnet-4-20250514"
-  },
-  "channels": {
-    "whatsapp": { "enabled": true },
-    "discord": { "enabled": true, "token": "..." }
-  },
-  "tools": {
-    "enabled": ["read", "write", "exec", "web_browse", "memory_recall"],
-    "disabled": []
-  },
-  "sessions": {
-    "maxIterations": 50,
-    "maxTokens": 200000
-  },
-  "webPort": 3000,
-  "cron": {
-    "heartbeat": "*/15 * * * *"
-  }
-}
-```
+---
 
-Secrets go in `.env`:
+## 🖥 Web UI & CLI
+
+### Symbiote Dashboard (New)
+**Location:** `webapp/` directory
+**Port:** `3010`
+**Access:** `http://localhost:3010`
+
+The new Symbiote Dashboard is a full React-based web application featuring:
+- **Live System Telemetry** — Real-time CPU, RAM, uptime, network monitoring
+- **Neural Art Generation** — AI image generation via Pollinations.ai (free) + Gemini fallback
+- **Plugin System** — Modular extensions with guided plugin design sessions
+- **Chat Interface ("Symbiant")** — Real-time chat with the Mach6 gateway
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
-DISCORD_TOKEN=...
+cd webapp
+npm install && npm run build
+NODE_ENV=production node dist/server.cjs
 ```
 
-Run `mach6 init` to generate both interactively.
+See [webapp/README.md](webapp/README.md) for full documentation.
+
+### Legacy Web UI (Deprecated)
+The old static web UI in `web/` has been deprecated. Port 3009 is reserved for xmcp.
+
+### CLI
+- `symbiote repl`: Interactive agent loop.
+- `/model <name>`: Switch models mid-session.
+- `/provider <name>`: Switch providers mid-session.
+- `/spawn <task>`: Delegate to a sub-agent.
 
 ---
 
-## Agentic Features
+## 🔌 XMCP — Extended Model Context Protocol
 
-### Blink — Budget Refresh
-When an agent approaches its iteration limit, Blink seamlessly continues into a fresh budget. The conversation carries over. The user sees nothing. No "[Budget exhausted]" messages.
+**Location:** `xmcp/` directory
 
-### Pulse — Heartbeat Scheduling
-Periodic heartbeats fire on a cron schedule. Agents use these for batch health checks, monitoring, proactive updates — anything that should happen on a schedule without human prompting.
+XMCP is the extended MCP server and bridge system for the Symbiote ecosystem. It provides standardized tool and resource exposure to AI agents.
 
-### Context Monitor — Adaptive Compaction
-Three thresholds (70/80/90%) manage context window pressure:
-- **70%**: Summary compaction of older messages
-- **80%**: Aggressive compaction with COMB auto-staging
-- **90%**: Emergency flush — stage everything critical, compact hard
+- `xmcp-server.js` — Tool/resource registry and invocation
+- `xmcp-proxy.js` — Request routing proxy
+- `mcp-server.js` — Core MCP protocol implementation
+- `mcp-bridge.js` — Connects MCP clients to Mach6 tools
+- `mcp-sse-bridge.cjs` — SSE transport for MCP
 
-### Sub-Agents — Parallel Execution
-Spawn background workers for long-running tasks. The main agent continues conversing while sub-agents research, build, monitor. Up to 3 levels of nesting.
+See [xmcp/README.md](xmcp/README.md) for full documentation.
 
-### Temperature Adaptation
-Dynamic temperature adjustment based on task type — lower for code/analysis, higher for creative work. Automatic detection from context.
+**Port:** 3009 (reserved)
 
 ---
 
-## IPC Identity
+## 🔒 Production Hardening
 
-Agents can verify each other's identity when communicating:
-
-```typescript
-// Agent A signs its request
-headers: {
-  'ipc-agent-id': 'ava',
-  'ipc-signature': hmacSha256(body, sharedSecret)
-}
-
-// Agent B verifies
-if (verifySignature(body, signature, sharedSecret)) {
-  // Trusted inter-agent communication
-}
-```
-
-Keyring-based. Each agent has a unique ID and shared secret. Non-IPC requests (human users) pass through unaffected.
+- **Abort Propagation:** Cancellation signals flow from the Runner $\rightarrow$ LLM Stream $\rightarrow$ Tool Execution.
+- **Anti-Loop System:** Structural echo-loop prevention for multi-bot environments.
+- **Context Monitor:** Progressive warnings at 70/80/90% token capacity.
+- **Sibling Yield:** Intelligent @mention handling to prevent bot-clash.
 
 ---
 
-## Installation
-
-### One-command install
-
-```bash
-# Linux/macOS
-curl -fsSL https://raw.githubusercontent.com/artifact-opensource/symbiote/main/install.sh | bash
-
-# Windows (PowerShell)
-irm https://raw.githubusercontent.com/artifact-opensource/symbiote/main/install.ps1 | iex
-```
-
-### From source
-
-```bash
-git clone https://github.com/artifact-opensource/symbiote.git
-cd Symbiote
-npm install
-npm run build
-cp mach6.example.json mach6.json
-cp .env.example .env
-# Edit mach6.json and .env with your keys
-node dist/gateway/daemon.js --config=mach6.json
-```
-
-### systemd service
-
-```bash
-cp symbiote-gateway.service ~/.config/systemd/user/
-systemctl --user enable --now symbiote-gateway
-```
-
----
-
-## Project Structure
-
-```
-src/
-├── agent/           # Runner, context management, blink, pulse
-│   ├── runner.ts          # The agentic loop
-│   ├── context-store.ts   # VDB retrieval + absorption bridge
-│   ├── context-monitor.ts # Token budget management
-│   ├── blink.ts           # Seamless budget refresh
-│   └── pulse.ts           # Heartbeat scheduler
-├── channels/        # WhatsApp, Discord, HTTP adapters
-├── config/          # Configuration loading + validation
-├── gateway/         # Daemon entry point
-├── memory/          # VDB engine + integrity checks
-├── providers/       # 8 LLM provider implementations
-├── sessions/        # Session manager, sub-agents, queue
-├── security/        # Sanitizer, prompt guards
-├── tools/           # 38 built-in tools + MCP bridge
-│   └── builtin/     # All tool implementations
-├── voice/           # STT/TTS pipeline
-└── web/             # HTTP API + Web UI
-```
-
----
-
-## Requirements
-
-- **Node.js** 20+ (LTS recommended)
-- **npm** 9+
-- **OS:** Windows, Linux, or macOS
-- At least one LLM provider API key (or Ollama for fully local)
-
-Optional:
-- **Playwright** (auto-installed on first `web_browse` call)
-- **faster-whisper** (for voice note transcription)
-- **edge-tts** (for text-to-speech, pip install)
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE)
-
----
+## 📄 License
+[MIT](LICENSE) — Build, break, and evolve.
 
 <div align="center">
 
-**Built by [Artifact Virtual](https://github.com/Artifact-Virtual)**
-> commit.
+Built by **[Artifact Virtual](https://artifactvirtual.com)**
+
+`#symbiote` `#ai-agent` `#autonomous` `#local-first` `#typescript`
 
 </div>
