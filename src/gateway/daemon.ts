@@ -76,6 +76,7 @@ import { HttpApiServer, type ChatRequest, type ChatResponse } from '../web/http-
 import { startWebServer } from '../web/server.js';
 import { McpBridge } from '../tools/mcp-bridge.js';
 import type { ChatInputCommandInteraction } from 'discord.js';
+import { preRoute, auditGate, postDeliver } from '../orchestrator/integration.js';
 
 // Default mood reactions for Discord messages (first match wins).
 // Override/extend via symbiote.json -> communication.discord.reactionMoods
@@ -797,6 +798,16 @@ export class SymbioteGateway {
         let currentSessionMessages = session.messages;
         let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
 
+        // ── PARC: Pre-route — determine optimal provider based on SARSI rules ──
+        let parcDecision: { provider: string; model: string; taskType: string; confidence: number } | null = null;
+        try {
+          const decision = preRoute(request.text, request.source ?? 'http', request.text.length);
+          parcDecision = decision;
+          console.log(`${palette.dim}  [parc]${palette.reset} ${decision.taskType} → ${decision.provider}/${decision.model} (conf: ${decision.confidence.toFixed(2)})`);
+        } catch {
+          // Non-critical — use existing provider selection
+        }
+
         while (blinkCtrl.shouldContinue()) {
           const result = await runAgent(currentSessionMessages, {
             provider: this.provider,
@@ -1428,6 +1439,29 @@ export class SymbioteGateway {
             },
           );
           console.log(`${palette.dim}  [send]${palette.reset} ${palette.green}delivered${palette.reset}`);
+
+          // ── PARC: Post-delivery assessment + learning (async, non-blocking) ──
+          try {
+            const msgText = envelope.payload.text ?? '';
+            const channelName = envelope.source.adapterId ?? 'unknown';
+            const decision = preRoute(msgText, channelName, msgText.length);
+            postDeliver(decision, {
+              channel: channelName,
+              userMessage: msgText,
+              contextLength: msgText.length,
+            }, {
+              text: responseText,
+              toolCalls: finalResult?.toolCalls ?? [],
+              iterations: finalResult?.iterations ?? 0,
+              aborted: finalResult?.aborted ?? false,
+              maxIterationsHit: finalResult?.maxIterationsHit ?? false,
+              tokensUsed: (finalResult as any)?.tokensUsed,
+              latencyMs: (finalResult as any)?.latencyMs,
+              hadErrors: (finalResult as any)?.hadErrors,
+            }, true);
+          } catch {
+            // Non-critical — don't let meta-cognitive layer break delivery
+          }
         } catch (sendErr) {
           console.error(`  ${palette.red}✗ [send]${palette.reset} ${sendErr}`);
         }

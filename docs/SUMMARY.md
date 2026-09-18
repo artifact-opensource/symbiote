@@ -38,6 +38,12 @@
 * [GitHub Copilot](providers/github-copilot.md)
 * [Ollama](providers/ollama.md)
 * [Gladius](providers/gladius.md)
+* [OpenRouter](providers/openrouter.md)
+* [NVIDIA](providers/nvidia.md)
+* [Qwen](providers/qwen.md)
+* [AIHorde](providers/aihorde.md)
+* [FreeAI](providers/freeai.md)
+* [OmniRoute](providers/omniroute.md)
 
 ## Tools
 
@@ -50,6 +56,7 @@
 * [Sub-Agents](advanced/sub-agents.md)
 * [Multi-Bot Coordination](advanced/multi-bot.md)
 * [Adaptive Temperature](advanced/adaptive-temperature.md)
+* [Meta-Cognitive Upgrade](advanced/meta-cognitive-upgrade.md)
 * [Production Deployment](advanced/production.md)
 * [Security](advanced/security.md)
 

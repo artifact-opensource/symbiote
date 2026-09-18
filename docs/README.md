@@ -39,4 +39,4 @@ No Docker. No Redis. No cloud dependencies. **Your machine, your data, your keys
 
 ---
 
-Built by [Artifact Virtual](https://artifactvirtual.com). v1.5.0. MIT License.
+Built by [Artifact Virtual](https://artifactvirtual.com). v3.0.0. MIT License.

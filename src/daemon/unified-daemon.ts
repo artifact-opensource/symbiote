@@ -2,12 +2,15 @@ import { spawn } from 'child_process';
 import { createServer, Server } from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
+import { initSarsi, shutdownSarsi } from '../sarsi/index.js';
+import { startMetaLoop, stopMetaLoop } from '../meta/index.js';
 
 
 /**
  * Symbiote Unified Daemon (Symbiote 3.0)
  * Manages the lifecycle of Gateway, COMB, HEKTOR, and PULSE.
  * Implements Semantic Initialization (VDB-first boot).
+ * SARSI + Meta^n + Curator integrated for self-improving routing.
  */
 
 interface ServiceConfig {
@@ -52,6 +55,22 @@ class UnifiedDaemon {
         }
         
         console.info('Symbiote 3.0: All systems operational. VDB-first boot complete.');
+        
+        // Initialize SARSI self-model
+        try {
+            initSarsi();
+            console.info('[Boot] SARSI self-model initialized.');
+        } catch (e) {
+            console.warn('[Boot] SARSI initialization failed, continuing with defaults.', e);
+        }
+        
+        // Start Meta^n background loop (self-improvement cycle)
+        try {
+            startMetaLoop();
+            console.info('[Boot] Meta^n self-improvement loop started.');
+        } catch (e) {
+            console.warn('[Boot] Meta^n initialization failed, continuing without self-improvement.', e);
+        }
     }
 
     private async startService(id: string, config: ServiceConfig): Promise<void> {
@@ -75,6 +94,12 @@ class UnifiedDaemon {
 
     async shutdown() {
         console.info('Shutting down Unified Daemon...');
+        
+        // Stop Meta^n background loop
+        try { stopMetaLoop(); } catch {}
+        // Flush SARSI state
+        try { shutdownSarsi(); } catch {}
+        
         for (const [id, service] of this.services) {
             console.info(`Stopping ${service.config.name}...`);
             service.process.kill();

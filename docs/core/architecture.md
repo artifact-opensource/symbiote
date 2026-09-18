@@ -6,8 +6,13 @@ Symbiote is a single-process agent framework. Every component — channels, rout
 
 ```
 Channels → Router → Message Bus → Agent Runner → LLM Provider
-   ↑                                    ↓
-   └──────────── Response ──────────────┘
+   ↑                                    ↓          ↑
+   └──────────── Response ──────────────┘          │
+        ↑                                          │
+   ┌────┴──────────────────────────────────────────┘
+   │ Meta-Cognitive Layer (async, non-blocking)
+   │ SARSI · Curator · Meta^n · MEA · PARC
+   └──────────────────────────────────→ (learning feedback)
 ```
 
 ```mermaid
@@ -34,6 +39,14 @@ graph LR
         P[LLM Provider · Hot-swappable]
     end
 
+    subgraph Meta[Meta-Cognitive Layer]
+        S[SARSI Self-Model]
+        C[Curator]
+        M[Meta^n Loop]
+        ME[MEA Audit]
+        PA[PARC Router]
+    end
+
     UI[Web UI :3006] -->|SSE| Q
 
     D --> R
@@ -43,6 +56,12 @@ graph LR
     Q --> A
     A --> P
     P --> LLM((LLM))
+    PA -.->|preRoute| A
+    A -.->|postDeliver| S
+    S -.-> C
+    C -.-> M
+    M -.->|validated changes| S
+    ME -.->|audit gate| A
 ```
 
 ## Layers
@@ -57,6 +76,7 @@ graph LR
 | **Tools** | 18 built-in tools + MCP bridge for external tool servers. Sandboxed per-session via the policy engine. |
 | **Sessions** | Persistent conversation state with TTL. Sub-agent spawning up to depth 3. Each session has its own tool sandbox. |
 | **Web UI** | Built-in interface at `:3006` with SSE streaming, session management, and config panel. Single HTML file, no build step. |
+| **Meta-Cognitive** | Self-improvement loop — SARSI (self-model), Curator (pattern review), Meta^n (recursive improvement), MEA (audit gate), PARC (adaptive routing). All async, non-blocking, wrapped in try/catch. |
 
 ## Design Principles
 
@@ -77,7 +97,7 @@ Each channel adapter uses the platform's native SDK (discord.js, Baileys) with f
 ```
 symbiote/
 ├── src/
-│   ├── agent/          # Runner, context manager, system prompt builder
+│   ├── agent/          # Runner, context manager, system prompt builder, MEA audit
 │   ├── boot/           # Boot sequence & validation
 │   ├── channels/       # Adapter pattern — Discord, WhatsApp, router, bus
 │   │   ├── bus.ts      # Priority queue, coalescing, interrupts
@@ -86,11 +106,15 @@ symbiote/
 │   ├── cli/            # Interactive setup wizard, branding
 │   ├── config/         # Config loader, validator, env interpolation
 │   ├── cron/           # Cron budget management
+│   ├── curator/        # Background review — pattern detection, rule proposals
 │   ├── formatters/     # Platform-aware markdown formatting
 │   ├── gateway/        # Persistent daemon — signals, hot-reload, turns
 │   ├── heartbeat/      # Activity-aware periodic health checks
 │   ├── memory/         # Index integrity checks
+│   ├── meta/           # Meta^n — recursive self-improvement loop
+│   ├── orchestrator/   # PARC adaptive routing + integration hooks
 │   ├── providers/      # LLM providers — Copilot, Anthropic, OpenAI, Gladius
+│   ├── sarsi/          # Self-Aware Routing & Self-Improvement self-model
 │   ├── security/       # Input sanitization
 │   ├── sessions/       # Session store, queue, sub-agents
 │   ├── tools/          # 18 built-in tools, policy engine, registry, MCP bridge

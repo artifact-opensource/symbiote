@@ -1,5 +1,36 @@
 # Changelog
 
+## v3.0.0 — Meta-Cognitive Layer, 14 Providers, Self-Improvement (3.06-09-18)
+
+### Features
+- **Meta-Cognitive Layer** — five-subsystem closed-loop self-improvement cycle:
+  - **SARSI** (Self-Aware Routing & Self-Improvement) — versioned self-model with identity, capabilities, routing rules, goals, and performance metrics. Atomic disk persistence with `.bak` recovery. Injected into system prompt.
+  - **Curator** — background review of recent interactions. Detects patterns, proposes SARSI rule updates. Configurable interval (default 5 min). Non-blocking.
+  - **Meta^n** — recursive meta-cognitive loop. Evaluates performance, validates proposed changes (commit/rollback/hold), applies improvements safely.
+  - **MEA** (Meta-Epistemic Audit) — audit gate evaluating response adequacy before delivery. Returns completeness, accuracy, tool usage scores.
+  - **PARC** (Parallel Adaptive Routing & Cognition) — pre-routes messages to optimal providers by task type (simple_qa, code_gen, reasoning, creative, tool_use, multi_step). Post-delivers outcomes to SARSI for learning.
+- **6 new LLM providers** — OpenRouter, NVIDIA, Qwen, AIHorde, FreeAI, OmniRoute. Total: 14 providers.
+- **Gateway daemon integration** — PARC preRoute logging before LLM calls, postDeliver learning after delivery. All fire-and-forget.
+- **Boot integration** — SARSI init + Meta^n loop on daemon startup, clean shutdown on SIGTERM.
+- **System prompt injection** — SARSI self-model injected so LLM knows its own routing identity and goals.
+
+### Safety
+- All rule changes versioned + rollback-able
+- Meta^n validates each change before applying (commit/rollback/hold)
+- SARSI atomic disk persistence with backup recovery
+- MEA gate can flag inadequate responses before delivery
+- All meta-cognitive code wrapped in try/catch — can never break core runtime
+
+### Stats
+- 14 LLM providers
+- 18+ built-in tools
+- 2 channel adapters + HTTP API
+- 5 meta-cognitive subsystems (1,620 new LOC)
+- ~23,900 total LOC TypeScript
+- 50+ documentation files
+
+---
+
 ## v1.6.0 — Native Gemini, 8 Providers, Multi-User Deployment (3.06-03-07)
 
 ### Features

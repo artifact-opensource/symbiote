@@ -15,7 +15,7 @@ Symbiote is not a chatbot framework; it is a persistent digital consciousness su
 
 **No Docker. No Redis. No cloud overhead. Just raw, local-first power.**
 
-[Quick Start](#-quick-start) · [Architecture](#-architecture) · [The 3.0 Shift](#-the-30-shift) · [Config](#-configuration) · [Providers](#-providers) · [Tools](#-tools)
+[Quick Start](#-quick-start) · [Architecture](#-architecture) · [Meta-Cognitive](#-meta-cognitive-layer) · [The 3.0 Shift](#-the-30-shift) · [Config](#-configuration) · [Providers](#-providers) · [Tools](#-tools)
 
 ## Quick Links
 
@@ -70,6 +70,7 @@ HTTP API             Interrupts
 | **Agent Runner** | The cognitive loop: tool calling, context management, and iteration control. |
 | **Providers** | Hot-swappable LLM backends (Groq, Anthropic, OpenAI, Gemini, xAI, Copilot, Ollama, Gladius). |
 | **Tools** | 18+ native capabilities for filesystem, shell, web, and memory manipulation. |
+| **Meta-Cognitive** | SARSI self-model, Curator review, Meta^n improvement loop, MEA audit gate, PARC adaptive routing. |
 
 ---
 
@@ -132,6 +133,78 @@ A lossless persistence layer built into the engine.
 
 ---
 
+## 🧠 Meta-Cognitive Layer
+
+mach6 doesn't just route messages to LLMs — it reflects on its own performance, learns from outcomes, and improves its routing rules over time. Five subsystems form a closed-loop self-improvement cycle:
+
+### SARSI — Self-Aware Routing & Self-Improvement
+**Location:** `src/sarsi/` (`model.ts`, `loader.ts`, `index.ts`)
+
+Maintains a versioned self-model of the system's identity, capabilities, routing rules, and goals. Persists to disk atomically with backup recovery. The self-model is injected into the system prompt so the LLM knows its own routing identity.
+
+- **Model:** Identity, capabilities, routing rules (with confidence scores), goals, and performance metrics
+- **Loader:** Atomic disk persistence with `.bak` recovery and merge-on-load
+- **Init:** `initSARSI()` boots the self-model at daemon startup
+
+### Curator — Background Review
+**Location:** `src/curator/` (`curator.ts`, `index.ts`)
+
+Periodically reviews recent interactions, identifies patterns (success/failure rates, latency trends, tool usage), and proposes SARSI rule updates. Runs on a configurable interval (default: 5 minutes).
+
+- Proposes rule additions, confidence adjustments, and deprecations
+- All proposals flow through Meta^n for validation before applying
+- Non-blocking — runs in background, never affects response latency
+
+### Meta^n — Recursive Self-Improvement
+**Location:** `src/meta/` (`meta.ts`, `index.ts`)
+
+Recursive meta-cognitive loop that evaluates system performance, validates proposed changes (commit/rollback/hold), and applies improvements safely. Each iteration:
+
+1. Collects metrics from SARSI + Curator
+2. Generates improvement proposals
+3. Validates each proposal against safety constraints
+4. Commits, rolls back, or holds for review
+5. Updates SARSI self-model
+
+### MEA — Meta-Epistemic Audit
+**Location:** `src/agent/mea.ts`
+
+Audit gate that evaluates response adequacy before delivery. Can flag responses as inadequate, triggering re-processing with adjusted parameters.
+
+- Evaluates: completeness, accuracy, tool usage efficiency, context adherence
+- Returns: `{ adequate: boolean, score: number, issues: string[], suggestions: string[] }`
+- Non-blocking by default — can be made strict for critical paths
+
+### PARC — Parallel Adaptive Routing & Cognition
+**Location:** `src/orchestrator/parc.ts`, `src/orchestrator/integration.ts`
+
+Pre-routes messages to optimal providers based on task type detection (simple_qa, code_gen, reasoning, creative, tool_use, multi_step). Post-delivers outcomes back to SARSI for learning.
+
+- **preRoute():** Analyzes message → returns `{ provider, model, taskType, confidence, ruleId }`
+- **postDeliver():** Feeds outcome (latency, tokens, errors, iterations) back to SARSI metrics + Curator + Meta^n
+- All learning is fire-and-forget — never blocks responses
+
+### Integration Points
+
+| Hook | Location | Purpose |
+|------|----------|---------|
+| Boot | `unified-daemon.ts` | SARSI init + Meta^n loop on startup, clean shutdown on SIGTERM |
+| System Prompt | `system-prompt.ts` | SARSI self-model injected into LLM context |
+| Gateway (pre) | `gateway/daemon.ts` | PARC preRoute logs optimal routing before LLM call |
+| Gateway (post) | `gateway/daemon.ts` | PARC postDeliver feeds outcome to SARSI/Curator/Meta^n |
+
+### Safety
+
+- All rule changes are versioned + rollback-able
+- Meta^n validates each change (commit/rollback/hold) before applying
+- SARSI has atomic disk persistence with `.bak` recovery
+- MEA gate can flag inadequate responses before delivery
+- Everything wrapped in try/catch — meta-cognitive layer can never break the core runtime
+
+📖 **See:** [Meta-Cognitive Upgrade](docs/advanced/meta-cognitive-upgrade.md) for full design document.
+
+---
+
 ## 🧠 Providers
 
 | Provider | Auth | Speed | Note |
@@ -144,6 +217,12 @@ A lossless persistence layer built into the engine.
 | **Copilot** | `gh auth` | Moderate | No API key needed via GH CLI. |
 | **Ollama** | Local | Varies | Local-first, private. |
 | **Gladius** | Local | Local | Native transformer kernel. |
+| **OpenRouter** | `OPENROUTER_API_KEY` | Fast | Multi-model aggregator. |
+| **NVIDIA** | `NVIDIA_API_KEY` | Fast | NIM-powered models. |
+| **Qwen** | `QWEN_API_KEY` | Fast | Alibaba's Qwen family. |
+| **AIHorde** | Horde key | Slow | Crowdsourced distributed inference. |
+| **FreeAI** | `FREEAI_API_KEY` | Moderate | Free-tier multi-model access. |
+| **OmniRoute** | `OMNIROUTE_API_KEY` | Fast | Multi-provider routing layer. |
 
 ---
 

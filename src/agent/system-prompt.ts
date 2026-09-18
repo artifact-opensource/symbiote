@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { getSarsiPrompt } from '../sarsi/index.js';
 
 export interface SystemPromptParams {
   workspace: string;
@@ -123,6 +124,16 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
   const yesterdayMem = readYesterdayMemory(params.workspace);
   if (yesterdayMem) {
     addSection('Yesterday\'s Memory', yesterdayMem);
+  }
+
+  // ── SARSI self-model (routing identity + goals) ──
+  try {
+    const sarsiPrompt = getSarsiPrompt();
+    if (sarsiPrompt) {
+      addSection('SARSI Self-Model', sarsiPrompt);
+    }
+  } catch {
+    // SARSI not initialized — skip silently
   }
 
   // ── Tools ──

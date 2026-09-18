@@ -7,7 +7,7 @@ node dist/index.js --config=symbiote.json
 ```
 
 ```
-Symbiote v1.5.0 | groq/llama-3.3-70b-versatile | session: default
+Symbiote v3.0.0 | groq/llama-3.3-70b-versatile | session: default
 Tools (18): read, write, edit, exec, image, web_fetch, tts, ...
 Type /help for commands
 
