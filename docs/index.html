@@ -17,6 +17,15 @@
             letter-spacing: -0.015em;
             overflow-x: hidden;
         }
+        #genCanvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+        }
         .font-mono {
             font-family: 'Geist Mono', monospace;
         }
@@ -33,6 +42,11 @@
     </style>
 </head>
 <body class="bg-black text-white min-h-screen flex flex-col justify-between selection:bg-white selection:text-black">
+
+    <!-- Background Animation Canvas -->
+    <div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+        <canvas id="genCanvas" class="w-full h-full block"></canvas>
+    </div>
 
     <!-- LEFT SIDEBAR -->
     <aside class="fixed left-0 top-0 h-screen w-16 border-r border-neutral-900 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-between py-8">
@@ -74,12 +88,12 @@
 
         <!-- Main Headline -->
         <h1 class="text-3xl sm:text-5xl md:text-7xl font-light tracking-tight max-w-4xl leading-[1.15] mb-4 sm:mb-6">
-            Stateful AI, simplified.
+            AUTONOMOUS<br>SUPER-AGENTS<br>AT SCALE
         </h1>
 
         <!-- Subheading -->
         <p class="text-neutral-400 text-sm sm:text-lg md:text-xl max-w-xl font-light leading-relaxed mb-8 px-2">
-            Long-running workflows and drop-in persistence for your local AI agent
+            A single-process foundry for building distributed agents and networks. With long-running workflows and drop-in persistence for any type of job.
         </p>
 
         <!-- Command Install Box -->
@@ -96,10 +110,9 @@
 
     <!-- FOOTER -->
     <footer class="ml-16 mr-16 py-6 border-t border-neutral-900 text-center text-neutral-600 text-[11px] flex flex-col md:flex-row justify-between items-center px-6 gap-3">
-        <div>&copy; 2026 Artifact Open Source. All rights reserved.</div>
+        <div>&copy; 2026 ARTIFACT VIRTUAL. All rights reserved.</div>
         <div class="flex gap-4">
-            <a href="https://github.com/artifact-opensource/symbiote" target="_blank" class="hover:text-neutral-400">GitHub</a>
-            <a href="https://github.com/artifact-opensource/symbiote/blob/main/LICENSE" target="_blank" class="hover:text-neutral-400">MIT License</a>
+            <a href="https://github.com/artifact-opensource/symbiote/blob/master/LICENSE" target="_blank" class="hover:text-neutral-400">License</a>
         </div>
     </footer>
 
@@ -146,6 +159,9 @@
         }
         fetchVersion();
     </script>
+
+    <!-- Background Animation Script -->
+    
 
 </body>
 </html>
