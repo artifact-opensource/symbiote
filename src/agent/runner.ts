@@ -128,7 +128,8 @@ export async function runAgent(messages: Message[], config: RunnerConfig): Promi
     }
 
     if (config.abortSignal?.aborted) {
-      return { text: '', messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: true, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
+      const abortText = allToolCalls.length > 0 ? `Completed ${allToolCalls.length} tool execution(s). Interrupted — results preserved.` : '';
+      return { text: abortText, messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: true, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
     }
 
     // Context Evaluation Gate
@@ -179,14 +180,15 @@ export async function runAgent(messages: Message[], config: RunnerConfig): Promi
       stream = config.provider.stream(truncated, tools, effectiveProviderConfig);
     } catch (err) {
       if (config.abortSignal?.aborted) {
-        return { text: '', messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: true, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
+        const abortText = allToolCalls.length > 0 ? `Completed ${allToolCalls.length} tool execution(s). Interrupted — results preserved.` : '';
+      return { text: abortText, messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: true, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
       }
       throw err;
     }
 
     // Streaming Event Consumption Block
     let textAccum = '';
-    const pendingToolCalls: ToolCall[] = [];
+    let pendingToolCalls: ToolCall[] = [];
     const toolInputBuffers = new Map<string, string>();
 
     try {
@@ -215,8 +217,9 @@ export async function runAgent(messages: Message[], config: RunnerConfig): Promi
       throw err;
     }
 
+    // If no tool calls were produced, break out of the loop (not return) so the final return handles exit
     if (pendingToolCalls.length === 0) {
-      return { text: textAccum, messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
+      break;
     }
 
     // Clean Parameter Payload Assembly Fast Extraction Pass
@@ -277,10 +280,14 @@ export async function runAgent(messages: Message[], config: RunnerConfig): Promi
       });
     }
 
+    // Reset pending tool calls for next iteration
+    pendingToolCalls = [];
+
     recentToolNames = pendingToolCalls.map(tc => tc.name);
 
     if (config.abortSignal?.aborted) {
-      return { text: '', messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: true, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
+      const abortText = allToolCalls.length > 0 ? `Completed ${allToolCalls.length} tool execution(s). Interrupted — results preserved.` : '';
+      return { text: abortText, messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: true, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
     }
 
     // Run Layer 2 sweeps over old indexes
@@ -289,5 +296,8 @@ export async function runAgent(messages: Message[], config: RunnerConfig): Promi
     }
   }
 
-  return { text: '[Max iterations reached]', messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: true, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
+  // Ensure never silent after completed work — synthesize brief status
+  let finalText = '[Max iterations reached]';
+  if (allToolCalls.length > 0) finalText = `Completed ${allToolCalls.length} tool execution(s). Results saved — continuing or interrupted.`;
+  return { text: finalText, messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: true, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
 }

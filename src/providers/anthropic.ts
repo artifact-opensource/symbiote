@@ -123,7 +123,7 @@ async function* streamAnthropic(
       'anthropic-version': API_VERSION,
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(((config as unknown as Record<string, unknown>).timeoutMs as number) ?? 30_000),
+    signal: AbortSignal.timeout(((config as unknown as Record<string, unknown>).timeoutMs as number) ?? 600_000),
   });
 
   if (!res.ok) {

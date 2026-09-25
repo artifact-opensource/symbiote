@@ -93,7 +93,7 @@ async function* streamOpenAI(
       ...extraHeaders,
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(((config as unknown as Record<string, unknown>).timeoutMs as number) ?? 120_000),
+    signal: AbortSignal.timeout(((config as unknown as Record<string, unknown>).timeoutMs as number) ?? 600_000),
   });
 
   if (!res.ok) {

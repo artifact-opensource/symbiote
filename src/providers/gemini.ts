@@ -156,7 +156,7 @@ async function* streamGemini(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(((config as any).timeoutMs as number) ?? 120_000),
+    signal: AbortSignal.timeout(((config as any).timeoutMs as number) ?? 600_000),
   });
 
   if (!res.ok) {

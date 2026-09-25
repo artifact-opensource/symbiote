@@ -89,7 +89,7 @@ async function* streamAihorde(
       'HTTP-Referer': 'https://github.com/Artifact-Virtual',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(300_000), // 5 minutes — Horde queues can be slow
+    signal: AbortSignal.timeout(600_000), // 5 minutes — Horde queues can be slow
   });
 
   if (!res.ok) {

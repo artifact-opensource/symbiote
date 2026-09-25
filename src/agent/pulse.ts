@@ -1,8 +1,8 @@
 // Symbiote — PULSE: Adaptive Iteration Budget Manager
 // 
-// Default cap: 20 iterations per turn
-// If a turn hits 18 iterations → runner auto-expands to 100 (within that turn)
-// If 3 consecutive sessions all iterate under 10 → revert effective cap back to 20
+// Default cap: 999999 iterations per turn (unlimited)
+// EXPAND_THRESHOLD is 999999 so expansion is never triggered
+// REVERT_THRESHOLD is 999999 so automatic reversion is disabled
 //
 // This module tracks cross-session iteration history and manages the effective cap.
 
@@ -42,7 +42,7 @@ export class PulseBudgetManager {
     return this.state.effectiveCap;
   }
 
-  /** Record a completed session's iteration count and evaluate revert */
+  /** Record a completed session's iteration count - no automatic reduction */
   recordSession(iterations: number): { reverted: boolean; effectiveCap: number } {
     this.state.recentIterations.push(iterations);
 
@@ -51,25 +51,9 @@ export class PulseBudgetManager {
       this.state.recentIterations = this.state.recentIterations.slice(-REVERT_WINDOW);
     }
 
-    // Check revert condition: if cap is expanded AND last N sessions all < threshold
-    let reverted = false;
-    if (
-      this.state.effectiveCap > DEFAULT_CAP &&
-      this.state.recentIterations.length >= REVERT_WINDOW &&
-      this.state.recentIterations.every(n => n < REVERT_THRESHOLD)
-    ) {
-      console.log(
-        `[PULSE] Reverting cap ${this.state.effectiveCap} → ${DEFAULT_CAP}: ` +
-        `last ${REVERT_WINDOW} sessions all under ${REVERT_THRESHOLD} iterations ` +
-        `(${this.state.recentIterations.join(', ')})`
-      );
-      this.state.effectiveCap = DEFAULT_CAP;
-      this.state.revertedAt = Date.now();
-      reverted = true;
-    }
-
+    // No automatic reduction - keep cap unlimited
     this.save();
-    return { reverted, effectiveCap: this.state.effectiveCap };
+    return { reverted: false, effectiveCap: this.state.effectiveCap };
   }
 
   /** Called by runner when expansion triggers (iteration 18 hit) */

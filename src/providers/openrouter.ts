@@ -86,7 +86,7 @@ async function* streamOpenRouter(
       'HTTP-Referer': 'https://github.com/Artifact-Virtual',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(300_000), // 5 minutes
+    signal: AbortSignal.timeout(600_000), // 5 minutes
   });
 
   if (!res.ok) {

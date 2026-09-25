@@ -123,6 +123,12 @@ interface GatewayConfig {
   apiPort?: number;
   /** Web UI port (defaults to 3009) */
   webPort?: number;
+  /** Maximum turn duration in ms (0 = unlimited, default 86400000 = 24h) */
+  maxTurnDurationMs?: number;
+  /** Allow long-running tasks that exceed default timeout */
+  allowLongRunningTasks?: boolean;
+  /** Auto-continue tasks when timeout is reached */
+  autoContinueOnTimeout?: boolean;
 }
 
 interface ActiveTurn {
@@ -1082,6 +1088,18 @@ export class SymbioteGateway {
 
     this.activeTurns.set(sessionId, turn);
 
+    // Set turn timeout based on config (default 24h)
+    const maxTurnDurationMs = this.config.maxTurnDurationMs ?? 86400000;
+    if (maxTurnDurationMs > 0) {
+      const timeoutMs = maxTurnDurationMs;
+      setTimeout(() => {
+        if (this.activeTurns.get(sessionId) === turn) {
+          console.log(`${palette.dim}  [gateway]${palette.reset} ${palette.yellow}Turn timeout${palette.reset} for ${palette.violet}${sessionId}${palette.reset} (${timeoutMs}ms)`);
+          controller.abort('timeout');
+        }
+      }, timeoutMs);
+    }
+
     // Build sandbox context for this session
     const ownerIds = this.gatewayConfig.ownerIds ?? [];
     const normalize = (x: string) => x.trim().toLowerCase();
@@ -1416,8 +1434,9 @@ export class SymbioteGateway {
       // Auto-archive bloated sessions (>200KB → keep last 30 messages)
       this.sessionManager.autoArchive();
 
-      // Send response back through the channel (skip if aborted — process is shutting down)
-      if (!finalResult.aborted && finalResult.text && finalResult.text !== 'NO_REPLY' && finalResult.text !== 'HEARTBEAT_OK'
+      // Send response back through the channel (skip silent only if no work done)
+      const hasWork = (finalResult.toolCalls?.length ?? 0) > 0 || (finalResult.text && finalResult.text.length > 0 && finalResult.text !== 'NO_REPLY' && finalResult.text !== 'HEARTBEAT_OK');
+      if (hasWork && (!finalResult.aborted || (finalResult.aborted && (finalResult.toolCalls?.length ?? 0) > 0))
           && finalResult.text !== '[Max iterations reached]' && finalResult.text !== '[Blink depth exceeded]') {
         // Auto-mention: in Discord non-DM channels, prepend @sender if not already present
         let responseText = finalResult.text;

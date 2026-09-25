@@ -56,6 +56,12 @@ export interface SymbioteConfig {
     default?: number;
     logChanges?: boolean;
   };
+  /** Maximum turn duration in ms (0 = unlimited, default 86400000 = 24h) */
+  maxTurnDurationMs?: number;
+  /** Allow long-running tasks that exceed default timeout */
+  allowLongRunningTasks?: boolean;
+  /** Auto-continue tasks when timeout is reached */
+  autoContinueOnTimeout?: boolean;
 }
 
 const DEFAULT_CONFIG: SymbioteConfig = {

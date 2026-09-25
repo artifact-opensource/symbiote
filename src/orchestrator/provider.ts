@@ -84,7 +84,7 @@ export async function initializeOrchestrator(toolRegistry: ToolRegistry): Promis
     cloudModel: orchCfg.cloudModel,
     localModels: orchCfg.localModels,
     maxParallel: orchCfg.maxParallel ?? 3,
-    taskTimeoutMs: orchCfg.taskTimeoutMs ?? 300_000,
+    taskTimeoutMs: orchCfg.taskTimeoutMs ?? 86400000,
     decompositionPrompt: orchCfg.decompositionPrompt,
     synthesisPrompt: orchCfg.synthesisPrompt,
   };

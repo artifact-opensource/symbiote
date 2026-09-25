@@ -16,7 +16,7 @@ function isRetryable400(status: number, body?: string): boolean {
 
 export async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
   let lastError: Error | undefined;
-  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+  for (let attempt = 0; attempt < 10; attempt++) {
     try {
       // On retries, ensure a fresh abort signal (previous may have timed out)
       const effectiveInit = attempt > 0 && init.signal instanceof AbortSignal
@@ -25,8 +25,14 @@ export async function fetchWithRetry(url: string, init: RequestInit): Promise<Re
       const res = await fetch(url, effectiveInit);
       if (res.ok) return res;
 
+      // 403 — auth blocked (e.g. daily check-in). Immediate fail, never retry.
+      if (res.status === 403) {
+        console.warn(`[retry] 403 Forbidden — immediate fail, no retries.`);
+        return res;
+      }
+
       // 401 — token expired (e.g., copilot session token). Invalidate cache and retry once.
-      if (res.status === 401 && attempt < RETRY_DELAYS.length) {
+      if (res.status === 401 && attempt < 10) {
         console.warn(`[retry] 401 Unauthorized (attempt ${attempt + 1}) — token may have expired, retrying...`);
         // Signal to callers that cached tokens should be refreshed
         (res as any)._tokenExpired = true;
@@ -39,19 +45,20 @@ export async function fetchWithRetry(url: string, init: RequestInit): Promise<Re
 
       // Retry on 429 (rate limit) and 500+ (server errors)
       if (res.status === 429 || res.status >= 500) {
-        if (attempt < RETRY_DELAYS.length) {
-          await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+        if (attempt < 10) {
+          const delayMs = RETRY_DELAYS[attempt] ?? 30000;
+          await new Promise(r => setTimeout(r, delayMs));
           continue;
         }
         return res;
       }
 
       // Retry on known-transient 400 errors (copilot backend quirks)
-      if (res.status === 400 && attempt < RETRY_DELAYS.length) {
+      if (res.status === 400 && attempt < 10) {
         const body = await res.clone().text().catch(() => '');
         if (isRetryable400(res.status, body)) {
           console.warn(`[retry] Retryable 400 (attempt ${attempt + 1}): ${body.slice(0, 200)}`);
-          await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+          await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt] ?? 30000));
           continue;
         }
       }
@@ -59,8 +66,8 @@ export async function fetchWithRetry(url: string, init: RequestInit): Promise<Re
       return res;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
-      if (attempt < RETRY_DELAYS.length) {
-        await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+      if (attempt < 10) {
+        await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt] ?? 30000));
         continue;
       }
     }

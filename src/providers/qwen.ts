@@ -27,7 +27,7 @@ async function* streamQwen(messages: Message[], _tools: ToolDef[], config: Provi
       'User-Agent': 'Symbiote/QwenProvider',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(config.timeoutMs ?? 120_000),
+    signal: AbortSignal.timeout(config.timeoutMs ?? 600_000),
   });
 
   if (!res.ok) {

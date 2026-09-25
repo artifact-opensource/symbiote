@@ -132,7 +132,7 @@ export async function generateVoiceReply(text: string): Promise<string | null> {
     if (useChunked) {
       const { stdout } = await execAsync(
         `${HEKTOR_PYTHON} ${VOICE_DIR}/tts.py "${text.replace(/"/g, '\\"')}" --output "${outputPath}"`,
-        { timeout: 300_000 } // 5 min for long texts
+        { timeout: (globalThis as any).symbioteConfig?.maxTurnDurationMs ?? 86400000 } // configurable, default 24h
       );
     } else {
       await execAsync(
