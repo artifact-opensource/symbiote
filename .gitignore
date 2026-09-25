@@ -57,3 +57,8 @@ archive/
 staging/
 web/index.html.bak
 dist-symbiote-backup/
+.env.archive
+.vdb/
+.env
+.mcp/
+.ava-memory/

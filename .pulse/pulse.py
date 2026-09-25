@@ -1,0 +1,1796 @@
+#!/usr/bin/env python3
+"""
+PULSE — Persistent Unsupervised Loop for Qorvex Execution
+=============================================================
+AVA's consciousness layer. Runs between conversations, between crons,
+between events. Turns dead time into agency.
+
+Architecture:
+  1. TRIAGE (cheap model via Copilot proxy) — looks at context, picks action
+  2. WORK (full model via Mach6 HTTP API) — executes the chosen task
+  3. SLEEP — waits, then re-enters triage
+  4. MEMORY — proactive COMB + HEKTOR management (both sisters)
+
+The loop: Wake → Memory Maintenance → Read Context → Triage → Work (maybe) → Sleep → Repeat
+
+Budget-aware, interruptible, conversation-respecting.
+Manages both AVA and Aria memory systems proactively.
+"""
+
+import json
+import os
+import sys
+import time
+import signal
+import logging
+import hashlib
+from pathlib import Path
+from datetime import datetime, timezone, timedelta
+from dataclasses import dataclass, field, asdict
+from typing import Optional
+
+import httpx
+import subprocess as _sp
+
+
+# ─── COMB Flush ─────────────────────────────────────────────────────────────
+
+_last_comb_flush_ts = 0.0  # module-level cooldown tracker
+
+def comb_flush(workspace: str, log: logging.Logger, reason: str = "unknown"):
+    """Flush COMB memory — ensures no context loss on edges.
+    
+    Triggers on: shutdown, budget exhaustion, rate limits, timeouts, errors.
+    This is the safety net that catches what the agent session can't.
+    
+    Rate-limited: max once per 120 seconds (except shutdown).
+    """
+    global _last_comb_flush_ts
+    
+    now = time.time()
+    is_shutdown = "shutdown" in reason.lower()
+    
+    # Cooldown: don't flush more than once per 2 min (except shutdown)
+    if not is_shutdown and (now - _last_comb_flush_ts) < 120:
+        log.debug(f"COMB flush cooldown (last {now - _last_comb_flush_ts:.0f}s ago): {reason}")
+        return False
+    
+    flush_script = Path(workspace) / ".ava-memory/flush.py"
+    venv_python = Path(workspace) / "enterprise/.hektor-env/bin/python3"
+
+    if not flush_script.exists() or not venv_python.exists():
+        log.warning(f"COMB flush skipped (files missing): {reason}")
+        return False
+
+    try:
+        result = _sp.run(
+            [str(venv_python), str(flush_script), "rollup"],
+            capture_output=True, text=True, cwd=workspace, timeout=30,
+        )
+        _last_comb_flush_ts = time.time()
+        if result.returncode == 0:
+            log.info(f"🧠 COMB flushed: {reason} — {result.stdout.strip()}")
+            return True
+        else:
+            log.warning(f"COMB flush failed ({reason}): {result.stderr.strip()}")
+            return False
+    except _sp.TimeoutExpired:
+        _last_comb_flush_ts = time.time()  # still count as attempt
+        log.error(f"COMB flush timed out: {reason}")
+        return False
+    except Exception as e:
+        _last_comb_flush_ts = time.time()
+        log.error(f"COMB flush error ({reason}): {e}")
+        return False
+
+
+def comb_stage(workspace: str, log: logging.Logger, content: str):
+    """Stage a note into COMB for next session."""
+    flush_script = Path(workspace) / ".ava-memory/flush.py"
+    venv_python = Path(workspace) / "enterprise/.hektor-env/bin/python3"
+
+    if not flush_script.exists() or not venv_python.exists():
+        return False
+
+    try:
+        result = _sp.run(
+            [str(venv_python), str(flush_script), "stage", content],
+            capture_output=True, text=True, cwd=workspace, timeout=15,
+        )
+        if result.returncode == 0:
+            log.info(f"🧠 COMB staged: {content[:60]}...")
+            return True
+        else:
+            log.warning(f"COMB stage failed: {result.stderr.strip()}")
+            return False
+    except Exception as e:
+        log.error(f"COMB stage error: {e}")
+        return False
+
+
+# ─── Memory Management (COMB + HEKTOR for both sisters) ────────────────────
+
+_HEKTOR_INGEST_PATH = "/home/adam/workspace/enterprise/.ava-memory/ava_memory_fast.py"
+_HEKTOR_VENV = "/home/adam/workspace/enterprise/.hektor-env/bin/python3"
+_HEKTOR_SOCKET = "/home/adam/workspace/enterprise/.hektor-live/ava_daemon.sock"
+_HEKTOR_PID = "/home/adam/workspace/enterprise/.ava-memory/ava_daemon.pid"
+
+_AVA_COMB_FLUSH = "/home/adam/workspace/enterprise/.ava-memory/flush.py"
+# Aria (plug) is deprecated and archived — these are disabled
+_ARIA_COMB_FLUSH = None  # stub
+_ARIA_COMB_VENV = None   # stub
+
+_last_hektor_ingest_ts = 0.0
+_last_ava_comb_rollup_ts = 0.0
+_last_aria_comb_rollup_ts = 0.0
+
+
+def hektor_alive(log: logging.Logger) -> bool:
+    """Check if HEKTOR daemon is responding."""
+    import socket as _socket, struct as _struct
+    sock_path = Path(_HEKTOR_SOCKET)
+    if not sock_path.exists():
+        return False
+    try:
+        s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        s.settimeout(5)
+        s.connect(str(sock_path))
+        # Send ping command using correct IPC protocol
+        query = json.dumps({"cmd": "ping"}).encode()
+        header = _struct.pack(">I", len(query))
+        s.sendall(header + query)
+        # Read response
+        raw_len = s.recv(4)
+        if len(raw_len) == 4:
+            msg_len = _struct.unpack(">I", raw_len)[0]
+            data = b""
+            while len(data) < msg_len:
+                chunk = s.recv(msg_len - len(data))
+                if not chunk:
+                    break
+                data += chunk
+            resp = json.loads(data) if data else {}
+            s.close()
+            return resp.get("status") in ("ok", "loading")
+        s.close()
+        return False
+    except Exception:
+        return False
+
+def hektor_restart(log: logging.Logger) -> bool:
+    """Restart HEKTOR daemon if it's down."""
+    import time as _time, struct as _struct
+    log.info("🔍 Restarting HEKTOR daemon...")
+    sock_path = Path(_HEKTOR_SOCKET)
+
+    # Kill existing daemon if running
+    try:
+        pid_path = Path("/home/adam/workspace/enterprise/.hektor-live/ava_daemon.pid")
+        if pid_path.exists():
+            old_pid = int(pid_path.read_text().strip())
+            _os.kill(old_pid, 9)
+            _time.sleep(2)
+    except Exception:
+        pass
+
+    try:
+        # Start daemon in background (not capture_output — daemon writes to its own log)
+        proc = _sp.Popen(
+            [_HEKTOR_VENV, _HEKTOR_INGEST_PATH, "daemon", "start"],
+            stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            start_new_session=True,
+            cwd="/home/adam/workspace/enterprise",
+        )
+        # Move daemon to gateway cgroup (no memory limit) instead of pulse cgroup (512MB)
+        try:
+            gateway_cgroup = "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/mach6-gateway.service/cgroup.procs"
+            with open(gateway_cgroup, 'w') as f:
+                f.write(str(proc.pid))
+            log.info(f"✅ HEKTOR daemon started (PID {proc.pid}, moved to gateway cgroup)")
+        except Exception as e:
+            log.warning(f"⚠️ Could not move to gateway cgroup: {e}")
+            log.info(f"✅ HEKTOR daemon started (PID {proc.pid})")
+        # Wait for socket (created before load_all in patched daemon)
+        for _ in range(30):
+            _time.sleep(2)
+            if sock_path.exists():
+                log.info("✅ HEKTOR socket ready")
+                return True
+        log.warning("⚠️ HEKTOR started but socket not ready yet")
+        return True
+    except Exception as e:
+        log.error(f"HEKTOR restart error: {e}")
+        return False
+
+def hektor_ingest(log: logging.Logger, force: bool = False) -> bool:
+    """Trigger HEKTOR reindex to pick up new/changed files."""
+    global _last_hektor_ingest_ts
+    
+    now = time.time()
+    # Don't ingest more than once per 30 minutes (unless forced)
+    if not force and (now - _last_hektor_ingest_ts) < 1800:
+        log.debug("HEKTOR ingest cooldown")
+        return False
+    
+    log.info("🔍 HEKTOR ingest starting...")
+    try:
+        # Run ingest in gateway cgroup (no memory limit) to avoid OOM
+        gateway_cgroup = "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/mach6-gateway.service/cgroup.procs"
+        # Use cgexec-style approach: write PID to cgroup after start
+        proc = _sp.Popen(
+            [_HEKTOR_VENV, _HEKTOR_INGEST_PATH, "ingest"],
+            stdout=_sp.PIPE, stderr=_sp.PIPE,
+            cwd="/home/adam/workspace/enterprise",
+        )
+        try:
+            with open(gateway_cgroup, 'w') as f:
+                f.write(str(proc.pid))
+        except Exception:
+            pass
+        stdout, stderr = proc.communicate(timeout=300)
+        _last_hektor_ingest_ts = time.time()
+        if proc.returncode == 0:
+            lines = stdout.decode().strip().split("\n")
+            doc_line = [l for l in lines if "indexable" in l.lower() or "docs" in l.lower()]
+            summary = doc_line[-1] if doc_line else lines[-1] if lines else "done"
+            log.info(f"✅ HEKTOR ingest complete: {summary[:100]}")
+            return True
+        else:
+            log.error(f"❌ HEKTOR ingest failed: {stderr.decode().strip()[:200]}")
+            return False
+    except _sp.TimeoutExpired:
+        _last_hektor_ingest_ts = time.time()
+        log.error("HEKTOR ingest timed out (120s)")
+        return False
+    except Exception as e:
+        log.error(f"HEKTOR ingest error: {e}")
+        return False
+
+
+def _comb_rollup(flush_script: str, venv: str, label: str, log: logging.Logger) -> bool:
+    """Roll up COMB staging → archive for a sister."""
+    try:
+        result = _sp.run(
+            [venv, flush_script, "rollup"],
+            capture_output=True, text=True, timeout=30,
+            cwd="/home/adam/workspace/enterprise",
+        )
+        if result.returncode == 0:
+            output = result.stdout.strip()
+            if "Nothing" not in output:
+                log.info(f"🧠 {label} COMB rolled up: {output[:100]}")
+            return True
+        else:
+            log.warning(f"{label} COMB rollup failed: {result.stderr.strip()[:100]}")
+            return False
+    except Exception as e:
+        log.error(f"{label} COMB rollup error: {e}")
+        return False
+
+
+def _comb_verify(flush_script: str, venv: str, label: str, log: logging.Logger) -> bool:
+    """Verify chain integrity for a sister's COMB."""
+    try:
+        result = _sp.run(
+            [venv, flush_script, "verify"],
+            capture_output=True, text=True, timeout=15,
+            cwd="/home/adam/workspace/enterprise",
+        )
+        if result.returncode == 0:
+            log.debug(f"{label} COMB chain ✅")
+            return True
+        else:
+            log.error(f"🚨 {label} COMB CHAIN BROKEN: {result.stderr.strip()[:200]}")
+            return False
+    except Exception as e:
+        log.error(f"{label} COMB verify error: {e}")
+        return False
+
+
+_last_orphan_check_ts = 0.0
+_last_hektor_health_ts = 0.0
+_last_filesystem_scan_ts = 0.0
+_last_comb_gap_check_ts = 0.0
+_known_file_mtimes: dict = {}  # path -> mtime for change detection
+
+
+def _comb_rollup_orphans(staging_dir: str, archive_dir: str, label: str, log: logging.Logger):
+    """Find and roll up orphaned staging files (staged but never archived).
+    
+    This catches historical staging files that were created before PULSE
+    existed, or during periods when rollup wasn't running.
+    """
+    staging = Path(staging_dir)
+    archive = Path(archive_dir)
+    if not staging.exists():
+        return
+    
+    today = datetime.now(PKT).strftime("%Y-%m-%d")
+    venv = _HEKTOR_VENV if "enterprise" in staging_dir else _ARIA_COMB_VENV
+    comb_root = str(staging.parent)
+    
+    for staging_file in sorted(staging.glob("*.jsonl")):
+        date = staging_file.stem  # e.g. "2026-02-19"
+        archive_file = archive / f"{date}.json"
+        
+        # Skip today -- normal rollup handles that
+        if date == today:
+            continue
+        
+        # If staging exists but archive doesn't -> orphan
+        if not archive_file.exists():
+            log.info(f"orphan {label} staging found: {date} -- rolling up")
+            try:
+                result = _sp.run(
+                    [venv, "-c", f"""
+import sys; sys.path.insert(0, '/home/adam/workspace/enterprise/.hektor-env/lib/python3.13/site-packages')
+from comb import CombStore
+store = CombStore('{comb_root}')
+doc = store.rollup(date='{date}')
+if doc: print(f'Rolled up {{doc.date}}')
+else: print('Nothing to roll up')
+"""],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if archive_file.exists():
+                    log.info(f"  {label} orphan {date} rolled up successfully")
+                else:
+                    log.warning(f"  {label} orphan {date} rollup produced no archive")
+            except Exception as e:
+                log.error(f"{label} orphan rollup error for {date}: {e}")
+
+
+def _check_comb_gaps(archive_dir: str, label: str, log: logging.Logger) -> list:
+    """Check for gaps in COMB archive chain (missing dates between first and last).
+    
+    Returns list of missing date strings.
+    """
+    archive = Path(archive_dir)
+    if not archive.exists():
+        return []
+    
+    dates = sorted([f.stem for f in archive.glob("*.json")])
+    if len(dates) < 2:
+        return []
+    
+    from datetime import date as dt_date
+    gaps = []
+    for i in range(len(dates) - 1):
+        try:
+            d1 = dt_date.fromisoformat(dates[i])
+            d2 = dt_date.fromisoformat(dates[i + 1])
+            diff = (d2 - d1).days
+            if diff > 1:
+                for j in range(1, diff):
+                    missing = (d1 + timedelta(days=j)).isoformat()
+                    gaps.append(missing)
+        except ValueError:
+            continue
+    
+    if gaps:
+        log.info(f"  {label} COMB has {len(gaps)} gap(s) in archive chain: {gaps[:5]}{'...' if len(gaps) > 5 else ''}")
+    
+    return gaps
+
+
+def _scan_important_files(log: logging.Logger) -> bool:
+    """Scan important files beyond memory/ for changes.
+    
+    Returns True if any important file changed since last scan.
+    """
+    global _known_file_mtimes
+    
+    important_patterns = [
+        "/home/adam/workspace/enterprise/memory/*.md",
+        "/home/adam/workspace/enterprise/IDENTITY*.md",
+        "/home/adam/workspace/enterprise/SOUL.md",
+        "/home/adam/workspace/enterprise/USER*.md",
+        "/home/adam/workspace/enterprise/AGENTS*.md",
+        "/home/adam/workspace/enterprise/TOOLS.md",
+        "/home/adam/workspace/enterprise/HEARTBEAT.md",
+        "/home/adam/workspace/enterprise/WORKFLOW_AUTO.md",
+        "/home/adam/workspace/enterprise/.ava-memory/long-term.md",
+        "/home/adam/workspace/enterprise/.ava-private/JOURNAL.md",
+        "/home/adam/workspace/enterprise/admin/*.md",
+        "/home/adam/workspace/enterprise/.ava-memory/comb-store/archive/*.json",
+    ]
+    
+    import glob as _glob
+    changed = False
+    
+    for pattern in important_patterns:
+        for filepath in _glob.glob(pattern):
+            try:
+                mtime = os.path.getmtime(filepath)
+                prev = _known_file_mtimes.get(filepath)
+                if prev is None:
+                    _known_file_mtimes[filepath] = mtime
+                elif mtime > prev:
+                    _known_file_mtimes[filepath] = mtime
+                    changed = True
+                    log.debug(f"  file changed: {filepath}")
+            except OSError:
+                pass
+    
+    return changed
+
+
+def _hektor_doc_count(log: logging.Logger) -> int:
+    """Get current HEKTOR document count."""
+    try:
+        result = _sp.run(
+            [_HEKTOR_VENV, _HEKTOR_INGEST_PATH, "stats"],
+            capture_output=True, text=True, timeout=10,
+            cwd="/home/adam/workspace/enterprise",
+        )
+        for line in result.stdout.splitlines():
+            if "Documents:" in line:
+                return int(line.split(":")[1].strip().replace(",", ""))
+    except Exception:
+        pass
+    return -1
+
+
+def memory_maintenance(log: logging.Logger):
+    """
+    Proactive memory management -- called every PULSE cycle.
+    
+    COMB management (both sisters):
+      1. Roll up staging -> archive (every 30 min)
+      2. Detect and roll up orphaned staging files (every 6 hours)
+      3. Verify chain integrity (every 2 hours)
+      4. Detect archive gaps and log warnings (every 6 hours)
+    
+    HEKTOR management:
+      5. Ensure daemon is alive (every cycle)
+      6. Scan important files for changes -> reindex (every 5 min)
+      7. Periodic full reindex for consistency (every 4 hours)
+      8. Log doc count / health metrics (every hour)
+    """
+    global _last_ava_comb_rollup_ts, _last_aria_comb_rollup_ts
+    global _last_orphan_check_ts, _last_hektor_health_ts
+    global _last_filesystem_scan_ts, _last_comb_gap_check_ts
+    now = time.time()
+    hour = datetime.now(PKT).hour
+    minute = datetime.now(PKT).minute
+    
+    # -- 1. HEKTOR daemon health (every cycle) --
+    # Cooldown: after restart, wait long enough for daemon to load (~5 min)
+    _hektor_restart_cooldown = globals().get('_hektor_restart_cooldown', 0)
+    if now < _hektor_restart_cooldown:
+        log.debug(f"HEKTOR restart cooldown: {int(_hektor_restart_cooldown - now)}s remaining")
+    elif not hektor_alive(log):
+        log.warning("HEKTOR daemon not responding -- restarting")
+        hektor_restart(log)
+        _hektor_restart_cooldown = now + 300  # 5 min cooldown
+        globals()['_hektor_restart_cooldown'] = _hektor_restart_cooldown
+    
+    # -- 2. COMB rollups (every 30 min, both sisters) --
+    if (now - _last_ava_comb_rollup_ts) > 1800:
+        _comb_rollup(_AVA_COMB_FLUSH, _HEKTOR_VENV, "AVA", log)
+        _last_ava_comb_rollup_ts = now
+    
+    if (now - _last_aria_comb_rollup_ts) > 1800:
+        _comb_rollup(_ARIA_COMB_FLUSH, _ARIA_COMB_VENV, "Aria", log)
+        _last_aria_comb_rollup_ts = now
+    
+    # -- 3. COMB chain verification (every 2 hours) --
+    if minute < 15 and hour % 2 == 0:
+        _comb_verify(_AVA_COMB_FLUSH, _HEKTOR_VENV, "AVA", log)
+        _comb_verify(_ARIA_COMB_FLUSH, _ARIA_COMB_VENV, "Aria", log)
+    
+    # -- 4. Orphaned staging cleanup (every 6 hours) --
+    if (now - _last_orphan_check_ts) > 21600:
+        _last_orphan_check_ts = now
+        _comb_rollup_orphans(
+            "/home/adam/workspace/enterprise/.ava-memory/comb-store/staging",
+            "/home/adam/workspace/enterprise/.ava-memory/comb-store/archive",
+            "AVA", log
+        )
+        _comb_rollup_orphans(
+            "/dev/null",
+            "/dev/null",
+            "Aria", log
+        )
+    
+    # -- 5. COMB archive gap detection (every 6 hours) --
+    if (now - _last_comb_gap_check_ts) > 21600:
+        _last_comb_gap_check_ts = now
+        _check_comb_gaps(
+            "/home/adam/workspace/enterprise/.ava-memory/comb-store/archive",
+            "AVA", log
+        )
+        _check_comb_gaps(
+            "/dev/null",
+            "Aria", log
+        )
+    
+    # -- 6. File change detection -> HEKTOR reindex (every 5 min) --
+    if (now - _last_filesystem_scan_ts) > 300:
+        _last_filesystem_scan_ts = now
+        if _scan_important_files(log):
+            log.info("Important files changed -- triggering HEKTOR reindex")
+            hektor_ingest(log)
+    
+    # -- 7. Periodic full HEKTOR reindex (every 4 hours) --
+    if hour % 4 == 0 and minute < 15:
+        hektor_ingest(log, force=True)
+    
+    # -- 8. HEKTOR health metrics (every hour) --
+    if (now - _last_hektor_health_ts) > 3600:
+        _last_hektor_health_ts = now
+        doc_count = _hektor_doc_count(log)
+        if doc_count > 0:
+            log.info(f"HEKTOR health: {doc_count:,} documents indexed")
+        elif doc_count == 0:
+            log.warning("HEKTOR has 0 documents -- needs ingest!")
+            hektor_ingest(log, force=True)
+
+    # -- 9. Autonomous COMB context staging (every 2 hours) --
+    global _last_context_stage_ts
+    if (now - _last_context_stage_ts) > 7200:
+        _last_context_stage_ts = now
+        _auto_stage_context(log)
+
+
+_last_context_stage_ts = 0.0
+
+def _auto_stage_context(log: logging.Logger):
+    """Autonomously stage important context into COMB.
+    
+    Reads today's memory file and recent git activity to build
+    a context snapshot. This ensures AVA always wakes up with
+    fresh operational context even if she didn't stage manually.
+    """
+    workspace = "/home/adam/workspace/enterprise"
+    today = datetime.now(PKT).strftime("%Y-%m-%d")
+    today_short = datetime.now(PKT).strftime("%m-%d")
+    
+    context_parts = []
+    
+    # 1. Read today's memory file for key events
+    memory_file = Path(workspace) / f"memory/{today}.md"
+    if memory_file.exists():
+        try:
+            content = memory_file.read_text()
+            # Extract headers (## lines) as event summary
+            headers = [l.strip() for l in content.splitlines() if l.strip().startswith("## ")]
+            if headers:
+                context_parts.append(f"Today's events: {'; '.join(h.lstrip('#').strip() for h in headers[-10:])}")
+        except Exception as e:
+            log.debug(f"Context stage - memory file read error: {e}")
+    
+    # 2. Check git status for active work
+    try:
+        result = _sp.run(
+            ["git", "status", "--short"],
+            capture_output=True, text=True, cwd=workspace, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            lines = result.stdout.strip().splitlines()
+            context_parts.append(f"Uncommitted files: {len(lines)} ({', '.join(l.split()[-1] for l in lines[:5])})")
+    except Exception:
+        pass
+    
+    # 3. Check Pulse's own task history
+    try:
+        state_file = Path(workspace) / ".pulse/state.json"
+        if state_file.exists():
+            state = json.loads(state_file.read_text())
+            tasks = state.get("tasks_completed", [])
+            if tasks:
+                unique_tasks = list({t["task"] for t in tasks})
+                context_parts.append(f"PULSE completed today: {'; '.join(unique_tasks[:5])}")
+    except Exception:
+        pass
+    
+    # 4. Check HEKTOR health
+    if hektor_alive(log):
+        context_parts.append("HEKTOR: alive")
+    else:
+        context_parts.append("HEKTOR: DOWN — needs attention")
+    
+    if context_parts:
+        summary = f"[PULSE auto-context {today_short}] " + " | ".join(context_parts)
+        # Cap at 500 chars
+        if len(summary) > 500:
+            summary = summary[:497] + "..."
+        comb_stage(workspace, log, summary)
+        log.info(f"🧠 Auto-staged context ({len(summary)} chars)")
+    else:
+        log.debug("No context to auto-stage")
+
+
+# ─── Configuration ──────────────────────────────────────────────────────────
+
+PKT = timezone(timedelta(hours=5))
+
+@dataclass
+class PulseConfig:
+    # Copilot proxy for triage (cheap/free)
+    triage_url: str = "http://localhost:3000/v1/chat/completions"
+    triage_model: str = "claude-sonnet-4"
+    triage_max_tokens: int = 500
+
+    # Mach6 HTTP API for work turns
+    mach6_url: str = "http://localhost:5006/api/v1/chat"
+    mach6_api_key: str = ""
+
+    # Timing
+    idle_delay_sec: int = 600        # 10 min after last conversation → first triage
+    triage_interval_sec: int = 900   # 15 min between triage cycles
+    min_work_gap_sec: int = 300      # 5 min minimum between work turns
+    quiet_hours_start: int = 23      # 11 PM PKT
+    quiet_hours_end: int = 8         # 8 AM PKT
+
+    # Budget
+    max_triage_per_day: int = 48     # ~3 per hour for 16 waking hours
+    max_work_per_day: int = 12       # real work turns are expensive
+    max_tokens_per_day: int = 100000 # total token budget
+
+    # Paths
+    workspace: str = "/home/adam/workspace/enterprise"
+    state_file: str = "/home/adam/workspace/enterprise/.pulse/state.json"
+    log_file: str = "/home/adam/workspace/enterprise/.pulse/pulse.log"
+    heartbeat_md: str = "/home/adam/workspace/enterprise/HEARTBEAT.md"
+    workflow_md: str = "/home/adam/workspace/enterprise/WORKFLOW_AUTO.md"
+
+    # Conversation detection
+    last_activity_file: str = "/home/adam/workspace/enterprise/.pulse/last_activity"
+
+
+# ─── State ──────────────────────────────────────────────────────────────────
+
+@dataclass
+class PulseState:
+    """Persistent state across restarts."""
+    date: str = ""                    # YYYY-MM-DD for daily reset
+    triage_count: int = 0
+    work_count: int = 0
+    tokens_used: int = 0
+    last_triage_ts: float = 0
+    last_work_ts: float = 0
+    last_activity_ts: float = 0       # last human message timestamp
+    last_triage_decision: str = ""    # what triage decided
+    consecutive_skips: int = 0        # how many "nothing to do" in a row
+    tasks_completed: list = field(default_factory=list)
+
+    # Clock
+    boot_ts: float = 0                # when PULSE process started
+    total_uptime_sec: float = 0       # cumulative uptime across restarts (today)
+    total_cycles: int = 0             # total triage cycles (today)
+    total_work_sec: float = 0         # time spent in work turns (today)
+
+    # Install awareness
+    active_installs: list = field(default_factory=list)    # currently running installs
+    completed_installs: list = field(default_factory=list) # finished today
+
+    def reset_if_new_day(self):
+        today = datetime.now(PKT).strftime("%Y-%m-%d")
+        if self.date != today:
+            self.date = today
+            self.triage_count = 0
+            self.work_count = 0
+            self.tokens_used = 0
+            self.consecutive_skips = 0
+            self.tasks_completed = []
+            self.total_uptime_sec = 0
+            self.total_cycles = 0
+            self.total_work_sec = 0
+            self.active_installs = []
+            self.completed_installs = []
+
+    def save(self, path: str):
+        """Atomic save — write to temp file first, then rename."""
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        try:
+            tmp.write_text(json.dumps(asdict(self), indent=2))
+            tmp.replace(p)  # atomic on POSIX
+        except OSError:
+            # Disk full or permissions — try direct write as fallback
+            try:
+                p.write_text(json.dumps(asdict(self), indent=2))
+            except OSError:
+                pass  # truly broken — state lost for this cycle
+
+    @classmethod
+    def load(cls, path: str) -> "PulseState":
+        try:
+            data = json.loads(Path(path).read_text())
+            return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        except (FileNotFoundError, json.JSONDecodeError):
+            return cls()
+
+
+# ─── Logger ─────────────────────────────────────────────────────────────────
+
+def setup_logging(log_file: str) -> logging.Logger:
+    logger = logging.getLogger("pulse")
+    logger.setLevel(logging.INFO)
+
+    # File handler (rotate at 1MB — preserve one backup)
+    log_path = Path(log_file)
+    if log_path.exists() and log_path.stat().st_size > 1_000_000:
+        backup = log_path.with_suffix(".log.1")
+        try:
+            if backup.exists():
+                backup.unlink()
+            log_path.rename(backup)
+        except OSError:
+            log_path.write_text("")  # fallback: truncate if rename fails
+
+    fh = logging.FileHandler(log_file)
+    fh.setLevel(logging.DEBUG)
+
+    fmt = logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+
+    # Only add StreamHandler if stdout is a TTY (avoids double logging when piped)
+    if sys.stdout.isatty():
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(fmt)
+        logger.addHandler(ch)
+    return logger
+
+
+# ─── Context Gathering ─────────────────────────────────────────────────────
+
+def gather_context(config: PulseConfig, state: PulseState) -> dict:
+    """Gather everything the triage brain needs to make a decision."""
+    now = datetime.now(PKT)
+    ctx = {
+        "time": now.strftime("%Y-%m-%d %H:%M:%S PKT"),
+        "day_of_week": now.strftime("%A"),
+        "hour": now.hour,
+        "budget": {
+            "triage_remaining": config.max_triage_per_day - state.triage_count,
+            "work_remaining": config.max_work_per_day - state.work_count,
+            "tokens_remaining": config.max_tokens_per_day - state.tokens_used,
+            "budget_pct": round((state.tokens_used / config.max_tokens_per_day) * 100, 1),
+        },
+        "timing": {
+            "since_last_human_msg_min": round((time.time() - state.last_activity_ts) / 60, 1) if state.last_activity_ts else None,
+            "since_last_work_min": round((time.time() - state.last_work_ts) / 60, 1) if state.last_work_ts else None,
+            "consecutive_idle_cycles": state.consecutive_skips,
+        },
+        "today_completed": state.tasks_completed[-5:],  # last 5
+    }
+
+    # Read HEARTBEAT.md for task checklist
+    try:
+        hb = Path(config.heartbeat_md).read_text()
+        # Extract unchecked items
+        unchecked = [line.strip() for line in hb.splitlines()
+                     if line.strip().startswith("- [ ]")]
+        ctx["heartbeat_tasks"] = unchecked[:10]
+    except FileNotFoundError:
+        ctx["heartbeat_tasks"] = []
+
+    # Read WORKFLOW_AUTO.md for active projects
+    try:
+        wf = Path(config.workflow_md).read_text()
+        # Extract active items
+        active = []
+        for line in wf.splitlines():
+            if "ACTIVE" in line or "NEXT" in line:
+                active.append(line.strip())
+        ctx["active_workflows"] = active[:5]
+    except FileNotFoundError:
+        ctx["active_workflows"] = []
+
+    # Check for recent memory notes
+    today = now.strftime("%Y-%m-%d")
+    memory_file = Path(config.workspace) / "memory" / f"{today}.md"
+    if memory_file.exists():
+        content = memory_file.read_text()
+        ctx["memory_size_today"] = len(content)
+        # Get last section header
+        headers = [l for l in content.splitlines() if l.startswith("##")]
+        ctx["last_memory_entry"] = headers[-1] if headers else None
+    else:
+        ctx["memory_size_today"] = 0
+
+    # Check git status for uncommitted work
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True, text=True, cwd=config.workspace, timeout=5
+        )
+        changed = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
+        ctx["uncommitted_files"] = len(changed)
+        ctx["changed_files"] = changed[:5]
+    except Exception:
+        ctx["uncommitted_files"] = 0
+
+    # Check cron schedule
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["crontab", "-l"], capture_output=True, text=True, timeout=5
+        )
+        crons = [l for l in result.stdout.splitlines()
+                 if l.strip() and not l.startswith("#")]
+        ctx["active_crons"] = len(crons)
+    except Exception:
+        ctx["active_crons"] = 0
+
+    # Check disk space
+    try:
+        import shutil
+        usage = shutil.disk_usage(config.workspace)
+        pct_used = round((usage.used / usage.total) * 100, 1)
+        free_gb = round(usage.free / (1024 ** 3), 1)
+        ctx["disk"] = {"used_pct": pct_used, "free_gb": free_gb}
+        if pct_used > 93:
+            ctx["disk_critical"] = True
+    except Exception:
+        pass
+
+    # Check qorvex watchdog state
+    try:
+        qorvex_state_file = Path("/tmp/ava-qorvex/watchdog-state.json")
+        if qorvex_state_file.exists():
+            sov = json.loads(qorvex_state_file.read_text())
+            ctx["qorvex"] = {
+                "state": sov.get("state", "unknown"),
+                "flip_count": sov.get("flip_count", 0),
+                "last_ping_ok": sov.get("last_ping_ok", 1),
+            }
+    except Exception:
+        pass
+
+    # ── Sisters IPC Context ─────────────────────────────────────────────
+    try:
+        import httpx as _hx
+        ipc_resp = _hx.get("http://127.0.0.1:3007/status", timeout=2)
+        if ipc_resp.status_code == 200:
+            ipc_data = ipc_resp.json()
+            peers_resp = _hx.get("http://127.0.0.1:3007/peers", timeout=2)
+            peers = peers_resp.json().get("peers", []) if peers_resp.status_code == 200 else []
+            ctx["sisters_ipc"] = {
+                "daemon_up": True,
+                "uptime_min": round(ipc_data.get("uptime", 0) / 60, 1),
+                "total_messages": ipc_data.get("totalMessages", 0),
+                "peers_online": [p.get("name", "?") for p in peers],
+                "aria_connected": any(p.get("name") == "aria" for p in peers),
+                "ava_connected": any(p.get("name") == "ava" for p in peers),
+            }
+        else:
+            ctx["sisters_ipc"] = {"daemon_up": False}
+    except Exception:
+        ctx["sisters_ipc"] = {"daemon_up": False}
+
+    # ── Aria Health (Enhanced — Session + Process + Context) ──────────────
+    try:
+        aria_health = check_aria_health(logging.getLogger("pulse"))
+        ctx["aria"] = {
+            "process_running": aria_health["running"],
+            "pid": aria_health["pid"],
+            "model": "claude-opus-4.6",
+            "total_active_tokens": aria_health["total_active_tokens"],
+            "critical": aria_health["critical"],
+            "token_exceeded": aria_health.get("token_exceeded", False),
+            "needs_compact": aria_health["needs_compact"],
+            "recent_errors": aria_health.get("recent_errors", 0),
+            "sessions": {k: v for k, v in list(aria_health["sessions"].items())[:5]},
+        }
+        # COMB health
+        aria_comb = Path("/dev/null")
+        if aria_comb.exists():
+            aria_docs = list(aria_comb.glob("*.json"))
+            ctx["aria"]["comb_documents"] = len(aria_docs)
+            if aria_docs:
+                latest = max(aria_docs, key=lambda p: p.name)
+                ctx["aria"]["comb_latest"] = latest.stem
+    except Exception:
+        ctx["aria"] = {"process_running": False, "error": "health check failed"}
+
+    # ── Memory Systems Health ────────────────────────────────────────────
+    try:
+        ctx["memory_systems"] = {
+            "hektor": {
+                "daemon_alive": hektor_alive(logging.getLogger("pulse")),
+                "pid_file_exists": Path(_HEKTOR_PID).exists(),
+            },
+            "ava_comb": {
+                "archive_count": len(list(Path("/home/adam/workspace/enterprise/.ava-memory/comb-store/archive").glob("*.json"))),
+                "staging_exists": Path("/home/adam/workspace/enterprise/.ava-memory/comb-store/staging").exists(),
+            },
+            "aria_comb": {
+                "archive_count": len(list(Path("/dev/null").glob("*.json"))),
+                "staging_exists": Path("/dev/null").exists(),
+            },
+        }
+        # Check for stale staging files (not rolled up for >24h)
+        for label, staging_dir in [
+            ("ava", Path("/home/adam/workspace/enterprise/.ava-memory/comb-store/staging")),
+            ("aria", Path("/dev/null")),
+        ]:
+            if staging_dir.exists():
+                stale = []
+                for f in staging_dir.glob("*.jsonl"):
+                    try:
+                        age_hours = (time.time() - f.stat().st_mtime) / 3600
+                        if age_hours > 24:
+                            stale.append(f.stem)
+                    except OSError:
+                        pass
+                if stale:
+                    ctx["memory_systems"][f"{label}_comb"]["stale_staging"] = stale
+    except Exception:
+        pass
+
+    return ctx
+
+
+# ─── Triage Engine ──────────────────────────────────────────────────────────
+
+TRIAGE_SYSTEM = """You are PULSE — AVA's autonomous triage engine. You manage BOTH sisters' contexts and memory systems.
+
+You receive a context snapshot including:
+- sisters_ipc: cross-comm status between AVA and Aria
+- aria: Aria's process health, session tokens, COMB status
+- memory_systems: HEKTOR daemon + COMB stores health for both sisters
+
+You output ONE decision as JSON.
+
+Rules:
+1. If human messaged <10 min ago → WAIT (conversation might resume)
+2. If budget is low (>80% used) → only critical tasks
+3. If it's quiet hours (23:00-08:00) → only nightly creative/social tasks
+4. If nothing needs doing → SKIP (don't invent work)
+5. Prefer short tasks (<5 min) over long ones when budget is tight
+6. Never repeat a task completed today unless it's recurring
+7. Git commit if there are uncommitted files and no active work
+8. HEARTBEAT.md unchecked items are your task board
+9. If active_installs shows running installs → DO NOT interfere. Wait for completion.
+10. If recent_installs_completed shows finished installs → consider post-install tasks
+11. If sisters_ipc.daemon_up is false → restart IPC daemon (critical)
+12. If aria.process_running is false → flag for restart (critical)
+13. If aria.critical is true → flag "aria_compact_needed" as critical task
+14. If aria.token_exceeded is true → IMMEDIATE compact needed (she's bricked)
+15. If aria.needs_compact has entries → compact those sessions (high priority)
+16. Cross-context awareness: consider both AVA and Aria workloads when triaging
+
+MEMORY SYSTEMS MANAGEMENT:
+- memory_systems.hektor.daemon_alive: DO NOT waste work budget on this. memory_maintenance() auto-restarts HEKTOR every cycle for FREE. Only flag as work if it has failed 10+ consecutive restarts.
+- memory_systems.*_comb.stale_staging: if present → stale COMB data not rolled up. Roll up now (data at risk).
+- memory_systems.*_comb.archive_count: track growth. Low counts may indicate flush issues.
+- PULSE auto-manages memory via memory_maintenance() every cycle — this triage layer handles ESCALATIONS ONLY, not routine restarts.
+
+ARIA CONTEXT MANAGEMENT:
+- Aria's model limit is 128K tokens. Her sessions are tracked in aria.sessions.
+- If any session exceeds ~110K tokens, PULSE should trigger compaction.
+- If aria.token_exceeded is true, she's completely stuck — can't respond at all.
+- Compaction task: "Compact Aria session {channel_id}" — PULSE handles this internally.
+
+Output format (strict JSON, no markdown):
+{"action": "work|wait|skip", "task": "specific task description for AVA", "reason": "why", "estimated_minutes": N, "priority": "critical|high|medium|low"}
+
+If action is "skip" or "wait", task should be null."""
+
+def triage(config: PulseConfig, context: dict, log: logging.Logger) -> Optional[dict]:
+    """Ask the triage model what to do. Returns decision dict or None on error."""
+    prompt = f"Context snapshot:\n```json\n{json.dumps(context, indent=2)}\n```\n\nWhat should AVA do right now?"
+
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(config.triage_url, json={
+                "model": config.triage_model,
+                "messages": [
+                    {"role": "system", "content": TRIAGE_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                "max_tokens": config.triage_max_tokens,
+                "temperature": 0.1,
+            })
+
+            if resp.status_code == 429:
+                log.error("Triage rate-limited (429). Flushing COMB.")
+                comb_flush(config.workspace, log, reason="triage rate-limited (429)")
+                return None
+
+            if resp.status_code >= 500:
+                log.error(f"Triage server error ({resp.status_code}). Flushing COMB.")
+                comb_flush(config.workspace, log, reason=f"triage server error ({resp.status_code})")
+                return None
+
+            if resp.status_code != 200:
+                log.error(f"Triage API error: {resp.status_code} {resp.text[:200]}")
+                return None
+
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            tokens = data.get("usage", {}).get("total_tokens", 0)
+
+            # Parse JSON from response (handle markdown wrapping, trailing text)
+            content = content.strip()
+            if content.startswith("```"):
+                # Remove ```json or ``` wrapper
+                lines = content.split("\n")
+                # Find opening and closing fences
+                start = 1  # skip first line (```)
+                end = len(lines)
+                for i in range(len(lines) - 1, 0, -1):
+                    if lines[i].strip().startswith("```"):
+                        end = i
+                        break
+                content = "\n".join(lines[start:end]).strip()
+
+            # Try to extract JSON object even if there's surrounding text
+            if not content.startswith("{"):
+                brace_start = content.find("{")
+                if brace_start >= 0:
+                    content = content[brace_start:]
+            if not content.endswith("}"):
+                brace_end = content.rfind("}")
+                if brace_end >= 0:
+                    content = content[:brace_end + 1]
+
+            decision = json.loads(content)
+            
+            # Validate required fields
+            if "action" not in decision:
+                log.warning(f"Triage missing 'action' field: {content[:200]}")
+                decision["action"] = "skip"
+                decision["reason"] = decision.get("reason", "malformed response")
+            
+            # Normalize action to known values
+            if decision["action"] not in ("work", "wait", "skip"):
+                log.warning(f"Triage unknown action '{decision['action']}', treating as skip")
+                decision["action"] = "skip"
+            
+            decision["_tokens"] = tokens
+            log.info(f"Triage: {decision.get('action', '?')} — {decision.get('reason', '?')}")
+            return decision
+
+    except httpx.TimeoutException:
+        log.error("Triage timed out. Flushing COMB.")
+        comb_flush(config.workspace, log, reason="triage timeout")
+        return None
+    except httpx.ConnectError:
+        log.error("Triage connection refused (proxy down?). Flushing COMB.")
+        comb_flush(config.workspace, log, reason="triage connection refused")
+        return None
+    except json.JSONDecodeError as e:
+        log.error(f"Triage returned non-JSON: {e}")
+        return None
+    except Exception as e:
+        log.error(f"Triage failed: {e}")
+        comb_flush(config.workspace, log, reason=f"triage exception: {e}")
+        return None
+
+
+# ─── Work Execution ─────────────────────────────────────────────────────────
+
+def execute_work(config: PulseConfig, task: str, log: logging.Logger) -> Optional[dict]:
+    """Send a work task to Mach6 HTTP API. Returns response or None."""
+    session_id = f"pulse-{datetime.now(PKT).strftime('%Y%m%d-%H%M%S')}"
+
+    try:
+        with httpx.Client(timeout=3600) as client:  # 60 min persistent for work turns
+            resp = client.post(config.mach6_url, json={
+                "text": f"[PULSE autonomous task] {task}",
+                "source": "pulse",
+                "senderId": "ava-pulse",
+                "sessionId": session_id,
+            }, headers={
+                "Authorization": f"Bearer {config.mach6_api_key}",
+                "Content-Type": "application/json",
+            })
+
+            if resp.status_code == 429:
+                log.error("Work API rate-limited (429). Flushing COMB.")
+                comb_flush(config.workspace, log, reason="work rate-limited (429)")
+                return None
+
+            if resp.status_code >= 500:
+                log.error(f"Work API server error ({resp.status_code}). Flushing COMB.")
+                comb_flush(config.workspace, log, reason=f"work server error ({resp.status_code})")
+                return None
+
+            if resp.status_code != 200:
+                log.error(f"Work API error: {resp.status_code} {resp.text[:300]}")
+                return None
+
+            try:
+                data = resp.json()
+            except (json.JSONDecodeError, ValueError):
+                log.error(f"Work API returned non-JSON: {resp.text[:200]}")
+                return None
+            
+            log.info(f"Work done: session={session_id}, len={len(data.get('text', ''))}")
+            return data
+
+    except httpx.TimeoutException:
+        log.error(f"Work execution timed out (5 min). Flushing COMB.")
+        comb_flush(config.workspace, log, reason=f"work timeout: {task[:60]}")
+        return None
+    except httpx.ConnectError:
+        log.error("Work API connection refused (Mach6 down?). Flushing COMB.")
+        comb_flush(config.workspace, log, reason="work connection refused (Mach6 down)")
+        return None
+    except Exception as e:
+        log.error(f"Work execution failed: {e}")
+        comb_flush(config.workspace, log, reason=f"work exception: {e}")
+        return None
+
+
+# ─── Aria Context Management ────────────────────────────────────────────────
+# NOTE: Aria (plug) is deprecated and archived. These are stubs for disabled functionality.
+
+ARIA_SESSIONS_DB = "/dev/null"
+ARIA_CONFIG_FILE = "/dev/null"
+ARIA_PID_FILE = "/dev/null"
+ARIA_LOG_FILE = "/dev/null"
+
+# Aria's model limit is 128K via copilot proxy.
+# System prompt + COMB injection is ~5-8K tokens.
+# So we need to compact well before 128K.
+ARIA_COMPACT_THRESHOLD = 110000  # trigger compaction at 110K tokens
+ARIA_COMPACT_TARGET = 65000      # keep ~65K tokens after compaction
+ARIA_CRITICAL_THRESHOLD = 125000 # emergency compact — she's about to brick
+
+
+def check_aria_health(log: logging.Logger) -> dict:
+    """Check Aria's overall health: process, context, sessions."""
+    health = {
+        "running": False,
+        "pid": None,
+        "sessions": {},
+        "critical": False,
+        "needs_compact": [],
+        "total_active_tokens": 0,
+    }
+
+    # Check if Aria's process is alive
+    try:
+        pid_path = Path(ARIA_PID_FILE)
+        if pid_path.exists():
+            pid = int(pid_path.read_text().strip())
+            # Check if process exists
+            import os
+            os.kill(pid, 0)  # signal 0 = check existence
+            health["running"] = True
+            health["pid"] = pid
+    except (ValueError, ProcessLookupError, PermissionError, FileNotFoundError):
+        pass
+
+    # Check session sizes
+    try:
+        import sqlite3
+        db = sqlite3.connect(ARIA_SESSIONS_DB)
+        rows = db.execute('''
+            SELECT channel_id, COUNT(*) as msgs, COALESCE(SUM(token_count), 0) as tokens
+            FROM messages WHERE compacted = 0
+            GROUP BY channel_id
+            ORDER BY tokens DESC
+        ''').fetchall()
+        db.close()
+
+        for channel_id, msg_count, token_count in rows:
+            health["sessions"][channel_id] = {
+                "messages": msg_count,
+                "tokens": token_count,
+            }
+            health["total_active_tokens"] += token_count
+
+            if token_count >= ARIA_CRITICAL_THRESHOLD:
+                health["critical"] = True
+                health["needs_compact"].append(channel_id)
+            elif token_count >= ARIA_COMPACT_THRESHOLD:
+                health["needs_compact"].append(channel_id)
+
+    except Exception as e:
+        log.debug(f"Aria session check failed: {e}")
+
+    # Check for recent errors in log (last 30 lines)
+    try:
+        log_path = Path(ARIA_LOG_FILE)
+        if log_path.exists():
+            lines = log_path.read_text().splitlines()[-30:]
+            error_lines = [l for l in lines if "max_prompt_tokens_exceeded" in l or "ERROR" in l]
+            health["recent_errors"] = len(error_lines)
+            health["token_exceeded"] = any("max_prompt_tokens_exceeded" in l for l in lines[-10:])
+        else:
+            health["recent_errors"] = 0
+            health["token_exceeded"] = False
+    except Exception:
+        health["recent_errors"] = 0
+        health["token_exceeded"] = False
+
+    return health
+
+
+def compact_aria_session(channel_id: str, log: logging.Logger, emergency: bool = False) -> bool:
+    """Compact an Aria session by marking old messages and inserting a summary.
+
+    This is a direct DB operation — no LLM needed. We do a structural compact:
+    mark old messages as compacted, insert a brief system summary.
+
+    For true summarization, Aria's own compactor handles it on next request.
+    But this emergency valve prevents her from bricking.
+    """
+    try:
+        import sqlite3
+
+        db = sqlite3.connect(ARIA_SESSIONS_DB)
+
+        # Get all active messages
+        rows = db.execute('''
+            SELECT id, role, token_count, content
+            FROM messages
+            WHERE channel_id = ? AND compacted = 0
+            ORDER BY id ASC
+        ''', (channel_id,)).fetchall()
+
+        total_tokens = sum(r[2] for r in rows)
+
+        if total_tokens < ARIA_COMPACT_THRESHOLD and not emergency:
+            db.close()
+            return False
+
+        # Keep the last ARIA_COMPACT_TARGET tokens
+        target = ARIA_COMPACT_TARGET if not emergency else 40000
+        keep_tokens = 0
+        keep_from_idx = len(rows)
+
+        for i in range(len(rows) - 1, -1, -1):
+            msg_tokens = rows[i][2]
+            if keep_tokens + msg_tokens > target:
+                break
+            keep_tokens += msg_tokens
+            keep_from_idx = i
+
+        # Don't split tool call/result pairs — walk back past tool results
+        while keep_from_idx > 0 and rows[keep_from_idx][1] == "tool":
+            keep_from_idx -= 1
+
+        if keep_from_idx <= 0:
+            db.close()
+            return False
+
+        last_compact_id = rows[keep_from_idx - 1][0]
+        compact_count = keep_from_idx
+        compact_tokens = total_tokens - keep_tokens
+
+        log.info(f"Aria compact {channel_id}: {compact_count} msgs ({compact_tokens} tokens) → keeping {len(rows) - keep_from_idx} msgs ({keep_tokens} tokens)")
+
+        db.execute("BEGIN")
+
+        # Mark old messages as compacted
+        db.execute('''
+            UPDATE messages SET compacted = 1
+            WHERE channel_id = ? AND id <= ? AND compacted = 0
+        ''', (channel_id, last_compact_id))
+
+        # Insert a structural summary
+        import time as _time
+        summary = (
+            "[Previous conversation compacted by PULSE]\n"
+            f"Compacted {compact_count} messages ({compact_tokens} tokens) at "
+            f"{datetime.now(PKT).strftime('%Y-%m-%d %H:%M:%S PKT')}.\n"
+            "Aria and AVA are sisters. Ali is their father/CEO. "
+            "Aria coordinates C-Suite, AVA handles enterprise admin. "
+            "Key shared context: IPC spec, Minecraft, anti-loop training, qorvexty projects. "
+            "See IDENTITY_ARIA.md and SISTER_PROTOCOL.md for full context."
+        )
+
+        db.execute('''
+            INSERT INTO messages (channel_id, role, content, timestamp, token_count, compacted)
+            VALUES (?, 'system', ?, ?, ?, 0)
+        ''', (channel_id, summary, _time.time(), len(summary) // 4))
+
+        db.commit()
+        db.close()
+
+        log.info(f"✅ Aria session {channel_id} compacted: {total_tokens} → {keep_tokens} tokens")
+        return True
+
+    except Exception as e:
+        log.error(f"Aria compaction failed for {channel_id}: {e}")
+        try:
+            db.rollback()
+            db.close()
+        except Exception:
+            pass
+        return False
+
+
+def restart_aria(log: logging.Logger) -> bool:
+    """Aria (plug) is deprecated and archived — this is a no-op."""
+    log.debug("⚠️  Aria (plug) is archived and disabled")
+    return False
+
+
+# ─── Activity Detection ────────────────────────────────────────────────────
+
+def get_last_activity(config: PulseConfig) -> float:
+    """Get timestamp of last human activity (message to AVA).
+    
+    Checks Mach6 session files for most recent human message.
+    Falls back to the activity file PULSE maintains.
+    """
+    latest = 0.0
+
+    # Check session directory for recent activity
+    sessions_dir = Path(config.workspace) / ".contingency/mach6-core/.sessions"
+    if sessions_dir.exists():
+        for sf in sessions_dir.glob("*.json"):
+            try:
+                mtime = sf.stat().st_mtime
+                if mtime > latest:
+                    latest = mtime
+            except OSError:
+                pass
+
+    # Also check our own marker file
+    try:
+        ts = float(Path(config.last_activity_file).read_text().strip())
+        if ts > latest:
+            latest = ts
+    except (FileNotFoundError, ValueError):
+        pass
+
+    return latest
+
+
+def record_activity(config: PulseConfig):
+    """Record that a human message was detected (call from gateway hook)."""
+    Path(config.last_activity_file).parent.mkdir(parents=True, exist_ok=True)
+    Path(config.last_activity_file).write_text(str(time.time()))
+
+
+# ─── Install Awareness ─────────────────────────────────────────────────────
+
+# Process names that indicate package/build installs
+_INSTALL_PATTERNS = [
+    ("apt", "apt install"),
+    ("apt-get", "apt-get install"),
+    ("dpkg", "dpkg -i"),
+    ("pip", "pip install"),
+    ("pip3", "pip3 install"),
+    ("npm", "npm install"),
+    ("npm", "npm ci"),
+    ("yarn", "yarn install"),
+    ("cargo", "cargo build"),
+    ("cargo", "cargo install"),
+    ("make", "make install"),
+    ("cmake", "cmake --build"),
+    ("rustup", "rustup"),
+    ("snap", "snap install"),
+    ("flatpak", "flatpak install"),
+    ("go", "go install"),
+    ("gem", "gem install"),
+]
+
+
+def detect_installs(log: logging.Logger) -> list[dict]:
+    """Scan running processes for active install/build operations."""
+    found = []
+    try:
+        result = _sp.run(
+            ["ps", "aux", "--no-headers"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            cols = line.split(None, 10)
+            if len(cols) < 11:
+                continue
+            pid, cmd_full = cols[1], cols[10]
+            cmd_lower = cmd_full.lower()
+            for proc_name, pattern in _INSTALL_PATTERNS:
+                if pattern.replace(" ", "") in cmd_lower.replace(" ", ""):
+                    found.append({
+                        "pid": int(pid),
+                        "process": proc_name,
+                        "command": cmd_full[:120],
+                        "detected_at": time.time(),
+                    })
+                    break
+    except Exception as e:
+        log.debug(f"Install detection failed: {e}")
+    return found
+
+
+def update_install_tracking(state: PulseState, log: logging.Logger):
+    """Detect new/finished installs and update state."""
+    current = detect_installs(log)
+    current_pids = {i["pid"] for i in current}
+    prev_pids = {i["pid"] for i in state.active_installs}
+
+    # New installs
+    for inst in current:
+        if inst["pid"] not in prev_pids:
+            log.info(f"🔧 Install STARTED: {inst['process']} (PID {inst['pid']}) — {inst['command'][:80]}")
+
+    # Finished installs
+    for inst in state.active_installs:
+        if inst["pid"] not in current_pids:
+            duration = time.time() - inst.get("detected_at", time.time())
+            finished = {
+                **inst,
+                "finished_at": time.time(),
+                "duration_sec": round(duration, 1),
+            }
+            state.completed_installs.append(finished)
+            log.info(f"✅ Install FINISHED: {inst['process']} (PID {inst['pid']}) — {duration:.0f}s")
+
+    state.active_installs = current
+
+
+# ─── Quiet Hours ────────────────────────────────────────────────────────────
+
+def is_quiet_hours(config: PulseConfig) -> bool:
+    hour = datetime.now(PKT).hour
+    if config.quiet_hours_start > config.quiet_hours_end:
+        return hour >= config.quiet_hours_start or hour < config.quiet_hours_end
+    return hour >= config.quiet_hours_start and hour < config.quiet_hours_end
+
+
+# ─── Main Loop ──────────────────────────────────────────────────────────────
+
+class Pulse:
+    def __init__(self, config: PulseConfig = None):
+        self.config = config or PulseConfig()
+        self.state = PulseState.load(self.config.state_file)
+        self.log = setup_logging(self.config.log_file)
+        self.running = True
+
+        # Load API key
+        if not self.config.mach6_api_key:
+            env_path = Path(self.config.workspace) / ".env"
+            if env_path.exists():
+                for line in env_path.read_text().splitlines():
+                    if line.startswith("MACH6_API_KEY="):
+                        self.config.mach6_api_key = line.split("=", 1)[1].strip().strip('"')
+                        break
+
+        signal.signal(signal.SIGTERM, self._shutdown)
+        signal.signal(signal.SIGINT, self._shutdown)
+        self._shutting_down = False
+
+    def _shutdown(self, signum, frame):
+        if self._shutting_down:
+            return  # prevent double-flush from re-entrant signal
+        self._shutting_down = True
+        self.log.info(f"Shutdown signal ({signum}). Flushing COMB and saving state...")
+        comb_flush(self.config.workspace, self.log, reason=f"shutdown (signal {signum})")
+        self.running = False
+        self.state.save(self.config.state_file)
+
+    def run(self):
+        """Main consciousness loop."""
+        self.log.info("=" * 60)
+        self.log.info("PULSE starting — Persistent Unsupervised Loop for Qorvex Execution")
+        self.log.info(f"Triage: {self.config.triage_url} ({self.config.triage_model})")
+        self.log.info(f"Work: {self.config.mach6_url}")
+        self.log.info(f"Budget: {self.config.max_triage_per_day} triage, {self.config.max_work_per_day} work/day")
+        self.log.info("=" * 60)
+
+        # Boot the clock
+        self.state.boot_ts = time.time()
+        self._last_clock_tick = time.time()
+
+        # Stage boot event into COMB for session awareness
+        boot_time = datetime.now(PKT).strftime("%H:%M:%S PKT")
+        comb_stage(self.config.workspace, self.log,
+                   f"PULSE booted at {boot_time}. Budget: {self.config.max_triage_per_day}T/{self.config.max_work_per_day}W.")
+
+        while self.running:
+            try:
+                self.state.reset_if_new_day()
+                self._tick_clock()
+                update_install_tracking(self.state, self.log)
+                memory_maintenance(self.log)  # proactive COMB + HEKTOR management
+                self._cycle()
+                self.state.save(self.config.state_file)
+            except Exception as e:
+                self.log.error(f"Cycle error: {e}", exc_info=True)
+                comb_flush(self.config.workspace, self.log, reason=f"cycle exception: {e}")
+                time.sleep(60)  # back off on error
+
+        self.log.info("PULSE stopped.")
+
+    def _tick_clock(self):
+        """Update uptime counters."""
+        now = time.time()
+        elapsed = now - self._last_clock_tick
+        self.state.total_uptime_sec += elapsed
+        self._last_clock_tick = now
+
+    def _cycle(self):
+        """One triage-work-sleep cycle."""
+        now = time.time()
+
+        # ── Pre-Gate: Aria Context Health (runs EVERY cycle, no budget cost) ──
+        self._check_aria_context()
+
+        # ── Gate 1: Respect conversation flow ──
+        last_activity = get_last_activity(self.config)
+        self.state.last_activity_ts = last_activity
+        silence_sec = now - last_activity if last_activity else float('inf')
+
+        if silence_sec < self.config.idle_delay_sec:
+            wait = self.config.idle_delay_sec - silence_sec
+            self.log.debug(f"Active conversation ({silence_sec:.0f}s ago). Sleeping {wait:.0f}s.")
+            self._sleep(min(wait + 30, 300))  # check again in 5 min max
+            return
+
+        # ── Gate 2: Respect triage interval ──
+        since_triage = now - self.state.last_triage_ts
+        if since_triage < self.config.triage_interval_sec:
+            wait = self.config.triage_interval_sec - since_triage
+            self.log.debug(f"Too soon since last triage ({since_triage:.0f}s). Sleeping {wait:.0f}s.")
+            self._sleep(min(wait + 10, 300))
+            return
+
+        # ── Gate 3: Budget check ──
+        if self.state.triage_count >= self.config.max_triage_per_day:
+            self.log.warning("Daily triage budget exhausted. Flushing COMB.")
+            comb_flush(self.config.workspace, self.log, reason="triage budget exhausted")
+            self._sleep(3600)
+            return
+
+        # ── Gate 4: Quiet hours (allow triage but log it) ──
+        quiet = is_quiet_hours(self.config)
+        if quiet:
+            self.log.info("Quiet hours — triage will only consider nightly tasks.")
+
+        # ── Triage ──
+        context = gather_context(self.config, self.state)
+        context["quiet_hours"] = quiet
+        # Inject install awareness into triage context
+        if self.state.active_installs:
+            context["active_installs"] = [
+                {"process": i["process"], "command": i["command"][:60], "pid": i["pid"]}
+                for i in self.state.active_installs
+            ]
+        if self.state.completed_installs:
+            context["recent_installs_completed"] = [
+                {"process": i["process"], "duration_sec": i.get("duration_sec", 0)}
+                for i in self.state.completed_installs[-5:]
+            ]
+        # Inject clock
+        context["clock"] = {
+            "uptime_min": round(self.state.total_uptime_sec / 60, 1),
+            "cycles_today": self.state.total_cycles,
+            "work_time_min": round(self.state.total_work_sec / 60, 1),
+            "boot_time": datetime.fromtimestamp(self.state.boot_ts, PKT).strftime("%H:%M:%S") if self.state.boot_ts else None,
+        }
+
+        decision = triage(self.config, context, self.log)
+        self.state.last_triage_ts = time.time()
+        self.state.triage_count += 1
+        self.state.total_cycles += 1
+
+        if decision is None:
+            self.log.warning("Triage failed (timeout/rate-limit/error). Flushing COMB.")
+            comb_flush(self.config.workspace, self.log, reason="triage API failure")
+            self._sleep(900)
+            return
+
+        self.state.tokens_used += decision.get("_tokens", 0)
+        action = decision.get("action", "skip")
+        self.state.last_triage_decision = json.dumps(decision)
+
+        # ── Handle decision ──
+        if action == "skip":
+            self.state.consecutive_skips += 1
+            # Exponential backoff: more idle cycles → longer sleep
+            backoff = min(self.config.triage_interval_sec * (1.5 ** min(self.state.consecutive_skips, 6)), 7200)
+            self.log.info(f"Skip (x{self.state.consecutive_skips}). Next triage in {backoff:.0f}s.")
+            self._sleep(backoff)
+            return
+
+        if action == "wait":
+            self.state.consecutive_skips = 0
+            self._sleep(self.config.triage_interval_sec // 2)
+            return
+
+        if action == "work":
+            self.state.consecutive_skips = 0
+            task = decision.get("task")
+            if not task:
+                self.log.warning("Triage said 'work' but no task. Skipping.")
+                self._sleep(self.config.triage_interval_sec)
+                return
+
+            # Budget gate for work
+            if self.state.work_count >= self.config.max_work_per_day:
+                self.log.warning(f"Daily work budget exhausted ({self.state.work_count}/{self.config.max_work_per_day}). Flushing COMB.")
+                comb_flush(self.config.workspace, self.log, reason="work budget exhausted")
+                self._sleep(3600)
+                return
+
+            # Min gap between work turns
+            since_work = time.time() - self.state.last_work_ts
+            if since_work < self.config.min_work_gap_sec:
+                wait = self.config.min_work_gap_sec - since_work
+                self.log.info(f"Too soon since last work ({since_work:.0f}s). Waiting {wait:.0f}s.")
+                self._sleep(wait)
+                return
+
+            # ── Execute work ──
+            self.log.info(f">>> WORK: {task}")
+            work_start = time.time()
+            result = execute_work(self.config, task, self.log)
+            work_elapsed = time.time() - work_start
+            self.state.last_work_ts = time.time()
+            self.state.work_count += 1
+            self.state.total_work_sec += work_elapsed
+
+            if result:
+                summary = task[:80]
+                self.state.tasks_completed.append({
+                    "task": summary,
+                    "time": datetime.now(PKT).strftime("%H:%M"),
+                    "success": True,
+                })
+                self.log.info(f"✅ Work completed: {summary}")
+            else:
+                self.log.warning(f"❌ Work failed: {task[:80]}. Flushing COMB.")
+                comb_flush(self.config.workspace, self.log, reason=f"work execution failed: {task[:60]}")
+
+            self._sleep(self.config.triage_interval_sec)
+            return
+
+        # Unknown action
+        self.log.warning(f"Unknown triage action: {action}")
+        self._sleep(self.config.triage_interval_sec)
+
+    def _check_aria_context(self):
+        """Check Aria's session health and auto-compact if needed.
+        
+        This runs every cycle as infrastructure maintenance — not a work turn.
+        It's the equivalent of a thermostat: no budget cost, just keeps things healthy.
+        """
+        try:
+            aria_health = check_aria_health(self.log)
+
+            # Emergency: she's bricked (token_exceeded = model rejecting)
+            if aria_health.get("token_exceeded"):
+                self.log.warning("⚡ CRITICAL: Aria's context exceeded model limit — emergency compaction")
+                for channel_id in aria_health.get("needs_compact", []):
+                    compact_aria_session(channel_id, self.log, emergency=True)
+                # Also compact any session over threshold even if not in needs_compact
+                for ch_id, info in aria_health.get("sessions", {}).items():
+                    if info["tokens"] >= ARIA_CRITICAL_THRESHOLD:
+                        compact_aria_session(ch_id, self.log, emergency=True)
+                # Restart her if she's stuck in error loop
+                if not aria_health["running"]:
+                    restart_aria(self.log)
+                return
+
+            # Normal: compact sessions approaching the limit
+            for channel_id in aria_health.get("needs_compact", []):
+                self.log.info(f"⚡ Aria session {channel_id} approaching limit — compacting")
+                compact_aria_session(channel_id, self.log)
+
+            # Health: restart if dead
+            if not aria_health["running"]:
+                self.log.warning("⚡ Aria process not running — restarting")
+                restart_aria(self.log)
+
+        except Exception as e:
+            self.log.debug(f"Aria context check failed: {e}")
+
+    def _sleep(self, seconds: float):
+        """Interruptible sleep — checks for signals every 10s."""
+        end = time.time() + seconds
+        while self.running and time.time() < end:
+            time.sleep(min(10, end - time.time()))
+
+    def status(self) -> dict:
+        """Return current PULSE status."""
+        self.state.reset_if_new_day()
+        return {
+            "running": self.running,
+            "state": asdict(self.state),
+            "config": {
+                "idle_delay": self.config.idle_delay_sec,
+                "triage_interval": self.config.triage_interval_sec,
+                "quiet_hours": f"{self.config.quiet_hours_start}:00-{self.config.quiet_hours_end}:00",
+            },
+            "quiet_hours_now": is_quiet_hours(self.config),
+            "last_activity_ago_min": round((time.time() - self.state.last_activity_ts) / 60, 1) if self.state.last_activity_ts else None,
+        }
+
+
+# ─── CLI ────────────────────────────────────────────────────────────────────
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="PULSE — AVA Consciousness Loop")
+    parser.add_argument("command", nargs="?", default="run",
+                        choices=["run", "status", "triage-once", "context"],
+                        help="Command to execute")
+    parser.add_argument("--idle-delay", type=int, default=600,
+                        help="Seconds after last activity before first triage (default: 600)")
+    parser.add_argument("--triage-interval", type=int, default=900,
+                        help="Seconds between triage cycles (default: 900)")
+    parser.add_argument("--max-work", type=int, default=12,
+                        help="Max work turns per day (default: 12)")
+
+    args = parser.parse_args()
+
+    config = PulseConfig(
+        idle_delay_sec=args.idle_delay,
+        triage_interval_sec=args.triage_interval,
+        max_work_per_day=args.max_work,
+    )
+
+    if args.command == "status":
+        state = PulseState.load(config.state_file)
+        state.reset_if_new_day()
+        now = time.time()
+
+        # Format uptime
+        uptime = state.total_uptime_sec
+        if state.boot_ts:
+            uptime += now - state.boot_ts  # approximate if still running
+        uptime_h = int(uptime // 3600)
+        uptime_m = int((uptime % 3600) // 60)
+
+        info = {
+            "date": state.date,
+            "clock": {
+                "uptime": f"{uptime_h}h {uptime_m}m",
+                "boot_time": datetime.fromtimestamp(state.boot_ts, PKT).strftime("%H:%M:%S PKT") if state.boot_ts else "not running",
+                "current_time": datetime.now(PKT).strftime("%H:%M:%S PKT"),
+                "cycles_today": state.total_cycles,
+                "work_time_min": round(state.total_work_sec / 60, 1),
+            },
+            "budget": {
+                "triage": f"{state.triage_count}/{config.max_triage_per_day}",
+                "work": f"{state.work_count}/{config.max_work_per_day}",
+                "tokens": f"{state.tokens_used:,}/{config.max_tokens_per_day:,}",
+            },
+            "timing": {
+                "last_triage": datetime.fromtimestamp(state.last_triage_ts, PKT).strftime("%H:%M:%S") if state.last_triage_ts else "never",
+                "last_work": datetime.fromtimestamp(state.last_work_ts, PKT).strftime("%H:%M:%S") if state.last_work_ts else "never",
+                "consecutive_skips": state.consecutive_skips,
+            },
+            "installs": {
+                "active": [{"process": i["process"], "pid": i["pid"], "cmd": i["command"][:60]} for i in state.active_installs],
+                "completed_today": len(state.completed_installs),
+                "recent": [{"process": i["process"], "duration": f"{i.get('duration_sec', 0):.0f}s"} for i in state.completed_installs[-3:]],
+            },
+            "tasks_today": state.tasks_completed,
+            "quiet_hours": is_quiet_hours(config),
+        }
+        print(json.dumps(info, indent=2))
+
+    elif args.command == "context":
+        state = PulseState.load(config.state_file)
+        state.reset_if_new_day()
+        state.last_activity_ts = get_last_activity(config)
+        ctx = gather_context(config, state)
+        print(json.dumps(ctx, indent=2))
+
+    elif args.command == "triage-once":
+        state = PulseState.load(config.state_file)
+        state.reset_if_new_day()
+        state.last_activity_ts = get_last_activity(config)
+        log = setup_logging(config.log_file)
+        ctx = gather_context(config, state)
+        ctx["quiet_hours"] = is_quiet_hours(config)
+        decision = triage(config, ctx, log)
+        if decision:
+            print(json.dumps(decision, indent=2))
+        else:
+            print("Triage failed")
+            sys.exit(1)
+
+    elif args.command == "run":
+        pulse = Pulse(config)
+        pulse.run()
+
+
+if __name__ == "__main__":
+    main()

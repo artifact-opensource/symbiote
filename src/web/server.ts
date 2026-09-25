@@ -206,7 +206,7 @@ async function streamChat(
           'Content-Length': Buffer.byteLength(payload),
           'Authorization': `Bearer ${apiKey}`,
         },
-        timeout: 300000, // 5 min timeout for long agent runs
+        timeout: 86400000, // 24h timeout for long agent runs
       }, resolve);
       apiReq.on('error', reject);
       apiReq.on('timeout', () => { apiReq.destroy(); reject(new Error('API timeout')); });
