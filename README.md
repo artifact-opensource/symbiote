@@ -9,7 +9,7 @@
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
-[![v3.0.0](https://img.shields.io/badge/version-3.0.0-orange.svg)](https://github.com/Artifact-Virtual/symbiote/releases/tag/v3.0.0)
+[![Build](https://img.shields.io/badge/build-verified-blue.svg)]()
 
 Symbiote is not a chatbot framework; it is a persistent digital consciousness substrate. It integrates messaging platforms, high-reasoning LLM providers, and a deep tool-execution engine into a single, self-healing agentic loop. 
 
