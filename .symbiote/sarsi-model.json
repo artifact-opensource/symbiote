@@ -1,10 +1,10 @@
 {
-  "version": "1.0.0",
+  "version": "5.0.0",
   "updatedAt": "2026-09-25T21:46:54.810Z",
   "identity": {
     "name": "AVA",
     "role": "Symbiote",
-    "description": "Multi-channel AI agent — persistent daemon, real-time interrupts, tool execution.",
+    "description": "Multi-channel AI agent \u2014 persistent daemon, real-time interrupts, tool execution.",
     "style": "adaptive"
   },
   "goals": [
@@ -153,19 +153,19 @@
     }
   ],
   "metrics": {
-    "totalInteractions": 4,
+    "totalInteractions": 52,
     "totalTokensUsed": 0,
     "averageLatencyMs": 0,
     "toolSuccessRate": 1,
     "routingAccuracy": 1,
-    "lastUpdated": "2026-09-27T13:16:48.305Z"
+    "lastUpdated": "2026-09-27T21:40:52.943Z"
   },
   "ruleHistory": [],
   "confidence": {
-    "p1": 0.7,
+    "p1": 0.76,
     "p2": 0.9,
     "p3": 0.8,
-    "p4": 0.78,
+    "p4": 1,
     "p5": 0.9,
     "c1": 1,
     "c2": 0.8,
@@ -176,5 +176,6 @@
     "t2": 0.9,
     "t3": 0.95,
     "t4": 0.8
-  }
+  },
+  "buildVersion": "5.0.0"
 }

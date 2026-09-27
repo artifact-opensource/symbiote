@@ -1,0 +1,15 @@
+[Unit]
+Description=Symbiote Unified Daemon (Symbiote 5.0)
+After=network.target
+
+[Service]
+Type=simple
+User=adam
+WorkingDirectory=/opt/ava/mach6
+ExecStart=/usr/bin/node /opt/ava/mach6/dist/daemon/unified-daemon.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target

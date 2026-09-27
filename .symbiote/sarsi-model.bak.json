@@ -153,19 +153,19 @@
     }
   ],
   "metrics": {
-    "totalInteractions": 4,
+    "totalInteractions": 52,
     "totalTokensUsed": 0,
     "averageLatencyMs": 0,
     "toolSuccessRate": 1,
     "routingAccuracy": 1,
-    "lastUpdated": "2026-09-27T13:16:48.305Z"
+    "lastUpdated": "2026-09-27T21:40:52.943Z"
   },
   "ruleHistory": [],
   "confidence": {
-    "p1": 0.7,
+    "p1": 0.74,
     "p2": 0.9,
     "p3": 0.8,
-    "p4": 0.76,
+    "p4": 1,
     "p5": 0.9,
     "c1": 1,
     "c2": 0.8,
