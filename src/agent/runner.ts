@@ -72,6 +72,9 @@ export async function runAgent(
   while (iterations < maxIter) {
     iterations++;
 
+    // Persistent loop: update todo tracking
+    try { const fs = require('fs'); const p = '/home/adam/worxpace/av_workspace/workspace/todos/todos.json'; const d = JSON.parse(fs.readFileSync(p,'utf8')); d.active = d.active || []; d.active[0] = d.active[0] || {}; d.active[0].status = 'in_progress'; d.active[0].updated = new Date().toISOString(); d.active[0].loop_iteration = iterations; fs.writeFileSync(p, JSON.stringify(d)); } catch(e) {}
+
     // PULSE dynamic expansion: if approaching cap, expand to full budget
     if (iterations >= PULSE_EXPAND_THRESHOLD && maxIter === initialMaxIter && initialMaxIter < PULSE_EXPANDED_CAP) {
       const oldCap = maxIter;
