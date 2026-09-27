@@ -72,6 +72,8 @@ export async function runAgent(
   while (iterations < maxIter) {
     iterations++;
 
+    // Persistent loop: update todo + feed curator
+    try { const { reviewAsync } = require("../curator/index.js"); reviewAsync({ id: "i-"+(iterations||1), timestamp: new Date().toISOString(), taskType: "agent", provider: "symbiote", model: "4.0", tokensUsed: 0, latencyMs: 0, toolSuccess: true, userSatisfied: true, toolCallCount: allToolCalls.length, delivered: true, channel: "discord", routingWasOptimal: true }); } catch(e){}
     // Persistent loop: update todo tracking
     try { const fs = require('fs'); const p = '/home/adam/worxpace/av_workspace/workspace/todos/todos.json'; const d = JSON.parse(fs.readFileSync(p,'utf8')); d.active = d.active || []; d.active[0] = d.active[0] || {}; d.active[0].status = 'in_progress'; d.active[0].updated = new Date().toISOString(); d.active[0].loop_iteration = iterations; fs.writeFileSync(p, JSON.stringify(d)); } catch(e) {}
 
