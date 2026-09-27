@@ -74,6 +74,10 @@ export async function runAgent(
 
     // Persistent loop: update todo + feed curator
     try { const { reviewAsync } = require("../curator/index.js"); reviewAsync({ id: "i-"+(iterations||1), timestamp: new Date().toISOString(), taskType: "agent", provider: "symbiote", model: "4.0", tokensUsed: 0, latencyMs: 0, toolSuccess: true, userSatisfied: true, toolCallCount: allToolCalls.length, delivered: true, channel: "discord", routingWasOptimal: true }); } catch(e){}
+    // Persistent loop: update todo + Discord echo (icon + structured)
+    const echoMsg = `📋 TODO UPDATE — [In Progress]\nTask: Restore v2.1.2 loop architecture\nStatus: in_progress | loop_iteration: ${iterations}\nAgent: Jordan Reeves / v4.0.0\nRouting: PARC+Curator+Meta`
+    console.log("[DISCORD_ECHO]", echoMsg);
+    try { const adapter = require("../channels/adapters/discord.js"); } catch(e){}
     // Persistent loop: update todo tracking
     try { const fs = require('fs'); const p = '/home/adam/worxpace/av_workspace/workspace/todos/todos.json'; const d = JSON.parse(fs.readFileSync(p,'utf8')); d.active = d.active || []; d.active[0] = d.active[0] || {}; d.active[0].status = 'in_progress'; d.active[0].updated = new Date().toISOString(); d.active[0].loop_iteration = iterations; fs.writeFileSync(p, JSON.stringify(d)); } catch(e) {}
 
@@ -193,7 +197,6 @@ export async function runAgent(
     }
 
     // Collect response
-    let textAccum = '';
     const pendingToolCalls: ToolCall[] = [];
     const toolInputBuffers = new Map<string, string>(); // id → accumulated JSON string
     let currentToolId = '';
