@@ -11,8 +11,8 @@
  */
 
 const EMOJI: Record<string, string> = {
-    terminal: '💻', bash: '💻', shell: '💻', exec: '🧠',
-    read_file: '📄', read: '📄', write_file: '✏️', write: '✏️',
+    terminal: '💻', bash: '💻', shell: '💻', exec: '⚡',
+    read_file: '📖', read: '📖', write_file: '✏️', write: '✏️',
     edit_file: '✏️', patch: '🩹', apply_patch: '🩹',
     search_files: '🔎', grep: '🔎', glob: '🔎', find: '🔎',
     web_search: '🌐', web: '🌐', fetch: '🌐', http: '🌐',
