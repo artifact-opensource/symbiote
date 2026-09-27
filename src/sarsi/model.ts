@@ -161,7 +161,7 @@ export function createDefaultSarsiModel(): SarsiModel {
 // SARSI Store — disk-backed persistence with atomic writes
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
 
 export class SarsiStore {
@@ -341,7 +341,6 @@ export class SarsiStore {
     }
 
     // Atomic rename
-    const { renameSync } = require('fs');
     renameSync(tmpPath, this.filePath);
   }
 }
