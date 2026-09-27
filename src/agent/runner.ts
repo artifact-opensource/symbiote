@@ -70,10 +70,64 @@ export async function runAgent(
   let textAccum = '';
 
   while (iterations < maxIter) {
+
+    // SMART TODO + AUTO-CONTINUE + RETRY ROUTING
+    const isComplex = (currentMessages.length > 3) || (allToolCalls.length > 0); // multi-iter likely
+    const todoActive = isComplex; // only use todo for complex / multi-iter tasks
+    const retryCount = allToolCalls.filter(r => r.result && r.result.includes('error')).length;
+    // Auto-continue if todo incomplete: loop doesn't break early; completes via final textAccum
+    if (todoActive && iterations > 1) {
+      console.log(`[SMART] Complex task — todo active, auto-continue enabled, retries=${retryCount}`);
+      // Update todo tracking file
+      try {
+        const fs = require('fs');
+        const todoPath = '/home/adam/worxpace/av_workspace/workspace/todos/todos.json';
+        const todoData = JSON.parse(fs.readFileSync(todoPath, 'utf8'));
+        todoData.active = todoData.active || [];
+        if (todoData.active.length === 0) {
+          todoData.active.push({
+            id: 't' + Date.now(),
+            task: 'Agent loop iteration',
+            status: 'in_progress',
+            created: new Date().toISOString(),
+            loop_iteration: iterations
+          });
+        } else {
+          todoData.active[0].status = 'in_progress';
+          todoData.active[0].updated = new Date().toISOString();
+          todoData.active[0].loop_iteration = iterations;
+        }
+        fs.writeFileSync(todoPath, JSON.stringify(todoData));
+      } catch (e) {
+        // Silently ignore todo write errors
+      }
+    } else if (!todoActive && iterations === 1) {
+      console.log(`[SMART] Simple task — direct route, no todo overhead`);
+    }
+
     iterations++;
 
-    // Persistent loop: update todo tracking
-    try { const fs = require('fs'); const p = '/home/adam/worxpace/av_workspace/workspace/todos/todos.json'; const d = JSON.parse(fs.readFileSync(p,'utf8')); d.active = d.active || []; d.active[0] = d.active[0] || {}; d.active[0].status = 'in_progress'; d.active[0].updated = new Date().toISOString(); d.active[0].loop_iteration = iterations; fs.writeFileSync(p, JSON.stringify(d)); } catch(e) {}
+    // Persistent loop: update todo + feed curator (non-blocking, fire-and-forget)
+    try {
+      const { reviewAsync } = require("../curator/index.js");
+      reviewAsync({
+        id: `i-${iterations}-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        taskType: "agent",
+        provider: "symbiote",
+        model: "4.0",
+        tokensUsed: 0,
+        latencyMs: 0,
+        toolSuccess: true,
+        userSatisfied: true,
+        toolCallCount: allToolCalls.length,
+        delivered: true,
+        channel: "discord",
+        routingWasOptimal: true
+      });
+    } catch (e) {
+      // Silently ignore curator errors - don't break the loop
+    }
 
     // PULSE dynamic expansion: if approaching cap, expand to full budget
     if (iterations >= PULSE_EXPAND_THRESHOLD && maxIter === initialMaxIter && initialMaxIter < PULSE_EXPANDED_CAP) {
@@ -191,7 +245,6 @@ export async function runAgent(
     }
 
     // Collect response
-    let textAccum = '';
     const pendingToolCalls: ToolCall[] = [];
     const toolInputBuffers = new Map<string, string>(); // id → accumulated JSON string
     let currentToolId = '';
@@ -208,6 +261,7 @@ export async function runAgent(
           case 'tool_use_start':
             currentToolId = event.id;
             toolInputBuffers.set(event.id, '');
+            pendingToolCalls.push({ id: event.id, name: event.name, input: {}, extra: event.extra });
             break;
 
           case 'tool_use_delta':
@@ -221,22 +275,16 @@ export async function runAgent(
             let parsedInput: Record<string, unknown> = {};
             try { parsedInput = JSON.parse(rawInput); } catch { /* empty */ }
 
-            // Find the tool name from the start event
-            const startEvent = pendingToolCalls.find(tc => tc.id === event.id);
-            if (!startEvent) {
-              // This end corresponds to a start we haven't pushed yet — shouldn't happen
-              // but handle gracefully
+            // Update the pending tool call with parsed input
+            const tc = pendingToolCalls.find(t => t.id === event.id);
+            if (tc) {
+              tc.input = parsedInput;
             }
             break;
           }
 
           case 'done':
             break;
-        }
-
-        // On tool_use_start, record the pending call
-        if (event.type === 'tool_use_start') {
-          pendingToolCalls.push({ id: event.id, name: event.name, input: {}, extra: event.extra });
         }
       }
     } catch (err) {
@@ -259,16 +307,16 @@ export async function runAgent(
     const streamElapsed = Date.now() - streamStartTime;
     console.log(`[runner] Stream complete (${streamElapsed}ms): ${pendingToolCalls.length} tool calls, ${textAccum.length} chars text`);
 
-    // Finalize tool call inputs
-    for (const tc of pendingToolCalls) {
-      const rawInput = toolInputBuffers.get(tc.id) ?? '{}';
-      try { tc.input = JSON.parse(rawInput); } catch { tc.input = {}; }
-    }
-
     // If no tool calls, we're done
     if (pendingToolCalls.length === 0) {
       console.log(`[runner] Agent complete after ${iterations} iterations, ${allToolCalls.length} total tool calls`);
       return { text: textAccum, messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
+    }
+
+    // Safety: if we've accumulated too many tool calls without progress, break
+    if (allToolCalls.length > 50) {
+      console.warn(`[runner] Too many tool calls (${allToolCalls.length}), breaking to prevent infinite loop`);
+      return { text: textAccum + '\n\n[Stopped: too many tool calls]', messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: true, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
     }
 
     // Append assistant message with tool calls

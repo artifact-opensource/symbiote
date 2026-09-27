@@ -66,8 +66,8 @@ export interface SymbioteConfig {
 
 const DEFAULT_CONFIG: SymbioteConfig = {
   providers: {},
-  defaultProvider: 'free-ai',
-  defaultModel: 'glm/glm-5.2',
+  defaultProvider: 'openrouter',
+  defaultModel: 'openrouter/free',
   maxTokens: 8192,
   temperature: 0.5,
   maxIterations: 999999,
