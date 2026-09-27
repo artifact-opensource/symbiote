@@ -116,6 +116,7 @@ export async function runAgent(messages: Message[], config: RunnerConfig): Promi
   // Isolate and retain base reference pointer
   let currentMessages = [...messages];
   let iterations = 0;
+  let textAccum = '';
 
   while (iterations < maxIter) {
     iterations++;
@@ -187,7 +188,7 @@ export async function runAgent(messages: Message[], config: RunnerConfig): Promi
     }
 
     // Streaming Event Consumption Block
-    let textAccum = '';
+    textAccum = '';
     let pendingToolCalls: ToolCall[] = [];
     const toolInputBuffers = new Map<string, string>();
 
@@ -283,7 +284,7 @@ export async function runAgent(messages: Message[], config: RunnerConfig): Promi
     // Reset pending tool calls for next iteration
     pendingToolCalls = [];
 
-    recentToolNames = pendingToolCalls.map(tc => tc.name);
+    recentToolNames = toolResults.map(res => res.name);
 
     if (config.abortSignal?.aborted) {
       const abortText = allToolCalls.length > 0 ? `Completed ${allToolCalls.length} tool execution(s). Interrupted — results preserved.` : '';
@@ -296,8 +297,9 @@ export async function runAgent(messages: Message[], config: RunnerConfig): Promi
     }
   }
 
-  // Ensure never silent after completed work — synthesize brief status
-  let finalText = '[Max iterations reached]';
-  if (allToolCalls.length > 0) finalText = `Completed ${allToolCalls.length} tool execution(s). Results saved — continuing or interrupted.`;
-  return { text: finalText, messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: true, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
+  // Ensure never silent after completed work — return actual accumulated text or brief status
+  const hitMax = iterations >= maxIter;
+  let finalText = textAccum.trim() || (hitMax ? '[Max iterations reached]' : '[Agent completed]');
+  if (!textAccum.trim() && allToolCalls.length > 0) finalText = `Completed ${allToolCalls.length} tool execution(s). Results preserved.`;
+  return { text: finalText, messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: hitMax, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
 }
