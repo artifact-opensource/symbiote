@@ -31,11 +31,11 @@
     ],
     "token": "${DISCORD_BOT_TOKEN}"
   },
-  "maxIterations": 999999,
+  "maxIterations": 5,
   "maxTokens": 8192,
-  "maxTurnDurationMs": 86400000,
+  "maxTurnDurationMs": 30000,
   "allowLongRunningTasks": true,
-  "autoContinueOnTimeout": true,
+  "autoContinueOnTimeout": false,
   "ownerIds": [
     "193011943382974466"
   ],
@@ -106,9 +106,9 @@
     "discord": {
       "toolProgress": true,
       "reactionMoods": {
-        "positive": "👍",
-        "negative": "👎",
-        "neutral": "👁"
+        "positive": "\ud83d\udc4d",
+        "negative": "\ud83d\udc4e",
+        "neutral": "\ud83d\udc41"
       },
       "reactions": true,
       "autoContinue": true
