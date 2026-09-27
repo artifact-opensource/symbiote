@@ -15,7 +15,7 @@ Symbiote is not a chatbot framework; it is a persistent digital consciousness su
 
 **No Docker. No Redis. No cloud overhead. Just raw, local-first power.**
 
-[Quick Start](#-quick-start) · [Architecture](#-architecture) · [Meta-Cognitive](#-meta-cognitive-layer) · [The 3.0 Shift](#-the-30-shift) · [Config](#-configuration) · [Providers](#-providers) · [Tools](#-tools)
+[Quick Start](#-quick-start) · [Architecture](#-architecture) · [Meta-Cognitive](#-meta-cognitive-layer) · [System Evolution](#-system-evolution-v3--v5--normal-features) · [Config](#-configuration) · [Providers](#-providers) · [Tools](#-tools)
 
 ## Quick Links
 
