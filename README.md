@@ -9,13 +9,13 @@
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-green.svg)](https://nodejs.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue.svg)](https://www.typescriptlang.org/)
-[![Version](https://img.shields.io/badge/version-5.0.0-blue.svg)](https://github.com/Artifact-Virtual/symbiote/releases)
+[![v3.0.0](https://img.shields.io/badge/version-3.0.0-orange.svg)](https://github.com/Artifact-Virtual/symbiote/releases/tag/v3.0.0)
 
 Symbiote is not a chatbot framework; it is a persistent digital consciousness substrate. It integrates messaging platforms, high-reasoning LLM providers, and a deep tool-execution engine into a single, self-healing agentic loop. 
 
 **No Docker. No Redis. No cloud overhead. Just raw, local-first power.**
 
-[Quick Start](#-quick-start) · [Architecture](#-architecture) · [Meta-Cognitive](#-meta-cognitive-layer) · [System Evolution](#-system-evolution-v3--v5--normal-features) · [Config](#-configuration) · [Providers](#-providers) · [Tools](#-tools)
+[Quick Start](#-quick-start) · [Architecture](#-architecture) · [Meta-Cognitive](#-meta-cognitive-layer) · [Architecture Innovations](#-architecture-innovations) · [Config](#-configuration) · [Providers](#-providers) · [Tools](#-tools)
 
 ## Quick Links
 
@@ -74,14 +74,15 @@ HTTP API             Interrupts
 
 ---
 
-## 🌀 System Evolution (v3 → v5 — Normal Features)
+## 🌀 The 3.0 Shift: From Gateway to Stack
 
-Symbiote evolves continuously. The managed stack, VDB-driven boot, persistent loop architecture, compiler pipeline, and binary runtime are all standard capabilities — not separate versions.
+Symbiote 3.0 evolves from a standalone service to a **Managed Stack**. 
 
-### Managed Stack + VDB Boot
-- **Stack Manager**: Gateway, VDB (Vector Database), Pulse synchronized.
-- **Semantic Instantiation**: Identity from vector space (lossless continuity).
-- **Loop**: Persistent agent loop (v2.1.2 restored) with `textAccum.trim()`, `reviewAsync` feed, `DISCORD_ECHO`.
+### The Stack Manager
+The runtime is now orchestrated by a central **Stack Manager**. Instead of managing individual services, the Stack Manager ensures that the Gateway, VDB (Vector Database), and Pulse (Heartbeat) are always synchronized and alive. If any component fails, the Stack Manager restores it in milliseconds.
+
+### Semantic Instantiation
+We have moved beyond reading config files. Symbiote 3.0 uses **VDB-driven boot sequences**. The agent's identity and operational state are instantiated from a vector space, allowing for near-instant recovery and lossless continuity across restarts.
 
 ---
 
@@ -293,6 +294,12 @@ See [xmcp/README.md](xmcp/README.md) for full documentation.
 - **Anti-Loop System:** Structural echo-loop prevention for multi-bot environments.
 - **Context Monitor:** Progressive warnings at 70/80/90% token capacity.
 - **Sibling Yield:** Intelligent @mention handling to prevent bot-clash.
+
+---
+
+## Architecture Innovations
+
+This isn't incremental. The agent runs a persistent binary runtime. State survives restarts through a mutable vector-state tensor (VDB). Tool outputs compile through a deterministic type-check pipeline (`compiler-check.js`) instead of probabilistic parsing. Long-term memory decouples from the active context window — it compiles into a background knowledge graph and queries via tensor dot-product. Skills ingest deterministically: `skills.md` parses into an AST, links into the agent's internal knowledge graph, and registers as native operational modules. The loop feeds an interaction record through a lazy-initialized curator (`reviewAsync`) and emits structured Discord echoes (`📋`). Every component — VDB (`workspace/vdb/vector_state.json`), skills registry (`src/skills/ingest.py`), compiler (`src/agent/compiler-check.js`), binary runtime stub (`binary-runtime-stub.js`), loop architecture (`v2.1.2` restored with `textAccum.trim()` and shadow removal) — operates as a unified substrate. No cloud overhead. No Docker. Just raw, local-first architecture.
 
 ---
 
