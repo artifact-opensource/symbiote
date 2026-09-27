@@ -70,6 +70,18 @@ export async function runAgent(
   let textAccum = '';
 
   while (iterations < maxIter) {
+
+    // SMART TODO + AUTO-CONTINUE + RETRY ROUTING
+    const isComplex = (currentMessages.length > 3) || (allToolCalls.length > 0); // multi-iter likely
+    const todoActive = isComplex; // only use todo for complex / multi-iter tasks
+    const retryCount = allToolCalls.filter(r => r.result && r.result.includes('error')).length;
+    // Auto-continue if todo incomplete: loop doesn't break early; completes via final textAccum
+    if (todoActive && iterations > 1) {
+      console.log(`[SMART] Complex task — todo active, auto-continue enabled, retries=${retryCount}`);
+    } else if (!todoActive && iterations === 1) {
+      console.log(`[SMART] Simple task — direct route, no todo overhead`);
+    }
+
     iterations++;
 
     // Persistent loop: update todo + feed curator
