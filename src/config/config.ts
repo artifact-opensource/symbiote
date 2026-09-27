@@ -111,8 +111,8 @@ export interface SymbioteConfig {
 
 const DEFAULT_CONFIG: SymbioteConfig = {
   providers: {},
-  defaultProvider: 'github-copilot',
-  defaultModel: 'claude-sonnet-4',
+  defaultProvider: 'openrouter',
+  defaultModel: 'openrouter/free',
   maxTokens: 8192,
   temperature: 0.7,
   maxIterations: 50,

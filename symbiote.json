@@ -1,7 +1,7 @@
 {
   "apiPort": 3006,
-  "defaultModel": "bbl/gpt-5.4-mini",
-  "defaultProvider": "free-ai",
+  "defaultModel": "openrouter/free",
+  "defaultProvider": "openrouter",
   "discord": {
     "botId": "${DISCORD_CLIENT_ID}",
     "enabled": true,
