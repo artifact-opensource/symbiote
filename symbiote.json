@@ -1,0 +1,118 @@
+{
+  "apiPort": 3006,
+  "defaultModel": "openrouter/free",
+  "defaultProvider": "openrouter",
+  "discord": {
+    "botId": "${DISCORD_DEFAULT_BOT_CLIENT_ID}",
+    "enabled": true,
+    "policy": {
+      "allowedGroups": [],
+      "allowedSenders": [
+        193011943382974466,
+        1520403264762282075,
+        1520406825353085092,
+        1520408504274518147,
+        1520407159324672073,
+        1520407680454365284,
+        1520408074119282859
+      ],
+      "dmPolicy": "allowlist",
+      "groupPolicy": "mention-only",
+      "requireMention": true
+    },
+    "siblingBotIds": [
+      1520403264762282075,
+      1520406825353085092,
+      1520408504274518147,
+      1520407159324672073,
+      1520407680454365284,
+      1520408074119282859,
+      193011943382974466
+    ],
+    "token": "${DISCORD_DEFAULT_BOT_TOKEN}"
+  },
+  "maxIterations": 99999,
+  "maxTokens": 8192,
+  "maxTurnDurationMs": 600000,
+  "allowLongRunningTasks": true,
+  "autoContinueOnTimeout": true,
+  "ownerIds": [
+    "193011943382974466"
+  ],
+  "providers": {
+    "anthropic": {},
+    "artifact-engine": {
+      "baseUrl": "http://localhost:8080/v1",
+      "defaultModel": "raven-v1-ollama.gguf",
+      "enabled": true,
+      "timeoutMs": 600000
+    },
+    "github-copilot": {
+      "timeoutMs": 600000
+    },
+    "gladius": {
+      "baseUrl": "http://127.0.0.1:8741",
+      "timeoutMs": 600000
+    },
+    "gemini": {
+      "timeoutMs": 600000
+    },
+    "groq": {
+      "baseUrl": "https://api.groq.com/openai",
+      "timeoutMs": 600000
+    },
+    "nvidia": {
+      "timeoutMs": 600000
+    },
+    "ollama": {
+      "baseUrl": "http://127.0.0.1:11434",
+      "timeoutMs": 240000
+    },
+    "openrouter": {
+      "apiKey": "${OPENROUTER_API_KEY}",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "enabled": true,
+      "timeoutMs": 600000
+    },
+    "openai": {
+      "timeoutMs": 600000
+    },
+    "xai": {
+      "timeoutMs": 600000
+    }
+  },
+  "sessionsDir": "/opt/ava/mach6/.sessions",
+  "temperature": 0.3,
+  "whatsapp": {
+    "authDir": "~/.symbiote/whatsapp-auth",
+    "autoRead": true,
+    "enabled": false,
+    "policy": {
+      "allowedGroups": [],
+      "allowedSenders": [
+        193011943382974466,
+        1520403264762282075,
+        1520406825353085092,
+        1520408504274518147,
+        1520407159324672073,
+        1520407680454365284,
+        1520408074119282859
+      ],
+      "dmPolicy": "allowlist",
+      "groupPolicy": "mention-only"
+    }
+  },
+  "workspace": ".",
+  "communication": {
+    "discord": {
+      "toolProgress": true,
+      "reactionMoods": {
+        "positive": "\ud83d\udc4d",
+        "negative": "\ud83d\udc4e",
+        "neutral": "\ud83d\udc41"
+      },
+      "reactions": true,
+      "autoContinue": true
+    }
+  }
+}
