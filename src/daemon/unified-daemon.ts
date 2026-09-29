@@ -32,15 +32,32 @@ class UnifiedDaemon {
             const raw = fs.readFileSync(this.pidFile, 'utf8').trim();
             if (!raw) return false;
             const pid = Number(raw);
-            if (!Number.isInteger(pid)) {
+            if (!Number.isInteger(pid) || pid <= 0) {
                 fs.unlinkSync(this.pidFile);
                 return false;
             }
+
             try {
                 process.kill(pid, 0);
-                return true;
             } catch {
                 try { fs.unlinkSync(this.pidFile); } catch {}
+                return false;
+            }
+
+            try {
+                const cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+                const isUnified = cmdline.includes('unified-daemon.js') || cmdline.includes('symbiote-unified');
+                const isGateway = cmdline.includes('/opt/ava/mach6/dist/gateway/daemon.js');
+                if (!isUnified && !isGateway) {
+                    console.warn(`[Boot] Stale PID lock detected at ${pid}; removing /tmp/symbiote-unified.pid.`);
+                    try { fs.unlinkSync(this.pidFile); } catch {}
+                    return false;
+                }
+                return true;
+            } catch {
+                // Some stale PIDs may be gone or inaccessible; treat them as not active.
+                try { fs.unlinkSync(this.pidFile); } catch {}
+                return false;
             }
         } catch {
             // no existing lock file
