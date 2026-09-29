@@ -1370,7 +1370,18 @@ export class SymbioteGateway {
           break;
         }
 
-        // Check if BLINK is needed
+        // Check if BLINK is needed. If the runner already injected a resume message,
+        // avoid double-advancing the same continuation cycle.
+        const blinkAlreadyInjected = result.maxIterationsHit && result.messages.some((msg) =>
+          msg.role === 'user' && typeof msg.content === 'string' && msg.content.includes('BLINK COMPLETE')
+        );
+
+        if (result.maxIterationsHit && blinkAlreadyInjected) {
+          currentSessionMessages = result.messages;
+          await new Promise(r => setTimeout(r, blinkCtrl.getCooldownMs()));
+          continue;
+        }
+
         if (result.maxIterationsHit && blinkCtrl.needsBlink(true)) {
           // Record the blink
           blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);

@@ -107,6 +107,27 @@ function updateTodoState(iterations: number): void {
   }
 }
 
+function maybeProceedWithBlinkContinuation(
+  messages: Message[],
+  iterations: number,
+  toolCalls: RunResult['toolCalls'],
+  blinkController?: BlinkController,
+): Message[] {
+  if (!blinkController) return messages;
+  if (!blinkController.needsBlink(true)) return messages;
+
+  blinkController.recordBlink(iterations, toolCalls.length);
+
+  const nextMessages = [...messages];
+  const last = nextMessages[nextMessages.length - 1];
+  if (last && last.role === 'assistant' && last.content === '[Max iterations reached]') {
+    nextMessages.pop();
+  }
+
+  nextMessages.push({ role: 'user', content: blinkController.getResumeMessage() });
+  return nextMessages;
+}
+
 /**
  * Run the agent loop: send messages to LLM, process tool calls, repeat until done.
  * 
@@ -232,9 +253,10 @@ export async function runAgent(
         });
       }
       if (!iterCheck.ok) {
+        const budgetMessages = maybeProceedWithBlinkContinuation(currentMessages, iterations, allToolCalls, config.blinkController);
         return {
           text: `[${iterCheck.warning}]`,
-          messages: currentMessages,
+          messages: budgetMessages,
           toolCalls: allToolCalls,
           iterations,
           maxIterationsHit: true,
@@ -358,7 +380,8 @@ export async function runAgent(
     // Safety: if we've accumulated too many tool calls without progress, break
     if (allToolCalls.length > 50) {
       console.warn(`[runner] Too many tool calls (${allToolCalls.length}), breaking to prevent infinite loop`);
-      return { text: textAccum + '\n\n[Stopped: too many tool calls]', messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: true, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
+      const budgetMessages = maybeProceedWithBlinkContinuation(currentMessages, iterations, allToolCalls, config.blinkController);
+      return { text: textAccum + '\n\n[Stopped: too many tool calls]', messages: budgetMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: true, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
     }
 
     // Append assistant message with tool calls
@@ -433,9 +456,10 @@ export async function runAgent(
 
   // Max iterations reached
   console.warn(`[runner] Max iterations (${maxIter}) reached after ${allToolCalls.length} tool calls`);
+  const budgetMessages = maybeProceedWithBlinkContinuation(currentMessages, iterations, allToolCalls, config.blinkController);
   return {
     text: textAccum.trim() || '[Max iterations reached]',
-    messages: currentMessages,
+    messages: budgetMessages,
     toolCalls: allToolCalls,
     iterations,
     maxIterationsHit: true,
