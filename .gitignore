@@ -34,3 +34,5 @@ HEARTBEAT.md
 .DS_Store
 Thumbs.db
 *.swp
+.symbiote/sarsi-model.bak.json
+.symbiote/sarsi-model.json
