@@ -9,11 +9,11 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 
-const DEFAULT_CAP = 999999;
-const EXPANDED_CAP = 999999;
-const EXPAND_THRESHOLD = 999999;
+const DEFAULT_CAP = 1000;
+const EXPANDED_CAP = 2000;
+const EXPAND_THRESHOLD = 750;
 const REVERT_WINDOW = 3;       // Check last N sessions
-const REVERT_THRESHOLD = 999999;   // If all N sessions < this, revert
+const REVERT_THRESHOLD = 500;   // If all N sessions < this, revert
 
 interface PulseState {
   effectiveCap: number;

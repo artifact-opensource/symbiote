@@ -94,7 +94,6 @@ export class DiscordAdapter extends BaseAdapter {
   private token = '';
   private botId = '';
   private siblingBotIds: Set<string> = new Set();
-  private lastConfig: DiscordAdapterConfig | null = null;
   /** Registered slash command handlers (command name → handler) */
   private commandHandlers = new Map<string, DiscordCommandHandler>();
 
@@ -112,14 +111,11 @@ export class DiscordAdapter extends BaseAdapter {
 
   protected async platformConnect(config: ChannelConfig): Promise<void> {
     const discordConfig = config as DiscordAdapterConfig;
-    this.lastConfig = { ...discordConfig };
     this.token = discordConfig.token;
 
     // Sibling bots are peers — never filter them out
     if (discordConfig.siblingBotIds?.length) {
       this.siblingBotIds = new Set(discordConfig.siblingBotIds);
-    } else {
-      this.siblingBotIds = new Set();
     }
 
     this.client = new Client({
@@ -194,13 +190,9 @@ export class DiscordAdapter extends BaseAdapter {
   }
 
   protected async platformReconnect(): Promise<void> {
-    console.log(`[${this.id}] reconnecting Discord adapter — preserving upgraded config`);
-    await new Promise(r => setTimeout(r, 3000));
     this.client?.destroy();
     this.client = undefined;
-
-    const reconnectConfig = this.lastConfig ?? ({ token: this.token } as DiscordAdapterConfig);
-    await this.platformConnect(reconnectConfig);
+    await this.platformConnect({ token: this.token } as ChannelConfig);
   }
 
   // ── Inbound Handlers ──────────────────────────────────────────────────

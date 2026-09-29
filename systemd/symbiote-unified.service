@@ -13,3 +13,4 @@ Environment=NODE_ENV=production
 
 [Install]
 WantedBy=default.target
+EnvironmentFile=/opt/ava/mach6/.env

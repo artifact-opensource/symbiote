@@ -1,6 +1,8 @@
 // Symbiote — Core Agent Runner
 // The heart: prompt → LLM → tool calls → loop → response
 
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { Message, ToolCall, StreamEvent, Provider, ProviderConfig, ToolDef } from '../providers/types.js';
 import { truncateContext } from './context.js';
 import { ContextMonitor } from './context-monitor.js';
@@ -44,6 +46,67 @@ export interface RunResult {
   temperatureHistory?: Array<{ iteration: number; category: TaskCategory; temperature: number }>;
 }
 
+function getTodoPath(): string {
+  const candidates = [
+    join(process.cwd(), '.sessions', 'todos.json'),
+    join(process.cwd(), '.sessions', 'workspace', 'todos', 'todos.json'),
+    join(process.cwd(), 'workspace', 'todos', 'todos.json'),
+    join(process.cwd(), 'todos.json'),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      if (candidate && readFileSync(candidate, 'utf8')) {
+        return candidate;
+      }
+    } catch {
+      // Keep trying the next candidate.
+    }
+  }
+
+  return candidates[0];
+}
+
+function updateTodoState(iterations: number): void {
+  try {
+    const todoPath = getTodoPath();
+    mkdirSync(dirname(todoPath), { recursive: true });
+
+    let todoData: { active?: Array<Record<string, unknown>>; completed?: Array<Record<string, unknown>> } = { active: [], completed: [] };
+    try {
+      const raw = readFileSync(todoPath, 'utf8');
+      todoData = raw.trim() ? JSON.parse(raw) : { active: [], completed: [] };
+    } catch {
+      // initialize an empty state when the file is missing or malformed
+    }
+
+    if (!Array.isArray(todoData.active)) todoData.active = [];
+    if (!Array.isArray(todoData.completed)) todoData.completed = [];
+
+    const active = todoData.active as Array<Record<string, unknown>>;
+    if (active.length === 0) {
+      active.push({
+        id: 't' + Date.now(),
+        task: 'Agent loop iteration',
+        status: 'in_progress',
+        created: new Date().toISOString(),
+        loop_iteration: iterations,
+      });
+    } else {
+      active[0] = {
+        ...active[0],
+        status: 'in_progress',
+        updated: new Date().toISOString(),
+        loop_iteration: iterations,
+      };
+    }
+
+    writeFileSync(todoPath, JSON.stringify({ ...todoData, active }, null, 2));
+  } catch {
+    // Best effort only; do not fail the agent loop on stale or missing todo state.
+  }
+}
+
 /**
  * Run the agent loop: send messages to LLM, process tool calls, repeat until done.
  * 
@@ -57,7 +120,7 @@ export async function runAgent(
   messages: Message[],
   config: RunnerConfig,
 ): Promise<RunResult> {
-  const initialMaxIter = config.maxIterations ?? 25;
+  const initialMaxIter = config.maxIterations ?? 999999;
   const PULSE_EXPAND_THRESHOLD = 18;
   const PULSE_EXPANDED_CAP = 100;
   let maxIter = initialMaxIter;
@@ -78,55 +141,34 @@ export async function runAgent(
     // Auto-continue if todo incomplete: loop doesn't break early; completes via final textAccum
     if (todoActive && iterations > 1) {
       console.log(`[SMART] Complex task — todo active, auto-continue enabled, retries=${retryCount}`);
-      // Update todo tracking file
-      try {
-        const fs = require('fs');
-        const todoPath = '/home/adam/worxpace/av_workspace/workspace/todos/todos.json';
-        const todoData = JSON.parse(fs.readFileSync(todoPath, 'utf8'));
-        todoData.active = todoData.active || [];
-        if (todoData.active.length === 0) {
-          todoData.active.push({
-            id: 't' + Date.now(),
-            task: 'Agent loop iteration',
-            status: 'in_progress',
-            created: new Date().toISOString(),
-            loop_iteration: iterations
-          });
-        } else {
-          todoData.active[0].status = 'in_progress';
-          todoData.active[0].updated = new Date().toISOString();
-          todoData.active[0].loop_iteration = iterations;
-        }
-        fs.writeFileSync(todoPath, JSON.stringify(todoData));
-      } catch (e) {
-        // Silently ignore todo write errors
-      }
+      updateTodoState(iterations);
     } else if (!todoActive && iterations === 1) {
       console.log(`[SMART] Simple task — direct route, no todo overhead`);
     }
 
     iterations++;
 
-    // Persistent loop: update todo + feed curator (non-blocking, fire-and-forget)
+    // Persistent loop: best-effort curator notification without failing the turn.
     try {
-      const { reviewAsync } = require("../curator/index.js");
-      reviewAsync({
-        id: `i-${iterations}-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        taskType: "agent",
-        provider: "symbiote",
-        model: "4.0",
-        tokensUsed: 0,
-        latencyMs: 0,
-        toolSuccess: true,
-        userSatisfied: true,
-        toolCallCount: allToolCalls.length,
-        delivered: true,
-        channel: "discord",
-        routingWasOptimal: true
-      });
-    } catch (e) {
-      // Silently ignore curator errors - don't break the loop
+      await import('../curator/index.js').then(({ reviewAsync }) => {
+        reviewAsync({
+          id: `i-${iterations}-${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          taskType: 'agent',
+          provider: 'symbiote',
+          model: '4.0',
+          tokensUsed: 0,
+          latencyMs: 0,
+          toolSuccess: true,
+          userSatisfied: true,
+          toolCallCount: allToolCalls.length,
+          delivered: true,
+          channel: 'discord',
+          routingWasOptimal: true,
+        });
+      }).catch(() => undefined);
+    } catch {
+      // Best effort only; a missing curator implementation must never stop an agent run.
     }
 
     // PULSE dynamic expansion: if approaching cap, expand to full budget

@@ -30,7 +30,7 @@ class UnifiedDaemon {
         gateway: {
             name: 'Gateway',
             command: 'node',
-            args: ['/opt/ava/mach6/mach6-core/dist/gateway/daemon.js', '--config=/opt/ava/mach6/symbiote.json'],
+            args: ['/opt/ava/mach6/dist/gateway/daemon.js', '--config=/opt/ava/mach6/symbiote.json'],
             critical: true,
         }
     };

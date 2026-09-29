@@ -114,5 +114,37 @@
       "reactions": true,
       "autoContinue": true
     }
+  },
+  "webPort": 3008,
+  "channels": {
+    "discord": {
+      "botId": "${DISCORD_DEFAULT_BOT_CLIENT_ID}",
+      "enabled": true,
+      "policy": {
+        "allowedGroups": [],
+        "allowedSenders": [
+          193011943382974466,
+          1520403264762282075,
+          1520406825353085092,
+          1520408504274518147,
+          1520407159324672073,
+          1520407680454365284,
+          1520408074119282859
+        ],
+        "dmPolicy": "allowlist",
+        "groupPolicy": "mention-only",
+        "requireMention": true
+      },
+      "siblingBotIds": [
+        1520403264762282075,
+        1520406825353085092,
+        1520408504274518147,
+        1520407159324672073,
+        1520407680454365284,
+        1520408074119282859,
+        193011943382974466
+      ],
+      "token": "${DISCORD_DEFAULT_BOT_TOKEN}"
+    }
   }
 }
