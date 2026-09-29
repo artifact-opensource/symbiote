@@ -173,6 +173,7 @@ export class SymbioteGateway {
   private model: string;
   private systemPrompt: string;
   private shutdownRequested = false;
+  private standbyMode = false;
   private heartbeat: HeartbeatScheduler;
   private subAgentManager: SubAgentManager;
   private pulseBudget: PulseBudgetManager;
@@ -933,6 +934,11 @@ export class SymbioteGateway {
   private async handleEnvelope(envelope: BusEnvelope): Promise<void> {
     const sessionId = envelope.sessionId!;
 
+    if (this.standbyMode) {
+      console.log(`${palette.dim}  [gateway]${palette.reset} ${palette.yellow}Standby mode${palette.reset} — ignoring inbound message for ${palette.violet}${sessionId}${palette.reset}`);
+      return;
+    }
+
     // ── Forward Routes ───────────────────────────────────────────────────
     // If this chatId is mapped to a sibling gateway (e.g. Ava), forward
     // the message via HTTP API instead of processing locally.
@@ -1028,6 +1034,21 @@ export class SymbioteGateway {
 
   private handleInterrupt(envelope: BusEnvelope): void {
     const sessionId = envelope.sessionId!;
+    const text = String(envelope.payload.text ?? '').trim();
+    const isFullStopKill = /^\.{1,}$/.test(text);
+
+    if (isFullStopKill) {
+      console.log(`${palette.dim}  [gateway]${palette.reset} ${palette.yellow}Global kill switch${palette.reset} — canceling all active turns and entering standby`);
+      this.standbyMode = true;
+      for (const [activeSessionId, turn] of this.activeTurns) {
+        turn.abortController.abort('full_stop');
+        this.channelRegistry.setSessionActive(activeSessionId, false);
+      }
+      this.activeTurns.clear();
+      this.pendingEnvelopes.clear();
+      return;
+    }
+
     const active = this.activeTurns.get(sessionId);
     if (!active) return;
 

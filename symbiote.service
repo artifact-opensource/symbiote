@@ -1,0 +1,18 @@
+[Unit]
+Description=Symbiote Core Daemon
+After=network.target
+Requires=network.target
+
+[Service]
+Type=forking
+User=adam
+WorkingDirectory=/opt/ava/mach6
+ExecStart=/usr/bin/setsid node dist/gateway/daemon.js --config=symbiote.json > /tmp/mach6.log 2>&1 &
+ExecStop=/bin/pkill -f "node dist/gateway/daemon.js"
+Restart=always
+RestartSec=5
+KillMode=process
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -51,32 +51,32 @@ export interface RoutingGoal {
   id: string;
   description: string;
   priority: 'critical' | 'high' | 'medium' | 'low';
-  metric: string; // e.g., 'latency', 'cost', 'quality', 'reliability'
+  metric: string;
   target: number;
-  weight: number; // 0..1
+  weight: number;
 }
 
 export interface ProviderRule {
   id: string;
-  taskType: string; // e.g., 'code', 'reasoning', 'creative', 'simple_qa', 'long_context'
+  taskType: string;
   provider: string;
   model: string;
-  priority: number; // 0..1 — higher = more preferred
-  conditions?: string[]; // e.g., ['context_length > 100000', 'has_code = true']
+  priority: number;
+  conditions?: string[];
   rationale?: string;
 }
 
 export interface ChannelRule {
   id: string;
   channel: 'discord' | 'whatsapp' | 'http' | 'all';
-  behavior: string; // e.g., 'concise_responses', 'voice_transcription', 'markdown_enabled'
+  behavior: string;
   enabled: boolean;
   config?: Record<string, unknown>;
 }
 
 export interface ToolRule {
   id: string;
-  operation: string; // e.g., 'file_read', 'web_fetch', 'exec', 'memory_search'
+  operation: string;
   preferredTool: string;
   fallbackTool?: string;
   maxRetries: number;
@@ -94,9 +94,7 @@ export interface RuleChange {
   after?: unknown;
   source: 'curator' | 'meta' | 'manual' | 'bootstrap';
   reason: string;
-  /** Whether this change improved outcomes (verified by Meta^n) */
   verified: boolean;
-  /** Rollback possible */
   rollback: boolean;
 }
 
@@ -161,8 +159,8 @@ export function createDefaultSarsiModel(): SarsiModel {
 // SARSI Store — disk-backed persistence with atomic writes
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, renameSync } from 'fs';
-import { join, dirname } from 'path';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, renameSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 
 export class SarsiStore {
   private filePath: string;
@@ -233,43 +231,46 @@ export class SarsiStore {
     const entry = this.model.ruleHistory.find(h => h.id === changeId);
     if (!entry || !entry.rollback) return false;
 
-    // Find the rule and restore it
-    switch (entry.ruleType) {
-      case 'provider':
-        const pIdx = this.model.providerRules.findIndex(r => r.id === entry.ruleId);
-        if (entry.change === 'remove' && entry.before) {
-          this.model.providerRules.push(entry.before as ProviderRule);
-        } else if (entry.change === 'add') {
-          if (pIdx >= 0) this.model.providerRules.splice(pIdx, 1);
-        } else if (entry.change === 'modify' && entry.before) {
-          if (pIdx >= 0) this.model.providerRules[pIdx] = entry.before as ProviderRule;
-        }
-        break;
-      case 'channel':
-        const cIdx = this.model.channelRules.findIndex(r => r.id === entry.ruleId);
-        if (entry.change === 'remove' && entry.before) {
-          this.model.channelRules.push(entry.before as ChannelRule);
-        } else if (entry.change === 'add') {
-          if (cIdx >= 0) this.model.channelRules.splice(cIdx, 1);
-        } else if (entry.change === 'modify' && entry.before) {
-          if (cIdx >= 0) this.model.channelRules[cIdx] = entry.before as ChannelRule;
-        }
-        break;
-      case 'tool':
-        const tIdx = this.model.toolRules.findIndex(r => r.id === entry.ruleId);
-        if (entry.change === 'remove' && entry.before) {
-          this.model.toolRules.push(entry.before as ToolRule);
-        } else if (entry.change === 'add') {
-          if (tIdx >= 0) this.model.toolRules.splice(tIdx, 1);
-        } else if (entry.change === 'modify' && entry.before) {
-          if (tIdx >= 0) this.model.toolRules[tIdx] = entry.before as ToolRule;
-        }
-        break;
+    const change = this.model.ruleHistory.find(h => h.id === changeId);
+    if (change) {
+      // Apply rollback logic based on change type
+      switch (change.ruleType) {
+        case 'provider':
+          const pIdx = this.model.providerRules.findIndex(r => r.id === change.ruleId);
+          if (entry.change === 'remove' && entry.before) {
+            this.model.providerRules.push(entry.before as ProviderRule);
+          } else if (entry.change === 'add') {
+            if (pIdx >= 0) this.model.providerRules.splice(pIdx, 1);
+          } else if (entry.change === 'modify' && entry.before) {
+            if (pIdx >= 0) this.model.providerRules[pIdx] = entry.before as ProviderRule;
+          }
+          break;
+        case 'channel':
+          const cIdx = this.model.channelRules.findIndex(r => r.id === change.ruleId);
+          if (entry.change === 'remove' && entry.before) {
+            this.model.channelRules.push(entry.before as ChannelRule);
+          } else if (entry.change === 'add') {
+            if (cIdx >= 0) this.model.channelRules.splice(cIdx, 1);
+          } else if (entry.change === 'modify' && entry.before) {
+            if (cIdx >= 0) this.model.channelRules[cIdx] = entry.before as ChannelRule;
+          }
+          break;
+        case 'tool':
+          const tIdx = this.model.toolRules.findIndex(r => r.id === change.ruleId);
+          if (entry.change === 'remove' && entry.before) {
+            this.model.toolRules.push(entry.before as ToolRule);
+          } else if (entry.change === 'add') {
+            if (tIdx >= 0) this.model.toolRules.splice(tIdx, 1);
+          } else if (entry.change === 'modify' && entry.before) {
+            if (tIdx >= 0) this.model.toolRules[tIdx] = entry.before as ToolRule;
+          }
+          break;
+      }
+      this.persist();
+      console.log(`[SARSI] Rolled back change ${changeId} (${change.ruleType} ${change.ruleId})`);
+      return true;
     }
-
-    this.persist();
-    console.log(`[SARSI] Rolled back change ${changeId} (${entry.ruleType} ${entry.ruleId})`);
-    return true;
+    return false;
   }
 
   /** Update metrics snapshot */

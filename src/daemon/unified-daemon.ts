@@ -27,6 +27,84 @@ class UnifiedDaemon {
     private bootSequence: string[] = ['gateway'];
     private readonly pidFile = '/tmp/symbiote-unified.pid';
 
+    private readonly candidatePatterns = [
+        '/opt/ava/mach6/dist/gateway/daemon.js',
+        '/opt/ava/mach6/dist/daemon/unified-daemon.js',
+        'symbiote-unified',
+        'node /opt/ava/mach6/dist/gateway/daemon.js',
+        'node /opt/ava/mach6/dist/daemon/unified-daemon.js',
+    ];
+
+    private killProcessTree(pid: number): void {
+        if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return;
+
+        try {
+            process.kill(pid, 'SIGTERM');
+        } catch {
+            // Already gone — ignore.
+        }
+
+        setTimeout(() => {
+            try {
+                process.kill(pid, 0);
+                try { process.kill(pid, 'SIGKILL'); } catch {}
+            } catch {
+                // Already dead.
+            }
+        }, 1500);
+    }
+
+    private cleanupStaleInstances(): void {
+        const seen = new Set<number>();
+
+        try {
+            const raw = fs.readFileSync(this.pidFile, 'utf8').trim();
+            if (raw) {
+                const pid = Number(raw);
+                if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) {
+                    seen.add(pid);
+                }
+            }
+        } catch {
+            // no pid lock; continue
+        }
+
+        try {
+            const ps = require('child_process').execSync('ps -eo pid,cmd --no-headers', { encoding: 'utf8' }) as string;
+            for (const line of ps.split('\n')) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+
+                const match = trimmed.match(/^\s*(\d+)\s+(.+)$/);
+                if (!match) continue;
+
+                const pid = Number(match[1]);
+                const cmd = match[2];
+                if (pid === process.pid) continue;
+
+                const isSymbioteCandidate = this.candidatePatterns.some(pattern => cmd.includes(pattern));
+                if (!isSymbioteCandidate) continue;
+
+                seen.add(pid);
+            }
+        } catch {
+            // Best effort only.
+        }
+
+        if (seen.size === 0) {
+            try { fs.rmSync(this.pidFile, { force: true }); } catch {}
+            return;
+        }
+
+        const pids = [...seen].sort((a, b) => a - b);
+        console.warn(`[Boot] Cleaning stale Symbiote processes: ${pids.join(', ')}`);
+        for (const pid of pids) {
+            this.killProcessTree(pid);
+        }
+
+        try { fs.rmSync(this.pidFile, { force: true }); } catch {}
+    }
+
     private isDaemonAlreadyRunning(): boolean {
         try {
             const raw = fs.readFileSync(this.pidFile, 'utf8').trim();
@@ -94,6 +172,8 @@ class UnifiedDaemon {
     };
 
     async boot() {
+        this.cleanupStaleInstances();
+
         if (this.isDaemonAlreadyRunning()) {
             console.warn('[Boot] Another Symbiote unified daemon is already running; this instance is exiting to avoid duplicate gateway startup.');
             process.exit(0);
@@ -143,9 +223,12 @@ class UnifiedDaemon {
     }
 
     private async startService(id: string, config: ServiceConfig): Promise<void> {
-        if (id === 'gateway' && this.isGatewayAlreadyRunning()) {
-            console.warn('[Boot] Gateway already running; skipping duplicate startup to avoid Discord shard exhaustion.');
-            return;
+        if (id === 'gateway') {
+            this.cleanupStaleInstances();
+            if (this.isGatewayAlreadyRunning()) {
+                console.warn('[Boot] Gateway already running; terminating stale duplicate before startup to ensure a single fresh instance.');
+                this.cleanupStaleInstances();
+            }
         }
 
         return new Promise((resolve, reject) => {

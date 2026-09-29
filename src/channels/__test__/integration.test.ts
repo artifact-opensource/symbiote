@@ -8,6 +8,7 @@
 import { SymbioteBus } from '../bus.js';
 import { InboundRouter } from '../router.js';
 import { formatForChannel } from '../formatter.js';
+import { addSharedTodo, listSharedTodoItems, resolveSharedTodoPath } from '../tools/shared-todo.js';
 import type { ChannelCapabilities, BusEnvelope, ChannelSource, InboundPayload } from '../types.js';
 
 let passed = 0;
@@ -95,6 +96,68 @@ console.log('\n⚡ Interrupts');
   assert(drained.length === 0, 'Interrupt bypasses queue (not in drain)');
 
   bus.destroy();
+}
+
+console.log('\n⚡ Interrupt Pattern Regression');
+{
+  const bus = new SymbioteBus({ coalesceWindowMs: 0 });
+  const interrupts: string[] = [];
+  const router = new InboundRouter(bus, {
+    policies: new Map([['test', {
+      dmPolicy: 'open',
+      groupPolicy: 'mention-only',
+      ownerIds: ['u1'],
+      selfId: 'bot-1',
+      selfIdAliases: [],
+      allowedSenders: ['u1'],
+    }]]),
+    globalOwnerIds: ['u1'],
+    getActiveSessions: () => new Set(['session-kill']),
+  });
+
+  router.setRoute({
+    channelType: 'test',
+    chatId: 'c1',
+    sessionId: 'session-kill',
+    lastActive: Date.now(),
+  });
+
+  bus.onInterrupt('session-kill', (env) => interrupts.push(env.payload.text ?? ''));
+
+  const dotOk = router.route({
+    adapterId: 'test',
+    channelType: 'test',
+    chatId: 'c1',
+    chatType: 'dm',
+    senderId: 'u1',
+    senderName: 'Owner',
+    mentions: [],
+  }, { type: 'text', text: '.' }, 'dot');
+  assert(dotOk === true && interrupts[0] === '.', 'Single full stop is treated as an interrupt');
+
+  const stopOk = router.route({
+    adapterId: 'test',
+    channelType: 'test',
+    chatId: 'c1',
+    chatType: 'dm',
+    senderId: 'u1',
+    senderName: 'Owner',
+    mentions: [],
+  }, { type: 'text', text: 'stop.' }, 'stop-punct');
+  assert(stopOk === true && interrupts[1] === 'stop.', 'Stop-with-punctuation still interrupts');
+
+  bus.destroy();
+}
+
+console.log('\n📝 Shared todo separation');
+{
+  const sharedPath = resolveSharedTodoPath();
+  const sharedResult = addSharedTodo('todos', 'Ship shared todo workflow');
+  const items = listSharedTodoItems('todos');
+
+  assert(sharedPath.includes('shared') || sharedPath.includes('todos'), 'Shared todo path is isolated from core agent state');
+  assert(sharedResult.includes('Ship shared todo workflow'), 'Shared todo item is stored');
+  assert(items.some(item => item.text.includes('Ship shared todo workflow')), 'Shared todo list can be read back');
 }
 
 // ─── Test: Backpressure ────────────────────────────────────────────────────

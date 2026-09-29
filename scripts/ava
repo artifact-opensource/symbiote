@@ -24,24 +24,31 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 function start_agent() {
-    echo "▶️  Starting Symbiote via symbiote-unified.service..."
-    $SC daemon-reload >/dev/null 2>&1 || true
-    $SC enable symbiote-unified.service >/dev/null 2>&1 || true
-    $SC restart symbiote-unified.service
+    echo "▶️  Starting Symbiote via setsid..."
+    cd "$MACH6_DIR"
+    setsid node dist/gateway/daemon.js --config=symbiote.json > /tmp/mach6.log 2>&1 &
     sleep 2
 
-    if [ "$($SC is-active symbiote-unified.service 2>/dev/null || true)" = "active" ]; then
-      echo "✅ Symbiote service is active"
+    if pgrep -f "node dist/gateway/daemon.js" > /dev/null; then
+      echo "✅ Symbiote daemon is running"
     else
-      echo "❌ Symbiote service did not stay active"
-      $SC status symbiote-unified.service --no-pager 2>&1 || true
+      echo "❌ Symbiote daemon failed to start"
+      tail -20 /tmp/mach6.log 2>/dev/null || true
     fi
 }
 
 function stop_agent() {
-    echo "🛑 Stopping Symbiote unified service..."
-    $SC stop symbiote-unified.service >/dev/null 2>&1 || true
-    echo "✅ Unified service stopped"
+    echo "🛑 Stopping Symbiote daemon..."
+    # Kill only the setsid-launched daemon (parent process group leader)
+    local PIDS=$(pgrep -f "node dist/gateway/daemon.js" 2>/dev/null || true)
+    if [ -n "$PIDS" ]; then
+        echo "$PIDS" | xargs kill -TERM 2>/dev/null || true
+        sleep 2
+        # Force kill any survivors
+        PIDS=$(pgrep -f "node dist/gateway/daemon.js" 2>/dev/null || true)
+        [ -n "$PIDS" ] && echo "$PIDS" | xargs kill -9 2>/dev/null || true
+    fi
+    echo "✅ Daemon stopped"
 }
 
 case "${1:-}" in
@@ -60,15 +67,14 @@ case "${1:-}" in
     ;;
 
   status)
-    echo "📊 Symbiote Unified Daemon Status"
+    echo "📊 Symbiote Daemon Status"
     echo ""
-    STATE=$( $SC is-active symbiote-unified.service 2>/dev/null || true)
-    if [ "$STATE" = "active" ]; then
-      echo "🟢 Service: ACTIVE"
-      $SC status symbiote-unified.service --no-pager --lines 20 || true
+    PID=$(pgrep -f "node dist/gateway/daemon.js" || true)
+    if [ -n "$PID" ]; then
+      echo "🟢 Daemon: ACTIVE (PID $PID)"
+      ps -o pid,ppid,stat,etime,cmd -p "$PID" 2>/dev/null || true
     else
-      echo "🔴 Service: INACTIVE or restarting"
-      $SC status symbiote-unified.service --no-pager --lines 20 || true
+      echo "🔴 Daemon: INACTIVE"
     fi
     ;;
 
@@ -135,7 +141,12 @@ case "${1:-}" in
 
   pulse)
     echo "ℹ️  pulse.service is not part of the active user-managed runtime. The canonical service is symbiote-unified.service."
-    $SC status symbiote-unified.service --no-pager --lines 20 2>/dev/null || true
+    PID=$(pgrep -f "node dist/gateway/daemon.js" || true)
+    if [ -n "$PID" ]; then
+      echo "🟢 Daemon: ACTIVE (PID $PID)"
+    else
+      echo "🔴 Daemon: INACTIVE"
+    fi
     ;;
 
   singularity)
@@ -152,26 +163,27 @@ case "${1:-}" in
         fi
         ;;
       stop)
-        $SC stop "$SING_SERVICE" 2>/dev/null || true
         pkill -9 -f "python3 -m singularity" 2>/dev/null || true
         echo "✅ Stopped"
         ;;
       start)
         pkill -9 -f "python3 -m singularity" 2>/dev/null || true
         sleep 1
-        $SC start "$SING_SERVICE" 2>/dev/null || true
-        sleep 3
-        [ "$($SC is-active "$SING_SERVICE" 2>/dev/null || true)" = "active" ] && echo "✅ Singularity running" || echo "❌ Singularity failed"
+        PROCS=$(pgrep -cf "python3 -m singularity" 2>/dev/null || echo 0)
+        if [ "$PROCS" -ge 1 ]; then
+          echo "✅ Singularity running"
+        else
+          echo "❌ No process came back"
+        fi
         ;;
       status)
         echo "📊 Singularity Status"
         echo ""
-        STATUS=$($SC is-active "$SING_SERVICE" 2>/dev/null || true)
-        if [ "$STATUS" = "active" ]; then
-          echo "🟢 Service: ACTIVE"
-          $SC status "$SING_SERVICE" 2>&1 | head -10
+        PID=$(pgrep -f "python3 -m singularity" || true)
+        if [ -n "$PID" ]; then
+          echo "🟢 Singularity: ACTIVE (PID $PID)"
         else
-          echo "🔴 Service: INACTIVE"
+          echo "🔴 Singularity: INACTIVE"
         fi
         ;;
       *)

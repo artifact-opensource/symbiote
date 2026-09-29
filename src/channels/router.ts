@@ -53,9 +53,9 @@ function jidInList(jid: string, list: string[]): boolean {
 // ─── Interrupt Detection ───────────────────────────────────────────────────
 
 const INTERRUPT_PATTERNS = [
-  /^(stop|wait|hold on|pause|cancel|actually|never ?mind)/i,
-  /^(no[,.]?\s|don'?t\s|abort)/i,
-  /^(scratch that|forget it|hold up)/i,
+  /^\.{1,}$/,
+  /^(?:stop|wait|hold on|pause|cancel|actually|never ?mind|scratch that|forget it|hold up)[.!?]*$/i,
+  /^(?:no[,.]?\s|don'?t\s|abort)[^]*$/i,
 ];
 
 // ─── Deduplication ─────────────────────────────────────────────────────────
@@ -269,7 +269,7 @@ export class InboundRouter {
     const activeSessions = this.config.getActiveSessions?.() ?? new Set();
     const sessionActive = activeSessions.has(sessionId);
 
-    if (isOwner && sessionActive) {
+    if (isOwner && (sessionActive || INTERRUPT_PATTERNS.some(p => p.test(text)))) {
       if (INTERRUPT_PATTERNS.some(p => p.test(text))) {
         return 'interrupt';
       }
