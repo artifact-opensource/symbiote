@@ -24,47 +24,24 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 function start_agent() {
-    # SELF-KILL GUARD
-    MACH6_PID=$(pgrep -f "daemon.js.*$CONFIG_FILE" 2>/dev/null | head -1 || true)
-    if [ -n "$MACH6_PID" ]; then
-      CHECK_PID=$PPID
-      while [ "$CHECK_PID" -gt 1 ] 2>/dev/null; do
-        if [ "$CHECK_PID" = "$MACH6_PID" ]; then
-          echo "🛑 BLOCKED: ava start called from within Stack Manager (self-kill prevention)"
-          exit 1
-        fi
-        CHECK_PID=$(ps -o ppid= -p "$CHECK_PID" 2>/dev/null | tr -d ' ' || echo 0)
-      done
-    fi
+    echo "▶️  Starting Symbiote via symbiote-unified.service..."
+    $SC daemon-reload >/dev/null 2>&1 || true
+    $SC enable symbiote-unified.service >/dev/null 2>&1 || true
+    $SC restart symbiote-unified.service
+    sleep 2
 
-    echo "▶️  Starting Mach6 Agent..."
-    # Kill any orphan processes first
-    pkill -9 -f "daemon.js.*$CONFIG_FILE" 2>/dev/null || true
-    pkill -9 -f "$STACK_MANAGER" 2>/dev/null || true
-    sleep 1
-    
-    # Launch the Mach6 Daemon
-    nohup setsid /usr/bin/node "$MACH6_CORE/dist/gateway/daemon.js" --config="$CONFIG_FILE" >> /tmp/mach6.log 2>&1 &
-    
-    PID=$!
-    disown $PID 2>/dev/null || true
-    
-    sleep 5
-
-    # Verify it came up
-    if pgrep -f "daemon.js.*$CONFIG_FILE" > /dev/null; then
-      echo "✅ Mach6 Agent running (PID $(pgrep -f "daemon.js.*$CONFIG_FILE"))"
+    if [ "$($SC is-active symbiote-unified.service 2>/dev/null || true)" = "active" ]; then
+      echo "✅ Symbiote service is active"
     else
-      echo "❌ Failed to start. Checking logs..."
-      tail -n 20 /tmp/mach6.log
+      echo "❌ Symbiote service did not stay active"
+      $SC status symbiote-unified.service --no-pager 2>&1 || true
     fi
 }
 
 function stop_agent() {
-    echo "🛑 Stopping Mach6 Agent..."
-    pkill -9 -f "daemon.js.*$CONFIG_FILE" 2>/dev/null || true
-    pkill -9 -f "$STACK_MANAGER" 2>/dev/null || true
-    echo "✅ Agent stopped"
+    echo "🛑 Stopping Symbiote unified service..."
+    $SC stop symbiote-unified.service >/dev/null 2>&1 || true
+    echo "✅ Unified service stopped"
 }
 
 case "${1:-}" in
@@ -83,31 +60,15 @@ case "${1:-}" in
     ;;
 
   status)
-    echo "📊 Mach6 Agent Status"
+    echo "📊 Symbiote Unified Daemon Status"
     echo ""
-    PID=$(pgrep -f "daemon.js.*$CONFIG_FILE" || true)
-    if [ -n "$PID" ]; then
-      echo "🟢 Agent: ACTIVE"
-      echo "PID: $PID"
-      
-      # Detect API Port
-      PORT_API=$(grep '"apiPort"' "$CONFIG_FILE" | sed -E 's/.*: ([0-9]+).*/\1/' || echo 3006)
-      if ss -tulpn | grep -q ":$PORT_API "; then
-          echo "✅ API Listening on port $PORT_API"
-      else
-          echo "⚠️  API Port $PORT_API not listening yet"
-      fi
-      
-      # Detect Web Port from log (since it might fallback)
-      ACTUAL_WEB_PORT=$(grep "Web UI → http://0.0.0.0:" /tmp/mach6.log | tail -1 | sed -E 's/.*:([0-9]+)/\1/' || true)
-      if [ -n "$ACTUAL_WEB_PORT" ] && ss -tulpn | grep -q ":$ACTUAL_WEB_PORT "; then
-          echo "✅ Web UI Listening on port $ACTUAL_WEB_PORT"
-          [ "$ACTUAL_WEB_PORT" != "$(grep '"webPort"' "$CONFIG_FILE" | sed -E 's/.*: ([0-9]+).*/\1/' || echo 3010)" ] && echo "   (Note: Fallback port used due to conflict)"
-      else
-          echo "❌ Web UI not listening"
-      fi
+    STATE=$( $SC is-active symbiote-unified.service 2>/dev/null || true)
+    if [ "$STATE" = "active" ]; then
+      echo "🟢 Service: ACTIVE"
+      $SC status symbiote-unified.service --no-pager --lines 20 || true
     else
-      echo "🔴 Agent: INACTIVE"
+      echo "🔴 Service: INACTIVE or restarting"
+      $SC status symbiote-unified.service --no-pager --lines 20 || true
     fi
     ;;
 
@@ -173,45 +134,8 @@ case "${1:-}" in
     ;;
 
   pulse)
-    PULSE_SERVICE="pulse.service"
-    PSC="sudo systemctl"
-    case "${2:-status}" in
-      restart)
-        echo "🔄 Restarting PULSE..."
-        $PSC restart "$PULSE_SERVICE" 2>/dev/null || true
-        sleep 1
-        [ "$($PSC is-active "$PULSE_SERVICE" 2>/dev/null || true)" = "active" ] && echo "✅ PULSE running" || echo "❌ PULSE failed"
-        ;;
-      stop)
-        echo "🛑 Stopping PULSE..."
-        $PSC stop "$PULSE_SERVICE" 2>/dev/null || true
-        echo "✅ PULSE stopped"
-        ;;
-      start)
-        echo "▶️  Starting PULSE..."
-        $PSC start "$PULSE_SERVICE" 2>/dev/null || true
-        sleep 1
-        [ "$($PSC is-active "$PULSE_SERVICE" 2>/dev/null || true)" = "active" ] && echo "✅ PULSE running" || echo "❌ PULSE failed"
-        ;;
-      status)
-        ENTERPRISE="/home/adam/workspace"
-        echo "📊 PULSE Status"
-        echo ""
-        STATUS=$($PSC is-active "$PULSE_SERVICE" 2>/dev/null || true)
-        if [ "$STATUS" = "active" ]; then
-          echo "🟢 Service: ACTIVE"
-          $PSC status "$PULSE_SERVICE" 2>&1 | head -8
-        else
-          echo "🔴 Service: INACTIVE"
-        fi
-        ;;
-      logs)
-        journalctl -u "$PULSE_SERVICE" --no-pager -n "${3:-50}" --output=short-iso 2>/dev/null || echo "No logs found"
-        ;;
-      *)
-        echo "Usage: ava pulse <restart|stop|start|status|logs [N]|follow>"
-        ;;
-    esac
+    echo "ℹ️  pulse.service is not part of the active user-managed runtime. The canonical service is symbiote-unified.service."
+    $SC status symbiote-unified.service --no-pager --lines 20 2>/dev/null || true
     ;;
 
   singularity)
