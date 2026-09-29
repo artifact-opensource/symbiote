@@ -185,7 +185,13 @@ export class DiscordAdapter extends BaseAdapter {
       this.health.transition('connected');
     });
 
-    await this.client.login(this.token);
+    try {
+      await this.client.login(this.token);
+    } catch (err) {
+      this.client.destroy();
+      this.client = undefined;
+      throw err;
+    }
   }
 
   protected async platformDisconnect(): Promise<void> {

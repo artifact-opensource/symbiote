@@ -553,6 +553,14 @@ export function startWebServer(port = 3006): http.Server {
     });
   });
 
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`${palette.dim}  [symbiote-web]${palette.reset} Port ${palette.cyan}${port}${palette.reset} already in use — web UI disabled ${palette.dim}(non-fatal)${palette.reset}`);
+      return;
+    }
+    console.error(`${palette.dim}  [symbiote-web]${palette.reset} Failed to start web UI:`, err);
+  });
+
   // Create a default session
   const defaultSession: Session = {
     id: uid(),

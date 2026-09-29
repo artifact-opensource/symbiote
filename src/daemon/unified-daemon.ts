@@ -25,6 +25,47 @@ interface ServiceConfig {
 class UnifiedDaemon {
     private services: Map<string, { process: any, config: ServiceConfig }> = new Map();
     private bootSequence: string[] = ['gateway'];
+    private readonly pidFile = '/tmp/symbiote-unified.pid';
+
+    private isDaemonAlreadyRunning(): boolean {
+        try {
+            const raw = fs.readFileSync(this.pidFile, 'utf8').trim();
+            if (!raw) return false;
+            const pid = Number(raw);
+            if (!Number.isInteger(pid)) {
+                fs.unlinkSync(this.pidFile);
+                return false;
+            }
+            try {
+                process.kill(pid, 0);
+                return true;
+            } catch {
+                try { fs.unlinkSync(this.pidFile); } catch {}
+            }
+        } catch {
+            // no existing lock file
+        }
+        return false;
+    }
+
+    private isGatewayAlreadyRunning(): boolean {
+        const gatewayPattern = '/opt/ava/mach6/dist/gateway/daemon.js';
+        try {
+            const lines = fs.readFileSync('/proc/net/tcp', 'utf8');
+            if (lines.includes(': 0A0D') && lines.includes('0.0.0.0:3009')) {
+                return true;
+            }
+        } catch {
+            // fall through to process scan
+        }
+
+        try {
+            const out = require('child_process').execSync('ps -eo pid,cmd --no-headers', { encoding: 'utf8' }) as string;
+            return out.split('\n').some((line: string) => line.includes(gatewayPattern) && !line.includes('unified-daemon.js'));
+        } catch {
+            return false;
+        }
+    }
 
     private serviceDefinitions: Record<string, ServiceConfig> = {
         gateway: {
@@ -36,6 +77,17 @@ class UnifiedDaemon {
     };
 
     async boot() {
+        if (this.isDaemonAlreadyRunning()) {
+            console.warn('[Boot] Another Symbiote unified daemon is already running; this instance is exiting to avoid duplicate gateway startup.');
+            process.exit(0);
+        }
+
+        try {
+            fs.writeFileSync(this.pidFile, String(process.pid));
+        } catch {
+            // best effort only; do not block startup if pid file cannot be written
+        }
+
         console.info('Symbiote 3.0: Starting Semantic Initialization sequence...');
         
         for (const serviceId of this.bootSequence) {
@@ -74,6 +126,11 @@ class UnifiedDaemon {
     }
 
     private async startService(id: string, config: ServiceConfig): Promise<void> {
+        if (id === 'gateway' && this.isGatewayAlreadyRunning()) {
+            console.warn('[Boot] Gateway already running; skipping duplicate startup to avoid Discord shard exhaustion.');
+            return;
+        }
+
         return new Promise((resolve, reject) => {
             const child = spawn(config.command, config.args, {
                 cwd: config.cwd || process.cwd(),
@@ -104,6 +161,11 @@ class UnifiedDaemon {
             console.info(`Stopping ${service.config.name}...`);
             service.process.kill();
         }
+
+        try {
+            if (fs.existsSync(this.pidFile)) fs.unlinkSync(this.pidFile);
+        } catch {}
+
         process.exit(0);
     }
 }

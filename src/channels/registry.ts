@@ -74,6 +74,11 @@ export class ChannelRegistry {
    * Register and start a channel adapter.
    * Hot-pluggable — can be called while the system is running.
    */
+  private static isSessionLimitError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error ?? '');
+    return /Not enough sessions remaining|429|session.*remaining|shard/i.test(message);
+  }
+
   async register(
     adapter: ChannelAdapter,
     config: ChannelConfig,
@@ -113,11 +118,14 @@ export class ChannelRegistry {
         entry.status = 'error';
         entry.error = health.lastError;
         // Auto-reconnect with appropriate delay
-        // 440 conflict = another socket took over, wait longer before retrying
-        const is440 = health.lastError?.includes('440');
-        const delay = is440 ? 30_000 : 2_000; // 30s for conflict, 2s for others
-        if (is440) {
-          console.log(`[registry] 440 conflict for ${adapter.id} — waiting ${delay/1000}s before reconnect`);
+        // Discord shard/session exhaustion and 440/429 errors need a longer cooldown
+        // to avoid repeated login storms and bot appearing gray/offline.
+        const lastError = health.lastError ?? '';
+        const is440 = lastError.includes('440');
+        const isShardExhausted = /Not enough sessions remaining|429|session.*remaining|shard/i.test(lastError);
+        const delay = is440 || isShardExhausted ? 60_000 : 2_000;
+        if (is440 || isShardExhausted) {
+          console.log(`[registry] Discord session/shard limit for ${adapter.id} — waiting ${delay/1000}s before reconnect`);
         }
         setTimeout(() => {
           adapter.reconnect().catch(err => {
@@ -140,11 +148,15 @@ export class ChannelRegistry {
       // Do not leave the adapter dead after an initial connect timeout.
       // Register it as failed, then let the normal reconnect loop recover it.
       console.error(`[registry] Initial connect failed for ${adapter.id}:`, err);
+      const delay = ChannelRegistry.isSessionLimitError(err) ? 60_000 : 2_000;
+      if (ChannelRegistry.isSessionLimitError(err)) {
+        console.log(`[registry] Initial Discord session/shard limit for ${adapter.id} — waiting ${delay / 1000}s before reconnect`);
+      }
       setTimeout(() => {
         adapter.reconnect().catch(reconnectErr => {
           console.error(`[registry] Initial auto-reconnect failed for ${adapter.id}:`, reconnectErr);
         });
-      }, 2_000);
+      }, delay);
       return;
     }
   }
