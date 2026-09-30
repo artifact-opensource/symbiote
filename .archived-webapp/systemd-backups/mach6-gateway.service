@@ -1,0 +1,23 @@
+[Unit]
+Description=Mach6 AI Gateway
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=adam
+WorkingDirectory=/opt/ava/mach6/mach6-core
+EnvironmentFile=/opt/ava/.env
+Environment=TZ=Asia/Karachi
+Environment=NODE_OPTIONS=--max-old-space-size=4096
+ExecStart=/usr/bin/node /opt/ava/mach6/mach6-core/dist/gateway/daemon.js --config=/opt/ava/mach6/symbiote.json
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mach6
+
+[Install]
+WantedBy=multi-user.target

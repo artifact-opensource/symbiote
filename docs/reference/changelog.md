@@ -1,0 +1,177 @@
+# Changelog
+
+## v3.0.0 — Meta-Cognitive Layer, 14 Providers, Self-Improvement (3.06-09-18)
+
+### Features
+- **Meta-Cognitive Layer** — five-subsystem closed-loop self-improvement cycle:
+  - **SARSI** (Self-Aware Routing & Self-Improvement) — versioned self-model with identity, capabilities, routing rules, goals, and performance metrics. Atomic disk persistence with `.bak` recovery. Injected into system prompt.
+  - **Curator** — background review of recent interactions. Detects patterns, proposes SARSI rule updates. Configurable interval (default 5 min). Non-blocking.
+  - **Meta^n** — recursive meta-cognitive loop. Evaluates performance, validates proposed changes (commit/rollback/hold), applies improvements safely.
+  - **MEA** (Meta-Epistemic Audit) — audit gate evaluating response adequacy before delivery. Returns completeness, accuracy, tool usage scores.
+  - **PARC** (Parallel Adaptive Routing & Cognition) — pre-routes messages to optimal providers by task type (simple_qa, code_gen, reasoning, creative, tool_use, multi_step). Post-delivers outcomes to SARSI for learning.
+- **6 new LLM providers** — OpenRouter, NVIDIA, Qwen, AIHorde, FreeAI, OmniRoute. Total: 14 providers.
+- **Gateway daemon integration** — PARC preRoute logging before LLM calls, postDeliver learning after delivery. All fire-and-forget.
+- **Boot integration** — SARSI init + Meta^n loop on daemon startup, clean shutdown on SIGTERM.
+- **System prompt injection** — SARSI self-model injected so LLM knows its own routing identity and goals.
+
+### Safety
+- All rule changes versioned + rollback-able
+- Meta^n validates each change before applying (commit/rollback/hold)
+- SARSI atomic disk persistence with backup recovery
+- MEA gate can flag inadequate responses before delivery
+- All meta-cognitive code wrapped in try/catch — can never break core runtime
+
+### Stats
+- 14 LLM providers
+- 18+ built-in tools
+- 2 channel adapters + HTTP API
+- 5 meta-cognitive subsystems (1,620 new LOC)
+- ~23,900 total LOC TypeScript
+- 50+ documentation files
+
+---
+
+## v1.6.0 — Native Gemini, 8 Providers, Multi-User Deployment (3.06-03-07)
+
+### Features
+- **Native Gemini provider** — `@google/genai` SDK integration with streaming, function calling, thinking support, and automatic `thoughtSignature` preservation across tool call roundtrips.
+- **8 LLM providers** — added Gemini alongside Groq, Anthropic, OpenAI, xAI, GitHub Copilot, Ollama, Gladius.
+- **Agent creation wizard (6-step)** — identity, provider, channels, access, workspace, review. Generates `SOUL.md`, `IDENTITY.md`, `USER.md`, `AGENTS.md`, `HEARTBEAT.md`.
+- **Multi-user deployment** — one Symbiote install serves multiple user profiles with isolated workspaces and configs.
+- **Sandbox wildcard ownerIds** — `"*"` allows open access for testing/demo deployments.
+- **De-branded web UI** — agent name and emoji pulled from config, not hardcoded.
+- **Self-contained QR HTML** — WhatsApp QR pairing page works without CDN dependencies.
+- **Landing page** — `symbiote.artifactvirtual.com` with CNAME support.
+
+### Fixes
+- **dotenv auto-import** — `.env` files are now loaded automatically at startup (previously ignored silently).
+- **xAI provider registration** — `xai` was defined but not registered in the provider map. Fixed.
+- **Default provider** — changed from `github-copilot` (requires `gh` CLI auth) to `groq` (free API key, fastest).
+- **Discord chatType detection** — correctly identifies channel vs thread messages.
+- **Gemini schema adaptation** — automatically strips `additionalProperties` from tool schemas (Gemini rejects them).
+
+### Stats
+- 8 LLM providers
+- 18+ built-in tools
+- 2 channel adapters + HTTP API
+- 38 documentation files
+
+---
+
+## v1.5.0 — Blink, Pulse, COMB, 7 Providers, Agent Wizard (3.06-03-06)
+
+### Features
+- **Blink** — seamless session continuation. Agent hits iteration budget → daemon spawns fresh turn on same session. User sees nothing. Up to 5 consecutive blinks with periodic checkpoints for crash recovery.
+- **Pulse** — adaptive iteration budget. Starts at 20 iterations. Expands to 100 when the agent needs it. Reverts when demand passes. Persists across restarts.
+- **Native COMB** — lossless session-to-session memory, pure Node.js, zero external dependencies. Automatic fallback if Python COMB exists. `comb_recall` and `comb_stage` built-in tools. Session auto-flush on shutdown.
+- **Groq provider** — free tier, 280-1000 tok/sec on LPU hardware. Auto-retry on rate limits with server-specified delays. **New default provider.**
+- **xAI (Grok) provider** — Grok 3, Grok 3 Fast, Grok 3 Mini, Grok 3 Mini Fast. OpenAI-compatible with rate limit handling.
+- **Ollama** — fully local, fully offline. No API key needed. Local fallback.
+- **Agent creation wizard** — 6-step interactive setup generates `symbiote.json`, `.env`, and identity files (SOUL.md, IDENTITY.md, USER.md, AGENTS.md, HEARTBEAT.md). Clean-room templates with zero bleed.
+- **Agent scaffold** — `scaffoldAgent()` function generates personalized identity files for new agents.
+- **dotenv auto-loading** — `.env` file automatically loaded at startup. No manual setup required.
+- **Cron budget manager** — jobs declare resource usage, scheduler enforces daily limits. Warns at 80%, blocks at 100%.
+- **Context monitor** — tracks token usage in real-time with progressive thresholds (70% warn, 80% compact, 90% emergency). Auto-compacts context before overflow. Emergency transcript flush to disk.
+- **Memory integrity** — validates HEKTOR index files at startup (size checks, test queries). Auto-rebuilds corrupt indices. Atomic file writes prevent corruption from interrupted writes.
+
+### Improvements
+- **Heartbeat scheduler** — activity-aware: scales frequency based on user activity (30min active, 2h idle, 6h sleeping). Quiet hours suppression.
+- **Boot sequence** — structured 5-step boot with per-step timeouts and degraded mode. Non-critical failures don't crash the daemon.
+- **Provider count:** 4 → 7 (added Groq, xAI, Ollama)
+- **Default provider:** `github-copilot` → `groq` (free, fastest, no CLI auth needed)
+- **Full documentation overhaul** — 37 docs across 8 sections, GitBook-compatible
+
+### Stats
+- 7 LLM providers (Groq, Anthropic, OpenAI, xAI, GitHub Copilot, Ollama, Gladius)
+- 18+ built-in tools (including `comb_recall`, `comb_stage`)
+- 2 channel adapters + HTTP API
+- 37 documentation files
+
+---
+
+## v1.4.0 — MCP Server, Anti-Loop & Degradation Protection (3.06-03-05)
+
+### Features
+- **MCP server mode** — expose Symbiote tools as an MCP server for external agents and editors
+- **Anti-loop system** — structural prevention of bot echo loops in multi-bot Discord environments. Detects coordination phrases, suppresses recursive mentions, maintains normal flow when safe
+- **Systemd service integration** — production-grade process management with auto-restart, resource limits, and journal logging
+
+### Improvements
+- **Provider retry hardening** — increased retry delays (2s/5s/10s), fresh abort signals on retry to prevent stale timeout propagation
+- **GitHub Copilot timeout** — extended token exchange timeout from 15s to 30s for slower networks
+- **Source sanitization** — all hardcoded paths replaced with portable `process.cwd()` resolution
+- **Full documentation suite** — 28 docs across 7 sections, GitBook-compatible structure
+
+### Stats
+- 66 source files, ~13,800 lines of TypeScript
+- 14+ built-in tools + MCP bridge + MCP server
+- 4 LLM providers (GitHub Copilot, Anthropic, OpenAI, Gladius)
+- 2 channel adapters + HTTP API
+- 28 documentation files
+
+---
+
+## v1.3.0 — Multi-Bot Coordination & ATM (3.06-03-03)
+
+### Features
+- **Adaptive Temperature Modulation (ATM)** — dynamic per-task temperature control with four profiles: precise, balanced, creative, exploratory
+- **Multi-bot coordination** — sibling bot detection, mention-based yield, cooldown-based echo loop prevention
+- **Sister message injection** — context-aware message framing for bot-to-bot communication
+
+### Improvements
+- Professional GitBook documentation
+- Gitee mirror synchronization
+
+---
+
+## v1.2.0 — Multi-Bot Coordination (3.06-03.08)
+
+### Features
+- Sibling bot ID configuration for multi-bot environments
+- Channel-level cooldown for sister bot messages
+- Mention-based routing — @mention one bot, only that one responds
+
+---
+
+## v1.1.0 — Brand Kit & First npm Publish (3.06-03.08)
+
+### Features
+- Interactive CLI setup wizard (`symbiote init`)
+- Branded terminal output with gradient headers
+- Published to npm as `symbiote-core`
+
+### Fixes
+- CVE fix: override `undici >=6.23.0` (GHSA-g9mf-h72j-4rw9)
+- README overhaul with Mermaid architecture diagram
+
+---
+
+## v1.0.0 — First Stable Release (3.06-03.08)
+
+### Features
+- Full cross-platform support (Windows, Linux, macOS)
+- Discord adapter (discord.js v14)
+- WhatsApp adapter (Baileys v7)
+- HTTP API with SSE streaming
+- Web UI — single HTML file, no build step
+- 18 built-in tools
+- 4 LLM providers (GitHub Copilot, Anthropic, OpenAI, Gladius)
+- MCP bridge for external tool servers
+- Priority message bus with interrupts and coalescing
+- Session management with TTL and persistence
+- Sub-agent spawning (max depth 3)
+- Tool policy engine with resource budgets
+- Boot sequence validation
+- Graceful shutdown with session persistence
+- Hot-reload via SIGUSR1
+
+### Stats
+- ~8,400 lines of TypeScript
+- 18 built-in tools
+- 4 LLM providers
+- 2 channel adapters + HTTP API
+- Cold boot to connected: ~2.3s
+
+---
+
+Built by [Artifact Virtual](https://artifactvirtual.com). MIT License.
