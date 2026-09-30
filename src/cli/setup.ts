@@ -217,7 +217,7 @@ export function buildEnvFile(input: SetupInput, existingEnv: Record<string, stri
   return lines.join('\n');
 }
 
-export function writeSetupFiles(input: SetupInput, configPath = path.resolve('mach6.json'), envPath = path.resolve('.env')): SetupWriteResult {
+export function writeSetupFiles(input: SetupInput, configPath = path.resolve('symbiote.json'), envPath = path.resolve('.env')): SetupWriteResult {
   const existingEnv = readEnvFile(envPath);
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.mkdirSync(path.dirname(envPath), { recursive: true });
@@ -302,7 +302,7 @@ async function askMasked(rl: readline.Interface, prompt: string): Promise<string
   });
 }
 
-export async function runInteractiveSetup(configPath = path.resolve('mach6.json'), envPath = path.resolve('.env')): Promise<SetupWriteResult> {
+export async function runInteractiveSetup(configPath = path.resolve('symbiote.json'), envPath = path.resolve('.env')): Promise<SetupWriteResult> {
   const existing = fs.existsSync(configPath) ? loadConfig(configPath) : undefined;
   const defaults = defaultSetupInput(existing, envPath);
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
