@@ -30,6 +30,7 @@ import { ttsTool } from './tools/builtin/tts.js';
 import { webFetchTool } from './tools/builtin/web-fetch.js';
 import { memorySearchTool } from './tools/builtin/memory.js';
 import { combRecallTool, combStageTool } from './tools/builtin/comb.js';
+import { todoTool } from './tools/shared-todo.js';
 import { SessionManager } from './sessions/manager.js';
 import { SubAgentManager } from './sessions/sub-agent.js';
 import { buildSystemPrompt } from './agent/system-prompt.js';
@@ -87,7 +88,7 @@ async function main() {
 
   // Setup tools
   const registry = new ToolRegistry();
-  for (const tool of [readTool, writeTool, editTool, execTool, imageTool, processStartTool, processPollTool, processKillTool, processListTool, ttsTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool]) {
+  for (const tool of [readTool, writeTool, editTool, execTool, imageTool, processStartTool, processPollTool, processKillTool, processListTool, ttsTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool, todoTool]) {
     registry.register(tool);
   }
 

@@ -9,6 +9,8 @@ import { sanitizeToolResult, logInjectionAttempt } from '../security/sanitizer.j
 import { classifyTask, getTemperature } from './temperature.js';
 import type { TemperatureConfig, TaskCategory } from './temperature.js';
 import type { BlinkController } from './blink.js';
+import type { ContextStore } from './context-store.js';
+import { TodoManager } from './todo.js';
 
 /** Minimal interface for tool registries (satisfied by both ToolRegistry and SandboxedToolRegistry) */
 export interface ToolExecutor {
@@ -28,6 +30,7 @@ export interface RunnerConfig {
   policyEngine?: PolicyEngine;
   temperatureConfig?: TemperatureConfig;
   abortSignal?: AbortSignal;
+  contextStore?: ContextStore;
   blinkController?: BlinkController;
   onEvent?: (event: StreamEvent) => void;
   onToolStart?: (name: string, input: Record<string, unknown>) => void;
@@ -68,32 +71,45 @@ export async function runAgent(
   let currentMessages = [...messages];
   let iterations = 0;
   let textAccum = '';
+  const todoManager = new TodoManager({ scope: config.sessionId ?? 'default', workspace: process.cwd() });
+
+  const ensureTodoPlan = () => {
+    const userSummary = [...currentMessages].reverse().find(msg => msg.role === 'user');
+    const promptText = typeof userSummary?.content === 'string'
+      ? userSummary.content
+      : Array.isArray(userSummary?.content)
+        ? userSummary.content.map(block => typeof block === 'string' ? block : (block.text ?? '')).join(' ')
+        : '';
+    const title = promptText.replace(/\s+/g, ' ').trim().slice(0, 180);
+
+    const existing = todoManager.list();
+    if (existing.length === 0 && title) {
+      const item = todoManager.addTask(title, 'Work through the request until the result is validated.');
+      return item;
+    }
+
+    const active = existing.find(item => item.status === 'in_progress') ?? existing.find(item => item.status === 'pending');
+    if (active) {
+      todoManager.updateTask(active.id, { status: 'in_progress' });
+      return active;
+    }
+
+    return existing[0];
+  };
 
   while (iterations < maxIter) {
-
-    // SMART TODO + AUTO-CONTINUE + RETRY ROUTING
-    const isComplex = (currentMessages.length > 3) || (allToolCalls.length > 0); // multi-iter likely
-    const todoActive = isComplex; // only use todo for complex / multi-iter tasks
-    const retryCount = allToolCalls.filter(r => r.result && r.result.includes('error')).length;
-    // Auto-continue if todo incomplete: loop doesn't break early; completes via final textAccum
-    if (todoActive && iterations > 1) {
-      console.log(`[SMART] Complex task — todo active, auto-continue enabled, retries=${retryCount}`);
-    } else if (!todoActive && iterations === 1) {
-      console.log(`[SMART] Simple task — direct route, no todo overhead`);
+    const todoItems = todoManager.list();
+    if (todoItems.length > 0) {
+      const active = todoItems.find(item => item.status === 'in_progress') ?? todoItems.find(item => item.status === 'pending');
+      if (active) {
+        todoManager.updateTask(active.id, { status: 'in_progress' });
+      }
+      console.log(`[todo] ${todoManager.renderMarkdown()}`);
+    } else {
+      ensureTodoPlan();
     }
 
     iterations++;
-    // 5.0 S2: Persistent Vector Scratchpad (VDB) read/write
-    try { const fs=require("fs"); const vdb=JSON.parse(fs.readFileSync("/home/adam/worxpace/av_workspace/workspace/vdb/vector_state.json","utf8")); const mem=vdb.scratchpad?.vectors?.memory_search||"[]"; console.log("[VDB] vector memory state:", mem.substring(0,40)); } catch(e){}
-
-    // Persistent loop: update todo + feed curator
-    try { const { reviewAsync } = require("../curator/index.js"); reviewAsync({ id: "i-"+(iterations||1), timestamp: new Date().toISOString(), taskType: "agent", provider: "symbiote", model: "4.0", tokensUsed: 0, latencyMs: 0, toolSuccess: true, userSatisfied: true, toolCallCount: allToolCalls.length, delivered: true, channel: "discord", routingWasOptimal: true }); } catch(e){}
-    // Persistent loop: update todo + Discord echo (icon + structured)
-    const echoMsg = `📋 TODO UPDATE — [In Progress]\nTask: Restore v2.1.2 loop architecture\nStatus: in_progress | loop_iteration: ${iterations}\nAgent: Jordan Reeves / v4.0.0\nRouting: PARC+Curator+Meta`
-    console.log("[DISCORD_ECHO]", echoMsg);
-    try { const adapter = require("../channels/adapters/discord.js"); } catch(e){}
-    // Persistent loop: update todo tracking
-    try { const fs = require('fs'); const p = '/home/adam/worxpace/av_workspace/workspace/todos/todos.json'; const d = JSON.parse(fs.readFileSync(p,'utf8')); d.active = d.active || []; d.active[0] = d.active[0] || {}; d.active[0].status = 'in_progress'; d.active[0].updated = new Date().toISOString(); d.active[0].loop_iteration = iterations; fs.writeFileSync(p, JSON.stringify(d)); } catch(e) {}
 
     // PULSE dynamic expansion: if approaching cap, expand to full budget
     if (iterations >= PULSE_EXPAND_THRESHOLD && maxIter === initialMaxIter && initialMaxIter < PULSE_EXPANDED_CAP) {
@@ -286,7 +302,13 @@ export async function runAgent(
 
     // If no tool calls, we're done
     if (pendingToolCalls.length === 0) {
+      for (const task of todoManager.list()) {
+        if (task.status !== 'completed') {
+          todoManager.updateTask(task.id, { status: 'completed' });
+        }
+      }
       console.log(`[runner] Agent complete after ${iterations} iterations, ${allToolCalls.length} total tool calls`);
+      console.log(`[todo] ${todoManager.renderMarkdown()}`);
       return { text: textAccum, messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
     }
 
@@ -356,12 +378,6 @@ export async function runAgent(
         temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined,
       };
     }
-
-    // 5.0 S3: Deterministic guardrail check (compiler)
-    try { const comp = require("../agent/compiler-check.js"); const check = comp.checkType(pendingToolCalls.length > 0 ? "tool_result" : "done"); if (!check.ok) console.log("[GUARDRAIL] Type error — rollback forced"); } catch(e){}
-
-    // 5.0 S5: Binary runtime IR emission + KV delta
-    try { const bin = require("../agent/binary-runtime-stub.js"); const ir = bin.emitIR({iter: iterations, text: textAccum.substring(0,20)}); console.log("[IR]", ir.format); } catch(e){}
 
     // Loop — send updated messages back to LLM
   }

@@ -58,6 +58,7 @@ export interface ProviderConfig {
   model: string;
   maxTokens?: number;
   temperature?: number;
+  timeoutMs?: number;
   systemPrompt?: string;
 }
 

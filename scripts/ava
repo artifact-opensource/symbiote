@@ -9,7 +9,7 @@ export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 MACH6_DIR="/opt/ava/mach6"
-MACH6_CORE="$MACH6_DIR/mach6-core"
+MACH6_CORE="$MACH6_DIR"
 CONFIG_FILE="$MACH6_DIR/symbiote.json"
 ENV_FILE="/opt/ava/.env"
 STACK_MANAGER="/opt/ava/stack_manager/stack_manager.py"
@@ -44,7 +44,7 @@ function start_agent() {
     sleep 1
     
     # Launch the Mach6 Daemon
-    nohup setsid /usr/bin/node "$MACH6_CORE/dist/gateway/daemon.js" --config="$CONFIG_FILE" >> /tmp/mach6.log 2>&1 &
+    nohup setsid /usr/bin/node "$MACH6_DIR/dist/gateway/daemon.js" --config="$CONFIG_FILE" >> /tmp/mach6.log 2>&1 &
     
     PID=$!
     disown $PID 2>/dev/null || true
@@ -257,7 +257,7 @@ case "${1:-}" in
     ;;
 
   webapp)
-    WEBAPP_DIR="/opt/ava/mach6/mach6-core/webapp"
+    WEBAPP_DIR="$MACH6_DIR/webapp"
     case "${2:-status}" in
       start)
         echo "▶️  Starting Symbiote Dashboard..."

@@ -63,6 +63,18 @@ export interface ProviderConfigBlock {
   [key: string]: unknown;
 }
 
+export interface OrchestratorConfigBlock {
+  enabled?: boolean;
+  cloudProvider?: string;
+  cloudModel?: string;
+  localModels?: Record<string, string>;
+  maxParallel?: number;
+  taskTimeoutMs?: number;
+  decompositionPrompt?: string;
+  synthesisPrompt?: string;
+  [key: string]: unknown;
+}
+
 export interface SymbioteConfig {
   name?: string;
   emoji?: string;
@@ -104,6 +116,7 @@ export interface SymbioteConfig {
   discord?: DiscordConfigBlock;
   discordExtra?: DiscordConfigBlock[];
   whatsapp?: WhatsAppConfigBlock;
+  orchestrator?: OrchestratorConfigBlock;
   tools?: {
     enabled?: boolean;
   };
