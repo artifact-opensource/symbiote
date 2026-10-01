@@ -1,6 +1,7 @@
 // Symbiote — Config loading
 
 import fs from 'node:fs';
+import path from 'node:path';
 
 import type { TemperatureConfig, TaskCategory } from '../agent/temperature.js';
 import { appPath, configSearchPaths } from '../runtime/platform.js';
@@ -92,6 +93,8 @@ export interface SymbioteConfig {
   defaultProvider: string;
   defaultModel: string;
   fallbackProviders?: string[];
+  /** Live-updating "what am I doing" tool-progress message in chat channels. Default: true */
+  toolProgress?: boolean;
   maxTokens: number;
   temperature: number;
   maxIterations?: number;
@@ -181,6 +184,7 @@ function resolveEnvKeys(config: SymbioteConfig): SymbioteConfig {
   injectKey('groq', 'GROQ_API_KEY');
   injectKey('xai', 'XAI_API_KEY');
   injectKey('nvidia', 'NVIDIA_API_KEY');
+  injectKey('openrouter', 'OPENROUTER_API_KEY');
 
   if (!config.discord?.token && process.env.DISCORD_BOT_TOKEN) {
     config.discord = { ...(config.discord ?? {}), token: process.env.DISCORD_BOT_TOKEN };
@@ -212,7 +216,14 @@ export function loadConfig(configPath?: string): SymbioteConfig {
       let raw = fs.readFileSync(p, 'utf-8');
       if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
       const parsed = JSON.parse(stripJsonComments(raw)) as Partial<SymbioteConfig>;
-      return resolveEnvKeys({ ...DEFAULT_CONFIG, ...parsed, providers: { ...DEFAULT_CONFIG.providers, ...(parsed.providers ?? {}) } });
+      const merged = resolveEnvKeys({ ...DEFAULT_CONFIG, ...parsed, providers: { ...DEFAULT_CONFIG.providers, ...(parsed.providers ?? {}) } });
+      // Anchor relative paths to the config file's directory, not the ambient
+      // process cwd — so `symbiote start` behaves the same regardless of where
+      // it's invoked from.
+      const configDir = path.dirname(path.resolve(p));
+      if (merged.workspace) merged.workspace = path.resolve(configDir, merged.workspace);
+      if (merged.sessionsDir) merged.sessionsDir = path.resolve(configDir, merged.sessionsDir);
+      return merged;
     } catch {
       continue;
     }

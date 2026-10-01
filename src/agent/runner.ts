@@ -83,7 +83,8 @@ export async function runAgent(
     const title = promptText.replace(/\s+/g, ' ').trim().slice(0, 180);
 
     const existing = todoManager.list();
-    if (existing.length === 0 && title) {
+    const openItems = existing.filter(item => item.status !== 'completed' && item.status !== 'blocked');
+    if (openItems.length === 0 && title) {
       const item = todoManager.addTask(title, 'Work through the request until the result is validated.');
       return item;
     }
@@ -95,6 +96,13 @@ export async function runAgent(
     }
 
     return existing[0];
+  };
+
+  const markTodoBlocked = (reason: string) => {
+    const active = todoManager.list().find(item => item.status === 'in_progress' || item.status === 'pending');
+    if (active) {
+      todoManager.updateTask(active.id, { status: 'blocked', description: `Blocked: ${reason.slice(0, 300)}` });
+    }
   };
 
   while (iterations < maxIter) {
@@ -223,6 +231,7 @@ export async function runAgent(
           temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined,
         };
       }
+      markTodoBlocked(err instanceof Error ? err.message : String(err));
       throw err;
     }
 
@@ -288,6 +297,7 @@ export async function runAgent(
           temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined,
         };
       }
+      markTodoBlocked(err instanceof Error ? err.message : String(err));
       throw err;
     }
 

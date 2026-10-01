@@ -1,6 +1,9 @@
 // Symbiote — Simple retry wrapper for provider fetch calls
 
 const RETRY_DELAYS = [2000, 5000, 10000];
+// 429s are survivable if we wait long enough — OpenRouter/most providers reset
+// within a minute. Use a longer, dedicated backoff ladder for rate limits.
+const RATE_LIMIT_DELAYS = [2000, 5000, 10000, 20000, 40000];
 
 // 400-class errors that are transient (backend quirks, not user errors)
 const RETRYABLE_400_PATTERNS = [
@@ -14,9 +17,20 @@ function isRetryable400(status: number, body?: string): boolean {
   return RETRYABLE_400_PATTERNS.some(p => lower.includes(p));
 }
 
+/** Parse a Retry-After header (seconds or HTTP-date) into a millisecond delay. */
+function parseRetryAfter(res: Response): number | undefined {
+  const header = res.headers.get('retry-after');
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (!Number.isNaN(seconds)) return Math.max(0, seconds * 1000);
+  const dateMs = Date.parse(header);
+  if (!Number.isNaN(dateMs)) return Math.max(0, dateMs - Date.now());
+  return undefined;
+}
+
 export async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
   let lastError: Error | undefined;
-  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
+  for (let attempt = 0; attempt <= RATE_LIMIT_DELAYS.length; attempt++) {
     try {
       // On retries, ensure a fresh abort signal (previous may have timed out)
       const effectiveInit = attempt > 0 && init.signal instanceof AbortSignal
@@ -37,8 +51,29 @@ export async function fetchWithRetry(url: string, init: RequestInit): Promise<Re
         return res;
       }
 
-      // Retry on 429 (rate limit) and 500+ (server errors)
-      if (res.status === 429 || res.status >= 500) {
+      // Retry on 429 (rate limit) — honor Retry-After header when present,
+      // otherwise fall back to an extended backoff ladder. Daily-quota
+      // exhaustion (vs. a transient per-minute limit) can't recover within
+      // our retry window, so fail fast instead of burning ~77s per message.
+      if (res.status === 429) {
+        const body = await res.clone().text().catch(() => '');
+        const isDailyQuota = /free-models-per-day|per-day|daily/i.test(body);
+        if (isDailyQuota) {
+          console.warn('[retry] 429 daily quota exhausted — failing fast (retrying won\'t help until reset)');
+          return res;
+        }
+        if (attempt < RATE_LIMIT_DELAYS.length) {
+          const retryAfterMs = parseRetryAfter(res);
+          const delayMs = retryAfterMs ?? RATE_LIMIT_DELAYS[attempt];
+          console.warn(`[retry] 429 rate limited (attempt ${attempt + 1}/${RATE_LIMIT_DELAYS.length + 1}) — retrying in ${(delayMs / 1000).toFixed(1)}s...`);
+          await new Promise(r => setTimeout(r, delayMs));
+          continue;
+        }
+        return res;
+      }
+
+      // Retry on 500+ (server errors)
+      if (res.status >= 500) {
         if (attempt < RETRY_DELAYS.length) {
           await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
           continue;

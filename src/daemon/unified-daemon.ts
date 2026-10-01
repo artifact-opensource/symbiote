@@ -1,16 +1,23 @@
 import { spawn } from 'child_process';
-import { createServer, Server } from 'http';
-import * as fs from 'fs';
 import * as path from 'path';
-import { initSarsi, shutdownSarsi } from '../sarsi/index.js';
-import { startMetaLoop, stopMetaLoop } from '../meta/index.js';
+import { existsSync } from 'fs';
+import { fileURLToPath } from 'url';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// This file lives at dist/daemon/unified-daemon.js — the gateway sits at dist/gateway/daemon.js
+const DIST_ROOT = path.resolve(__dirname, '..');
+const PROJECT_ROOT = path.resolve(DIST_ROOT, '..');
 
 /**
  * Symbiote Unified Daemon (Symbiote 3.0)
- * Manages the lifecycle of Gateway, COMB, HEKTOR, and PULSE.
- * Implements Semantic Initialization (VDB-first boot).
- * SARSI + Meta^n + Curator integrated for self-improving routing.
+ * Process supervisor — spawns the gateway as a subprocess and restarts it on crash.
+ * The gateway itself boots SARSI + the Meta^n self-improvement loop directly
+ * (see gateway/daemon.ts) — this supervisor does not duplicate that.
+ *
+ * Optional — most deployments run the gateway directly (`symbiote start` /
+ * `node dist/gateway/daemon.js`). Use this only if you want OS-level process
+ * supervision without systemd/pm2.
  */
 
 interface ServiceConfig {
@@ -22,6 +29,13 @@ interface ServiceConfig {
     critical: boolean;
 }
 
+function resolveConfigArg(): string {
+    const fromArgv = process.argv.find(a => a.startsWith('--config='))?.split('=')[1];
+    if (fromArgv) return fromArgv;
+    const candidates = ['symbiote.json', 'mach6.json'].map(f => path.join(PROJECT_ROOT, f));
+    return candidates.find(p => existsSync(p)) ?? candidates[0];
+}
+
 class UnifiedDaemon {
     private services: Map<string, { process: any, config: ServiceConfig }> = new Map();
     private bootSequence: string[] = ['gateway'];
@@ -30,7 +44,8 @@ class UnifiedDaemon {
         gateway: {
             name: 'Gateway',
             command: 'node',
-            args: ['/opt/ava/mach6/mach6-core/dist/gateway/daemon.js', '--config=/opt/ava/mach6/symbiote.json'],
+            args: [path.join(DIST_ROOT, 'gateway', 'daemon.js'), `--config=${resolveConfigArg()}`],
+            cwd: PROJECT_ROOT,
             critical: true,
         }
     };
@@ -55,22 +70,6 @@ class UnifiedDaemon {
         }
         
         console.info('Symbiote 3.0: All systems operational. VDB-first boot complete.');
-        
-        // Initialize SARSI self-model
-        try {
-            initSarsi();
-            console.info('[Boot] SARSI self-model initialized.');
-        } catch (e) {
-            console.warn('[Boot] SARSI initialization failed, continuing with defaults.', e);
-        }
-        
-        // Start Meta^n background loop (self-improvement cycle)
-        try {
-            startMetaLoop();
-            console.info('[Boot] Meta^n self-improvement loop started.');
-        } catch (e) {
-            console.warn('[Boot] Meta^n initialization failed, continuing without self-improvement.', e);
-        }
     }
 
     private async startService(id: string, config: ServiceConfig): Promise<void> {
@@ -82,6 +81,17 @@ class UnifiedDaemon {
             });
 
             child.on('error', reject);
+
+            // Restart on unexpected exit (crash resilience)
+            child.on('exit', (code: number | null, signal: string | null) => {
+                if (this.shuttingDown) return;
+                console.warn(`[supervisor] ${config.name} exited (code=${code}, signal=${signal}) — restarting in 2s...`);
+                setTimeout(() => {
+                    this.startService(id, config).catch(err => {
+                        console.error(`[supervisor] Failed to restart ${config.name}:`, err);
+                    });
+                }, 2000);
+            });
             
             // Simple health check: wait for process to be alive
             // In a real impl, we'd check a health port or PID file
@@ -92,15 +102,13 @@ class UnifiedDaemon {
         });
     }
 
+    private shuttingDown = false;
+
     async shutdown() {
+        this.shuttingDown = true;
         console.info('Shutting down Unified Daemon...');
         
-        // Stop Meta^n background loop
-        try { stopMetaLoop(); } catch {}
-        // Flush SARSI state
-        try { shutdownSarsi(); } catch {}
-        
-        for (const [id, service] of this.services) {
+        for (const [, service] of this.services) {
             console.info(`Stopping ${service.config.name}...`);
             service.process.kill();
         }

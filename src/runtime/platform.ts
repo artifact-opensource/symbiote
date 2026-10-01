@@ -9,6 +9,22 @@ export function isWindows(): boolean {
   return process.platform === 'win32';
 }
 
+/**
+ * Expand a leading `~` (and `~/...`) to the user's home directory.
+ * Node never does this automatically — only interactive shells do — so any
+ * config value like "~/.mach6/whatsapp-auth" would otherwise be created as a
+ * literal "~" folder under the current working directory on every OS,
+ * Windows included (where `~` has no special meaning at all).
+ */
+export function expandHome(p: string): string {
+  if (!p) return p;
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/') || (isWindows() && p.startsWith('~\\'))) {
+    return path.join(os.homedir(), p.slice(2));
+  }
+  return p;
+}
+
 export function appHomeDir(): string {
   return process.env.SYMBIOTE_HOME
     ?? process.env.MACH6_HOME

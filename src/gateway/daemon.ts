@@ -23,6 +23,8 @@ import {
   divider, thickDivider, sectionHeader,
 } from '../cli/brand.js';
 import { ChannelRegistry } from '../channels/registry.js';
+import { ToolProgressBubble } from '../channels/progress-bubble.js';
+import { expandHome } from '../runtime/platform.js';
 import { DiscordAdapter } from '../channels/adapters/discord.js';
 import { WhatsAppAdapter } from '../channels/adapters/whatsapp.js';
 import { ToolRegistry } from '../tools/registry.js';
@@ -64,6 +66,7 @@ import { githubCopilotProvider } from '../providers/github-copilot.js';
 import { geminiProvider } from '../providers/gemini.js';
 import { gladiusProvider } from '../providers/gladius.js';
 import { groqProvider } from '../providers/groq.js';
+import { openrouterProvider } from '../providers/openrouter.js';
 import { ollamaProvider } from '../providers/ollama.js';
 import { xaiProvider } from '../providers/xai.js';
 import type { BusEnvelope, ChannelPolicy, OutboundMessage } from '../channels/types.js';
@@ -77,6 +80,8 @@ import { HotResumeManager } from '../sessions/hot-resume.js';
 import { ProviderHealthMonitor } from '../providers/health.js';
 import { APP_VERSION } from '../meta/version.js';
 import { preRoute, postDeliver } from '../orchestrator/integration.js';
+import { initSarsi, shutdownSarsi } from '../sarsi/index.js';
+import { startMetaLoop, stopMetaLoop } from '../meta/index.js';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -141,6 +146,7 @@ const PROVIDERS = new Map<string, Provider>([
   ['gemini', geminiProvider],
   ['gladius', gladiusProvider],
   ['groq', groqProvider],
+  ['openrouter', openrouterProvider],
   ['nvidia', nvidiaProvider],
   ['ollama', ollamaProvider],
   ['xai', xaiProvider],
@@ -359,6 +365,16 @@ export class SymbioteGateway {
 
     // Connect MCP servers (external tool sources)
     await this.connectMcpServers();
+
+    // SARSI self-model + Meta^n self-improvement loop (recursive routing evaluation).
+    // Previously only started by the unused unified-daemon.ts subprocess supervisor —
+    // wired directly into the gateway so it actually runs.
+    try {
+      initSarsi();
+      startMetaLoop();
+    } catch (err) {
+      console.log(warn(`SARSI/Meta^n init failed — continuing without self-improvement loop: ${err instanceof Error ? err.message : err}`));
+    }
 
     // Register signal handlers
     this.setupSignals();
@@ -1185,6 +1201,20 @@ export class SymbioteGateway {
     const typingTarget = { adapterId: envelope.source.adapterId, chatId: envelope.source.chatId };
     presenceManager.startTyping(typingTarget);
 
+    // Tool-progress bubble — live "what am I doing" message in the originating channel
+    const progressBubble = new ToolProgressBubble(
+      {
+        enabled: this.config.toolProgress !== false,
+        send: (adapterId, chatId, content) => this.channelRegistry.send(adapterId, chatId, { content }),
+        edit: async (adapterId, chatId, messageId, content) => {
+          const edited = await this.channelRegistry.edit(adapterId, chatId, messageId, content);
+          return edited ? undefined : null;
+        },
+      },
+      envelope.source.adapterId,
+      envelope.source.chatId,
+    );
+
     try {
       // Load or create session
       let session = this.sessionManager.load(sessionId) ?? this.sessionManager.create(sessionId, {
@@ -1292,9 +1322,10 @@ export class SymbioteGateway {
             presenceManager.llmStreaming();
           }
         },
-        onToolStart: (name: string) => {
+        onToolStart: (name: string, input: Record<string, unknown>) => {
           console.log(`  ${palette.violet}⚡ ${name}${palette.reset}`);
           presenceManager.toolStart(name);
+          void progressBubble.toolLine(name, input);
         },
         onToolEnd: (name: string, res: string) => {
           const preview = res.length > 100 ? res.slice(0, 100) + '...' : res;
@@ -1407,6 +1438,8 @@ export class SymbioteGateway {
         console.warn(`[BLINK] Loop ended without result — depth capped`);
         finalResult = { text: '[Blink depth exceeded]', messages: currentSessionMessages, toolCalls: [], iterations: 0, maxIterationsHit: true, aborted: false };
       }
+
+      await progressBubble.finalize();
 
       const turnElapsed = Date.now() - turnStartTime;
       const blinkState = blinkCtrl.getState();
@@ -1528,6 +1561,7 @@ export class SymbioteGateway {
       }
 
     } catch (err) {
+      await progressBubble.finalize();
       if (controller.signal.aborted) {
         console.log(`${palette.dim}  [turn]${palette.reset} ${palette.yellow}Interrupted${palette.reset} ${palette.violet}${sessionId}${palette.reset}`);
         // Re-process with accumulated messages
@@ -1545,12 +1579,19 @@ export class SymbioteGateway {
         }
       } else {
         console.error(`  ${palette.red}✗ [turn]${palette.reset} ${palette.violet}${sessionId}${palette.reset}: ${err}`);
-        // Send error message
+        if (err instanceof Error && err.stack) console.error(err.stack);
+        // Send error message — give a clear, short message for the daily-quota
+        // case instead of dumping the raw provider JSON error.
+        const rawMsg = err instanceof Error ? err.message : String(err);
+        const isDailyQuota = /free-models-per-day/i.test(rawMsg);
+        const userMsg = isDailyQuota
+          ? '⚠️ OpenRouter free-tier daily limit reached (50 requests/day). Resets at midnight UTC, or add credits at openrouter.ai to raise the cap.'
+          : `⚠️ Error: ${rawMsg}`;
         try {
           await this.channelRegistry.send(
             envelope.source.adapterId,
             envelope.source.chatId,
-            { content: `⚠️ Error: ${err instanceof Error ? err.message : String(err)}` },
+            { content: userMsg },
           );
         } catch { /* ignore send errors */ }
       }
@@ -1665,6 +1706,10 @@ export class SymbioteGateway {
         turn.abortController.abort('shutdown');
       }
 
+      // Stop Meta^n self-improvement loop + flush SARSI state
+      try { stopMetaLoop(); } catch { /* ignore */ }
+      try { shutdownSarsi(); } catch { /* ignore */ }
+
       // ── COMB auto-flush: persist conversation tail before exit ──
       // Runs BEFORE channels disconnect — needs filesystem access
       await this.flushCombOnShutdown(4);
@@ -1698,45 +1743,68 @@ export class SymbioteGateway {
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
 
-    // SIGUSR1 = hot-reload config (Linux/macOS only — not supported on Windows)
-    // On Windows: restart the process, or POST /api/v1/health to verify state
+    // Hot-reload config. SIGUSR1 works on Linux/macOS; Windows has no POSIX
+    // signals, so fall back to watching the config file for changes instead.
     if (process.platform !== 'win32') {
-      process.on('SIGUSR1', () => {
-        console.log(`${palette.dim}  [gateway]${palette.reset} ${palette.cyan}SIGUSR1${palette.reset} — reloading config...`);
-        try {
-          const nextConfig = loadConfig(this.gatewayConfig.configPath);
-          if (!validateAndReport(nextConfig)) {
-            throw new Error('Configuration validation failed');
-          }
-          const nextProviderName = nextConfig.defaultProvider;
-          const nextProvider = PROVIDERS.get(nextProviderName);
-          if (!nextProvider) {
-            throw new Error(`Unknown provider: ${nextProviderName}`);
-          }
-          const nextFallbackChain: { name: string; provider: Provider }[] = [];
-          if (nextConfig.fallbackProviders?.length) {
-            for (const fbName of nextConfig.fallbackProviders) {
-              const fbProvider = PROVIDERS.get(fbName);
-              if (fbProvider) nextFallbackChain.push({ name: fbName, provider: fbProvider });
-            }
-          }
-          const nextSystemPrompt = buildSystemPrompt({
-            workspace: nextConfig.workspace,
-            tools: this.toolRegistry.list().map(t => t.name),
-          });
-          this.config = nextConfig;
-          this.providerName = nextProviderName;
-          this.provider = nextProvider;
-          this.model = nextConfig.defaultModel;
-          this.fallbackChain = nextFallbackChain;
-          this.systemPrompt = nextSystemPrompt;
-          console.log(`${palette.dim}  [gateway]${palette.reset} Provider: ${palette.cyan}${this.providerName}/${this.model}${palette.reset}${this.fallbackChain.length > 0 ? ` → fallback: ${this.fallbackChain.map(f => f.name).join(' → ')}` : ''}`);
-          console.log(`${palette.dim}  [gateway]${palette.reset} System prompt refreshed ${palette.dim}(${this.systemPrompt.length} chars)${palette.reset}`);
-          console.log(ok('Config reloaded successfully'));
-        } catch (err) {
-          console.error(`  ${palette.red}✗ [gateway]${palette.reset} Config reload failed: ${err}`);
+      process.on('SIGUSR1', () => this.reloadConfig('SIGUSR1'));
+    } else {
+      this.watchConfigForChanges();
+    }
+  }
+
+  /** Re-read and apply config from disk — triggered by SIGUSR1 (POSIX) or a file watcher (Windows). */
+  private reloadConfig(trigger: string): void {
+    console.log(`${palette.dim}  [gateway]${palette.reset} ${palette.cyan}${trigger}${palette.reset} — reloading config...`);
+    try {
+      const nextConfig = loadConfig(this.gatewayConfig.configPath);
+      if (!validateAndReport(nextConfig)) {
+        throw new Error('Configuration validation failed');
+      }
+      const nextProviderName = nextConfig.defaultProvider;
+      const nextProvider = PROVIDERS.get(nextProviderName);
+      if (!nextProvider) {
+        throw new Error(`Unknown provider: ${nextProviderName}`);
+      }
+      const nextFallbackChain: { name: string; provider: Provider }[] = [];
+      if (nextConfig.fallbackProviders?.length) {
+        for (const fbName of nextConfig.fallbackProviders) {
+          const fbProvider = PROVIDERS.get(fbName);
+          if (fbProvider) nextFallbackChain.push({ name: fbName, provider: fbProvider });
         }
+      }
+      const nextSystemPrompt = buildSystemPrompt({
+        workspace: nextConfig.workspace,
+        tools: this.toolRegistry.list().map(t => t.name),
       });
+      this.config = nextConfig;
+      this.providerName = nextProviderName;
+      this.provider = nextProvider;
+      this.model = nextConfig.defaultModel;
+      this.fallbackChain = nextFallbackChain;
+      this.systemPrompt = nextSystemPrompt;
+      console.log(`${palette.dim}  [gateway]${palette.reset} Provider: ${palette.cyan}${this.providerName}/${this.model}${palette.reset}${this.fallbackChain.length > 0 ? ` → fallback: ${this.fallbackChain.map(f => f.name).join(' → ')}` : ''}`);
+      console.log(`${palette.dim}  [gateway]${palette.reset} System prompt refreshed ${palette.dim}(${this.systemPrompt.length} chars)${palette.reset}`);
+      console.log(ok('Config reloaded successfully'));
+    } catch (err) {
+      console.error(`  ${palette.red}✗ [gateway]${palette.reset} Config reload failed: ${err}`);
+    }
+  }
+
+  /** Windows fallback for SIGUSR1 — watch the config file and reload on change (debounced). */
+  private watchConfigForChanges(): void {
+    const configPath = this.gatewayConfig.configPath;
+    if (!configPath || !fs.existsSync(configPath)) return;
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const watcher = fs.watch(configPath, { persistent: false }, () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        // Editors often write in multiple steps (truncate + write) — wait for it to settle
+        debounceTimer = setTimeout(() => this.reloadConfig(`file change: ${path.basename(configPath)}`), 300);
+      });
+      watcher.unref?.();
+      console.log(`${palette.dim}  [gateway]${palette.reset} Watching ${palette.cyan}${path.basename(configPath)}${palette.reset} for changes ${palette.dim}(Windows hot-reload fallback)${palette.reset}`);
+    } catch (err) {
+      console.warn(`[config] Could not watch ${configPath} for hot-reload: ${err instanceof Error ? err.message : err}`);
     }
   }
 
@@ -1798,7 +1866,7 @@ export async function startGateway(configPath?: string): Promise<SymbioteGateway
       },
       whatsapp: {
         enabled: !!(config as any).whatsapp?.enabled,
-        authDir: (config as any).whatsapp?.authDir ?? path.join(os.homedir(), '.mach6', 'whatsapp-auth'),
+        authDir: expandHome((config as any).whatsapp?.authDir ?? path.join(os.homedir(), '.mach6', 'whatsapp-auth')),
         phoneNumber: (config as any).whatsapp?.phoneNumber,
         autoRead: (config as any).whatsapp?.autoRead ?? true,
         policy: (config as any).whatsapp?.policy,

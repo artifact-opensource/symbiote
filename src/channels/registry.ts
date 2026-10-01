@@ -178,6 +178,18 @@ export class ChannelRegistry {
     throw new Error(`No running adapter for channel type "${channelType}"`);
   }
 
+  /**
+   * Edit a previously sent message, if the adapter supports it.
+   * Returns false (no throw) when the adapter can't edit, so callers can
+   * fall back gracefully (e.g. tool-progress bubbles).
+   */
+  async edit(adapterId: string, chatId: string, messageId: string, newContent: string): Promise<boolean> {
+    const entry = this.adapters.get(adapterId);
+    if (!entry || entry.status !== 'running' || !entry.adapter.editMessage) return false;
+    await entry.adapter.editMessage(chatId, messageId, newContent);
+    return true;
+  }
+
   // ── Status ─────────────────────────────────────────────────────────────
 
   /** List all registered adapters with their status */
