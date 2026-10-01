@@ -121,10 +121,10 @@ export function createDefaultSarsiModel(): SarsiModel {
       { id: 'g4', description: 'Maximize tool success rate', priority: 'high', metric: 'tool_success', target: 0.95, weight: 0.1 },
     ],
     providerRules: [
-      { id: 'p1', taskType: 'code', provider: 'groq', model: 'llama-3.3-70b', priority: 0.8, rationale: 'Fast + good at code' },
+      { id: 'p1', taskType: 'code', provider: 'groq', model: 'llama-3.3-70b-versatile', priority: 0.8, rationale: 'Fast + good at code' },
       { id: 'p2', taskType: 'reasoning', provider: 'anthropic', model: 'claude-sonnet-4', priority: 0.9, rationale: 'Best reasoning' },
       { id: 'p3', taskType: 'creative', provider: 'openai', model: 'gpt-4o', priority: 0.8, rationale: 'Good creative output' },
-      { id: 'p4', taskType: 'simple_qa', provider: 'groq', model: 'llama-3.3-70b', priority: 0.7, rationale: 'Fast for simple queries' },
+      { id: 'p4', taskType: 'simple_qa', provider: 'groq', model: 'llama-3.3-70b-versatile', priority: 0.7, rationale: 'Fast for simple queries' },
       { id: 'p5', taskType: 'long_context', provider: 'anthropic', model: 'claude-sonnet-4', priority: 0.9, conditions: ['context_length > 50000'], rationale: 'Large context window' },
     ],
     channelRules: [

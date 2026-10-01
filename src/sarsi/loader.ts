@@ -82,9 +82,12 @@ export function routeProvider(taskType: string): { provider: string; model: stri
   if (matches.length === 0) return null;
   
   const best = matches[0];
+  const modelAliases: Record<string, Record<string, string>> = {
+    groq: { 'llama-3.3-70b': 'llama-3.3-70b-versatile' },
+  };
   return {
     provider: best.provider,
-    model: best.model,
+    model: modelAliases[best.provider]?.[best.model] ?? best.model,
     ruleId: best.ruleId,
     confidence: best.confidence,
   };

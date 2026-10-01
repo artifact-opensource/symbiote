@@ -11,6 +11,7 @@ import 'dotenv/config';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 // @ts-ignore — no types for qrcode-terminal
 import qrcode from 'qrcode-terminal';
@@ -60,6 +61,7 @@ import { BlinkController } from '../agent/blink.js';
 import { loadConfig, type SymbioteConfig } from '../config/config.js';
 import { validateAndReport } from '../config/validator.js';
 import type { Provider, ProviderConfig } from '../providers/types.js';
+import { selectProviderRoute, type ProviderRouteChoice } from '../providers/route.js';
 import { anthropicProvider } from '../providers/anthropic.js';
 import { openaiProvider } from '../providers/openai.js';
 import { githubCopilotProvider } from '../providers/github-copilot.js';
@@ -855,45 +857,56 @@ export class SymbioteGateway {
         };
         const sandboxedTools = createSandboxedRegistry(this.toolRegistry, sandboxCtx);
 
-        // Provider config
-        const providerCfg = (this.config.providers as Record<string, any>)[this.providerName] ?? {};
+        // Run agent with BLINK continuation
+        console.log(`${palette.dim}  [http]${palette.reset} Agent turn for ${palette.violet}${sessionId}${palette.reset}`);
+        const startMs = Date.now();
+        const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
+        const turnTodoScope = `turn-${randomUUID()}`;
+
+        // ── PARC: Pre-route — determine optimal provider based on SARSI rules ──
+        let parcDecision: { provider: string; model: string; taskType: string; confidence: number; ruleId: string; reasoning: string } | null = null;
+        let routeChoice: ProviderRouteChoice = { name: this.providerName, provider: this.provider, model: this.model, routed: false };
+        try {
+          const routeContextLength = session.messages
+            .filter(message => message.role !== 'system')
+            .reduce((length, message) => length + (typeof message.content === 'string' ? message.content.length : JSON.stringify(message.content).length), 0);
+          const decision = preRoute(request.text, request.source ?? 'http', routeContextLength);
+          parcDecision = decision;
+          routeChoice = selectProviderRoute(
+            decision,
+            PROVIDERS,
+            this.config.providers as Record<string, { apiKey?: string } | undefined>,
+            routeChoice,
+          );
+          console.log(`${palette.dim}  [parc]${palette.reset} ${decision.taskType} → ${routeChoice.name}/${routeChoice.model} (conf: ${decision.confidence.toFixed(2)}${routeChoice.routed ? '' : ', using configured provider'})`);
+        } catch {
+          // Non-critical — use existing provider selection
+        }
+
+        const providerCfg = (this.config.providers as Record<string, any>)[routeChoice.name] ?? {};
         const thinkingCfg = (this.config as any).thinking;
         const provConfig = {
-          model: this.model,
           maxTokens: this.config.maxTokens,
           temperature: this.config.temperature,
           systemPrompt: this.systemPrompt,
           ...(thinkingCfg ? { thinking: thinkingCfg } : {}),
           ...providerCfg,
+          model: routeChoice.model,
         };
-
-        // Run agent with BLINK continuation
-        console.log(`${palette.dim}  [http]${palette.reset} Agent turn for ${palette.violet}${sessionId}${palette.reset}`);
-        const startMs = Date.now();
-        const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
-
-        // ── PARC: Pre-route — determine optimal provider based on SARSI rules ──
-        let parcDecision: { provider: string; model: string; taskType: string; confidence: number; ruleId: string; reasoning: string } | null = null;
-        try {
-          const decision = preRoute(request.text, request.source ?? 'http', request.text.length);
-          parcDecision = decision;
-          console.log(`${palette.dim}  [parc]${palette.reset} ${decision.taskType} → ${decision.provider}/${decision.model} (conf: ${decision.confidence.toFixed(2)})`);
-        } catch {
-          // Non-critical — use existing provider selection
-        }
 
         let currentSessionMessages = session.messages;
         let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
 
         while (blinkCtrl.shouldContinue()) {
           const result = await runAgent(currentSessionMessages, {
-            provider: this.provider,
+            provider: routeChoice.provider,
             providerConfig: provConfig,
             toolRegistry: sandboxedTools,
             sessionId,
             maxIterations: this.pulseBudget.getEffectiveCap(),
             contextMonitor: this.contextMonitor,
             contextStore: this.contextStore ?? undefined,
+            todoScope: turnTodoScope,
             blinkController: blinkCtrl,
             abortSignal: controller.signal,
             onEvent: (ev) => {
@@ -935,7 +948,7 @@ export class SymbioteGateway {
         }
 
         if (!finalResult) {
-          finalResult = { text: '[Blink depth exceeded]', messages: currentSessionMessages, toolCalls: [], iterations: 0, maxIterationsHit: true, aborted: false };
+          finalResult = { text: 'I reached the continuation limit before completing this task. Progress is saved; send "continue" to resume.', messages: currentSessionMessages, toolCalls: [], iterations: 0, maxIterationsHit: true, aborted: false };
         }
 
         // Save session (skip if already saved during abort)
@@ -1282,22 +1295,42 @@ export class SymbioteGateway {
         }
       }
 
+      const messageText = envelope.payload.text ?? '';
+      const routeContextLength = session.messages
+        .filter(message => message.role !== 'system')
+        .reduce((length, message) => length + (typeof message.content === 'string' ? message.content.length : JSON.stringify(message.content).length), 0);
+      let parcDecision: ReturnType<typeof preRoute> | null = null;
+      let routeChoice: ProviderRouteChoice = { name: this.providerName, provider: this.provider, model: this.model, routed: false };
+      try {
+        parcDecision = preRoute(messageText, envelope.source.channelType, routeContextLength);
+        routeChoice = selectProviderRoute(
+          parcDecision,
+          PROVIDERS,
+          this.config.providers as Record<string, { apiKey?: string } | undefined>,
+          routeChoice,
+        );
+        console.log(`${palette.dim}  [parc]${palette.reset} ${parcDecision.taskType} → ${routeChoice.name}/${routeChoice.model} (conf: ${parcDecision.confidence.toFixed(2)}${routeChoice.routed ? '' : ', using configured provider'})`);
+      } catch {
+        // Non-critical — use existing provider selection
+      }
+
       // Provider config
-      const providerCfg = (this.config.providers as Record<string, any>)[this.providerName] ?? {};
+      const providerCfg = (this.config.providers as Record<string, any>)[routeChoice.name] ?? {};
       const thinkingCfg = (this.config as any).thinking;
       const provConfig: ProviderConfig = {
-        model: this.model,
         maxTokens: this.config.maxTokens,
         temperature: this.config.temperature,
         systemPrompt: this.systemPrompt,
         ...(thinkingCfg ? { thinking: thinkingCfg } : {}),
         ...providerCfg,
+        model: routeChoice.model,
       };
 
       // Run agent with BLINK continuation
       console.log(`\n${palette.dim}  [turn]${palette.reset} ${palette.violet}${sessionId}${palette.reset} ${palette.dim}via${palette.reset} ${envelope.source.channelType}${palette.dim}/${palette.reset}${envelope.source.chatId}`);
       const turnStartTime = Date.now();
       const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
+      const turnTodoScope = `turn-${randomUUID()}`;
 
       let currentSessionMessages = session.messages;
       let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
@@ -1308,6 +1341,7 @@ export class SymbioteGateway {
         providerConfig: useConfig,
         toolRegistry: sandboxedTools,
         sessionId,
+        todoScope: turnTodoScope,
         maxIterations: this.pulseBudget.getEffectiveCap(),
         contextMonitor: this.contextMonitor,
         contextStore: this.contextStore ?? undefined,
@@ -1338,14 +1372,14 @@ export class SymbioteGateway {
       const runWithFallback = async (msgs: typeof currentSessionMessages): Promise<Awaited<ReturnType<typeof runAgent>>> => {
         try {
           const turnStartTime = Date.now();
-          const result = await runAgent(msgs, makeRunOpts(this.provider, provConfig));
+          const result = await runAgent(msgs, makeRunOpts(routeChoice.provider, provConfig));
           // v2.0 — Record provider success metrics
-          this.providerHealth.recordSuccess(this.providerName, Date.now() - turnStartTime);
+          this.providerHealth.recordSuccess(routeChoice.name, Date.now() - turnStartTime);
           return result;
         } catch (primaryErr) {
           // v2.0 — Record primary provider failure
-          this.providerHealth.recordFailure(this.providerName, primaryErr instanceof Error ? primaryErr.message : String(primaryErr));
-          this.metrics.recordProviderError(this.providerName, primaryErr instanceof Error ? primaryErr.message : String(primaryErr));
+          this.providerHealth.recordFailure(routeChoice.name, primaryErr instanceof Error ? primaryErr.message : String(primaryErr));
+          this.metrics.recordProviderError(routeChoice.name, primaryErr instanceof Error ? primaryErr.message : String(primaryErr));
 
           // Try each fallback provider in order
           for (const fb of this.fallbackChain) {
@@ -1355,7 +1389,7 @@ export class SymbioteGateway {
               continue;
             }
 
-            console.log(`${palette.dim}  [fallback]${palette.reset} ${palette.yellow}Primary ${this.providerName} failed${palette.reset}: ${primaryErr instanceof Error ? primaryErr.message : primaryErr}`);
+            console.log(`${palette.dim}  [fallback]${palette.reset} ${palette.yellow}Primary ${routeChoice.name} failed${palette.reset}: ${primaryErr instanceof Error ? primaryErr.message : primaryErr}`);
             console.log(`${palette.dim}  [fallback]${palette.reset} Trying ${palette.cyan}${fb.name}${palette.reset}...`);
             try {
               const fbCfg = (this.config.providers as Record<string, any>)[fb.name] ?? {};
@@ -1436,7 +1470,7 @@ export class SymbioteGateway {
       // If loop exhausted without a finalResult (shouldn't happen but safety net)
       if (!finalResult) {
         console.warn(`[BLINK] Loop ended without result — depth capped`);
-        finalResult = { text: '[Blink depth exceeded]', messages: currentSessionMessages, toolCalls: [], iterations: 0, maxIterationsHit: true, aborted: false };
+        finalResult = { text: 'I reached the continuation limit before completing this task. Progress is saved; send "continue" to resume.', messages: currentSessionMessages, toolCalls: [], iterations: 0, maxIterationsHit: true, aborted: false };
       }
 
       await progressBubble.finalize();
@@ -1528,6 +1562,9 @@ export class SymbioteGateway {
                 replyToId: envelope.metadata.platformMessageId,
               },
             );
+            if (!sendResult.success) {
+              throw new Error(sendResult.error ?? 'Channel send failed');
+            }
           }
           console.log(`${palette.dim}  [send]${palette.reset} ${palette.green}delivered${palette.reset}`);
 
@@ -1535,7 +1572,7 @@ export class SymbioteGateway {
           try {
             const msgText = envelope.payload.text ?? '';
             const channelName = envelope.source.adapterId ?? 'unknown';
-            const decision = preRoute(msgText, channelName, msgText.length);
+            const decision = parcDecision ?? preRoute(msgText, channelName, msgText.length);
             postDeliver(decision, {
               channel: channelName,
               userMessage: msgText,
@@ -1571,10 +1608,12 @@ export class SymbioteGateway {
         const allPending = [...pending, ...busPending];
         this.pendingEnvelopes.delete(sessionId);
         if (allPending.length > 0) {
-          // Recursion with new context
+          // Preserve every message that arrived while this turn was active.
           this.activeTurns.delete(sessionId);
           this.channelRegistry.setSessionActive(sessionId, false);
-          await this.runAgentTurn(allPending[allPending.length - 1]); // most recent message
+          for (const pendingEnvelope of allPending) {
+            await this.runAgentTurn(pendingEnvelope);
+          }
           return;
         }
       } else {
@@ -1605,8 +1644,9 @@ export class SymbioteGateway {
       if (pending && pending.length > 0) {
         this.pendingEnvelopes.delete(sessionId);
         console.log(`${palette.dim}  [gateway]${palette.reset} Processing ${pending.length} pending for ${palette.violet}${sessionId}${palette.reset}`);
-        // Process the most recent pending message (others are stale context)
-        await this.runAgentTurn(pending[pending.length - 1]);
+        for (const pendingEnvelope of pending) {
+          await this.runAgentTurn(pendingEnvelope);
+        }
       }
     }
   }

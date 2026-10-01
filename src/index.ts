@@ -13,6 +13,8 @@ import * as readline from 'node:readline';
 import { loadConfig } from './config/config.js';
 import { anthropicProvider } from './providers/anthropic.js';
 import { openaiProvider } from './providers/openai.js';
+import { openrouterProvider } from './providers/openrouter.js';
+import { selectProviderRoute } from './providers/route.js';
 import { githubCopilotProvider } from './providers/github-copilot.js';
 import { gladiusProvider } from './providers/gladius.js';
 import { groqProvider } from './providers/groq.js';
@@ -40,14 +42,16 @@ import type { Session } from './sessions/types.js';
 import {
   palette, gradient, multiGradient, banner, logo, tagline,
   sectionHeader, ok, warn, info, kvLine, divider, thickDivider,
-  versionBanner, box,
+  versionBanner, box, createActivityIndicator,
 } from './cli/brand.js';
 import { APP_VERSION } from './meta/version.js';
+import { classifyTask, routeProvider } from './sarsi/loader.js';
 
 // ─── Provider registry ───
 const providers = new Map<string, Provider>([
   ['anthropic', anthropicProvider],
   ['openai', openaiProvider],
+  ['openrouter', openrouterProvider],
   ['github-copilot', githubCopilotProvider],
   ['gladius', gladiusProvider],
   ['groq', groqProvider],
@@ -119,39 +123,66 @@ async function main() {
   console.log(versionBanner(APP_VERSION));
 
   const providerDisplay = `${palette.cyan}${currentProvider!.name}${palette.reset}${palette.dim}/${palette.reset}${palette.white}${currentModel}${palette.reset}`;
-  const toolCount = `${palette.gold}${registry.list().length}${palette.reset}`;
-  const sessionDisplay = `${palette.violet}${sessionId}${palette.reset}`;
-
-  console.log(kvLine('Provider', providerDisplay));
-  console.log(kvLine('Tools', `${toolCount} ${palette.dim}registered${palette.reset}`));
-  console.log(kvLine('Session', sessionDisplay));
+  console.log(`  ${palette.green}●${palette.reset} ${providerDisplay}  ${palette.dim}·${palette.reset} ${palette.gold}${registry.list().length}${palette.reset} tools  ${palette.dim}·${palette.reset} session ${palette.violet}${sessionId}${palette.reset}`);
+  console.log(`  ${palette.dim}/help${palette.reset} ${palette.silver}for commands${palette.reset}`);
   console.log();
-  console.log(`  ${palette.dim}Type ${palette.reset}${palette.cyan}/help${palette.reset}${palette.dim} for commands${palette.reset}`);
-  console.log();
-  console.log(divider());
+  console.log(divider(54));
   console.log();
 
   const runWithCallbacks = async (msgs: Message[], provConfig: ProviderConfig) => {
-    return runAgent(msgs, {
-      provider: currentProvider!,
-      providerConfig: { ...provConfig, systemPrompt },
-      toolRegistry: registry,
-      sessionId,
-      onEvent(ev) {
-        if (ev.type === 'text_delta') process.stdout.write(ev.text);
-        if (ev.type === 'usage') {
-          sessionMgr.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
+    const activity = createActivityIndicator();
+    const latestUserMessage = [...msgs].reverse().find(message => message.role === 'user');
+    const userText = typeof latestUserMessage?.content === 'string' ? latestUserMessage.content : '';
+    const contextLength = msgs
+      .filter(message => message.role !== 'system')
+      .reduce((length, message) => length + (typeof message.content === 'string' ? message.content.length : JSON.stringify(message.content).length), 0);
+    const taskType = contextLength > 50_000 ? 'long_context' : classifyTask(userText);
+    const route = routeProvider(taskType);
+    const routeChoice = selectProviderRoute(
+      route ?? { provider: currentProviderName, model: currentModel },
+      providers,
+      config.providers as Record<string, { apiKey?: string } | undefined>,
+      { name: currentProviderName, provider: currentProvider!, model: currentModel },
+    );
+    const routeConfig = routeChoice.routed
+      ? {
+          ...provConfig,
+          ...(config.providers[routeChoice.name] ?? {}),
+          model: routeChoice.model,
         }
-      },
-      onToolStart(name) {
-        sessionMgr.trackToolCall(session, name);
-        console.log(`\n${palette.violet}  ⚡ ${name}${palette.reset}`);
-      },
-      onToolEnd(name, result) {
-        const preview = result.length > 200 ? result.slice(0, 200) + '...' : result;
-        console.log(`${palette.green}  ✓ ${name}${palette.reset} ${palette.dim}${preview.split('\n')[0]}${palette.reset}`);
-      },
-    });
+      : provConfig;
+    activity.start();
+    try {
+      const result = await runAgent(msgs, {
+        provider: routeChoice.provider,
+        providerConfig: { ...routeConfig, systemPrompt },
+        toolRegistry: registry,
+        sessionId,
+        onEvent(ev) {
+          if (ev.type === 'usage') {
+            sessionMgr.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
+          }
+        },
+        onToolStart(name) {
+          activity.stop();
+          sessionMgr.trackToolCall(session, name);
+          console.log(`\n${palette.violet}  ◈ ${name}${palette.reset}`);
+          activity.start(`Running ${name}`);
+        },
+        onToolEnd(name, result) {
+          activity.stop();
+          const preview = result.length > 200 ? result.slice(0, 200) + '...' : result;
+          console.log(`${palette.green}  ✓ ${name}${palette.reset} ${palette.dim}${preview.split('\n')[0]}${palette.reset}`);
+          activity.start();
+        },
+      });
+      activity.stop();
+      if (result.text) process.stdout.write(result.text);
+      return result;
+    } catch (err) {
+      activity.stop();
+      throw err;
+    }
   };
 
   // One-shot mode

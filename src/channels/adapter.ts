@@ -152,9 +152,10 @@ export abstract class BaseAdapter implements ChannelAdapter {
   async send(chatId: string, message: OutboundMessage): Promise<SendResult> {
     // Rate limit check
     if (this.rateLimiter) {
-      const delay = this.rateLimiter.check();
-      if (delay > 0) await sleep(delay);
-      this.rateLimiter.consume();
+      while (!this.rateLimiter.consume()) {
+        const delay = this.rateLimiter.check();
+        if (delay > 0) await sleep(delay);
+      }
     }
 
     try {

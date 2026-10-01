@@ -8,26 +8,29 @@
 // ── ANSI 256-Color + True Color Helpers ─────────────────────────
 
 // True color: \x1b[38;2;r;g;bm (foreground)
-const rgb = (r: number, g: number, b: number) => `\x1b[38;2;${r};${g};${b}m`;
-const bgRgb = (r: number, g: number, b: number) => `\x1b[48;2;${r};${g};${b}m`;
+const colorEnabled = process.env.NO_COLOR === undefined
+  && process.env.FORCE_COLOR !== '0'
+  && (process.env.FORCE_COLOR !== undefined || (process.stdout.isTTY === true && process.env.TERM !== 'dumb'));
+const rgb = (r: number, g: number, b: number) => colorEnabled ? `\x1b[38;2;${r};${g};${b}m` : '';
+const bgRgb = (r: number, g: number, b: number) => colorEnabled ? `\x1b[48;2;${r};${g};${b}m` : '';
 
 // ── Brand Palette ───────────────────────────────────────────────
 
 export const palette = {
-  // Primary — electric violet to deep purple
-  violet:      rgb(138, 43, 226),
-  purple:      rgb(106, 13, 173),
-  deepPurple:  rgb(75, 0, 130),
+  // Primary — lagoon teal to open sky
+  violet:      rgb(76, 205, 173),
+  purple:      rgb(49, 139, 164),
+  deepPurple:  rgb(34, 83, 104),
 
-  // Accent — molten gold
-  gold:        rgb(255, 193, 37),
-  amber:       rgb(255, 160, 0),
-  warmGold:    rgb(218, 165, 32),
+  // Accent — restrained amber
+  gold:        rgb(255, 190, 112),
+  amber:       rgb(239, 145, 89),
+  warmGold:    rgb(201, 142, 86),
 
-  // Energy — electric cyan / teal
-  cyan:        rgb(0, 229, 255),
-  teal:        rgb(0, 188, 212),
-  ice:         rgb(178, 235, 242),
+  // Energy — clear sky blue
+  cyan:        rgb(105, 190, 231),
+  teal:        rgb(70, 160, 184),
+  ice:         rgb(186, 224, 232),
 
   // Neutrals
   white:       rgb(240, 240, 245),
@@ -42,11 +45,11 @@ export const palette = {
   orange:      rgb(255, 145, 0),
 
   // Reset
-  reset:       '\x1b[0m',
-  bold:        '\x1b[1m',
-  dim_attr:    '\x1b[2m',
-  italic:      '\x1b[3m',
-  underline:   '\x1b[4m',
+  reset:       colorEnabled ? '\x1b[0m' : '',
+  bold:        colorEnabled ? '\x1b[1m' : '',
+  dim_attr:    colorEnabled ? '\x1b[2m' : '',
+  italic:      colorEnabled ? '\x1b[3m' : '',
+  underline:   colorEnabled ? '\x1b[4m' : '',
 };
 
 // ── Gradient Text ───────────────────────────────────────────────
@@ -92,32 +95,47 @@ export function multiGradient(text: string, stops: [number, number, number][]): 
 // ── ASCII Art ───────────────────────────────────────────────────
 
 /**
- * The Symbiote banner — compact, striking.
- * Each line gets the violet→cyan→gold gradient.
+ * Compact connected-node mark for startup and help surfaces.
  */
 export function banner(): string {
-  const lines = [
-    '                          __   _____ ',
-    '   ____ ___  ____ ______ / /_ / ___/ ',
-    '  / __ `__ \\/ __ `/ ___/ __ \\/ __ \\  ',
-    ' / / / / / / /_/ / /__/ / / / /_/ /  ',
-    '/_/ /_/ /_/\\__,_/\\___/_/ /_/\\____/   ',
-  ];
-
-  const stops: [number, number, number][] = [
-    [138, 43, 226],   // violet
-    [0, 229, 255],    // cyan
-    [255, 193, 37],   // gold
-  ];
-
-  return lines.map(line => multiGradient(line, stops)).join('\n');
+  const mark = gradient('◇─◈─◇', [76, 205, 173], [105, 190, 231]);
+  const name = gradient('SYMBIOTE', [76, 205, 173], [105, 190, 231]);
+  return `  ${mark}  ${palette.bold}${name}${palette.reset}`;
 }
 
 /**
  * Compact one-line logo for prompts and headers.
  */
 export function logo(): string {
-  return `${palette.bold}${gradient('⚡ Symbiote', [138, 43, 226], [0, 229, 255])}${palette.reset}`;
+  return `${palette.bold}${gradient('◇ Symbiote', [76, 205, 173], [105, 190, 231])}${palette.reset}`;
+}
+
+export function createActivityIndicator() {
+  const enabled = process.stdout.isTTY === true && process.env.TERM !== 'dumb';
+  const frames = ['◇', '◈', '◆', '◈'];
+  let frame = 0;
+  let label = 'Thinking';
+  let timer: ReturnType<typeof setInterval> | undefined;
+
+  const render = () => {
+    if (!enabled) return;
+    process.stdout.write(`\r  ${palette.cyan}${frames[frame++ % frames.length]}${palette.reset} ${palette.dim}${label}${palette.reset}`);
+  };
+
+  return {
+    start(nextLabel = label) {
+      label = nextLabel;
+      if (!enabled || timer) return;
+      render();
+      timer = setInterval(render, 110);
+      timer.unref?.();
+    },
+    stop() {
+      if (timer) clearInterval(timer);
+      timer = undefined;
+      if (enabled) process.stdout.write('\r\x1b[2K');
+    },
+  };
 }
 
 // ── Box Drawing ─────────────────────────────────────────────────
@@ -222,7 +240,7 @@ export function thickDivider(width = 56): string {
 // ── Tagline ─────────────────────────────────────────────────────
 
 export function tagline(): string {
-  return subHeader('AI agent framework · artifact virtual');
+  return subHeader('A local-first agent runtime');
 }
 
 // ── Version Banner (for boot/startup) ───────────────────────────
@@ -232,11 +250,7 @@ export function versionBanner(version: string): string {
   return [
     '',
     banner(),
-    '',
-    `  ${palette.bold}${gradient(ver, [255, 193, 37], [255, 160, 0])}${palette.reset}  ${palette.dim_attr}${palette.silver}· AI agent framework${palette.reset}`,
-    `  ${palette.dim_attr}${palette.dim}artifact virtual · artifactvirtual.com${palette.reset}`,
-    '',
-    thickDivider(),
+    `  ${palette.silver}A local-first agent runtime${palette.reset}  ${palette.dim}·${palette.reset}  ${palette.gold}${ver}${palette.reset}`,
     '',
   ].join('\n');
 }

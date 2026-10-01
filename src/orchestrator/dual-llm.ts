@@ -61,6 +61,7 @@ export class DualLLMOrchestrator implements Provider {
   private localProviders: Map<string, Provider>;
   private config: OrchestratorConfig;
   private semaphore: AsyncSemaphore;
+  private toolSemaphore: AsyncSemaphore;
   private toolRegistry: ToolRegistry;
   private lastUsageReport: DAGUsageReport | null = null;
 
@@ -72,8 +73,9 @@ export class DualLLMOrchestrator implements Provider {
   ) {
     this.cloudProvider = cloudProvider;
     this.localProviders = localProviders;
-    this.config = config;
-    this.semaphore = new AsyncSemaphore(config.maxParallel);
+    this.config = { ...config, maxParallel: Math.max(1, Math.floor(config.maxParallel) || 1) };
+    this.semaphore = new AsyncSemaphore(this.config.maxParallel);
+    this.toolSemaphore = new AsyncSemaphore(5);
     this.toolRegistry = toolRegistry;
 
     if (!config.enabled) {
@@ -500,18 +502,26 @@ Important:
     };
 
     const release = await this.semaphore.acquire();
+    let releaseDeferred = false;
+    let timedOut = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let resultPromise: Promise<string> | undefined;
     try {
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error(`Task ${node.id} timed out after ${this.config.taskTimeoutMs}ms`)), this.config.taskTimeoutMs);
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          reject(new Error(`Task ${node.id} timed out after ${this.config.taskTimeoutMs}ms`));
+        }, this.config.taskTimeoutMs);
       });
 
       let textAccum = '';
       const pendingToolCalls: ToolCall[] = [];
       const toolInputBuffers = new Map<string, string>();
       let iterations = 0;
-      const maxIterations = 10;
+      let completionReviewPending = false;
+      const maxIterations = 100;
 
-      const resultPromise = (async () => {
+      resultPromise = (async () => {
         while (iterations < maxIterations) {
           iterations++;
 
@@ -545,8 +555,18 @@ Important:
             }
           }
 
-          // If no tool calls and we have text, we're done
+          // Ask the model to verify completion before accepting a node result.
           if (pendingToolCalls.length === 0) {
+            if (!completionReviewPending) {
+              if (textAccum.trim()) taskMessages.push({ role: 'assistant', content: textAccum.trim() });
+              taskMessages.push({
+                role: 'user',
+                content: 'Internal completion review: check the assigned task and work completed. If work remains, continue using tools. If complete, provide the final result. If blocked, state the blocker and remaining work. Do not mention this review.',
+              });
+              textAccum = '';
+              completionReviewPending = true;
+              continue;
+            }
             nodeUsage.toolIterations = iterations - 1;
             nodeUsage.durationMs = Date.now() - nodeStartTime;
             return textAccum;
@@ -555,11 +575,14 @@ Important:
           // Execute tool calls via the real registry
           const toolResults = await Promise.allSettled(
             pendingToolCalls.map(async (tc) => {
+              const releaseTool = await this.toolSemaphore.acquire();
               try {
                 const result = await this.toolRegistry.execute(tc.name, tc.input);
                 return { tc, result, isError: false };
               } catch (err) {
                 return { tc, result: JSON.stringify({ error: err instanceof Error ? err.message : String(err), is_error: true }), isError: true };
+              } finally {
+                releaseTool();
               }
             })
           );
@@ -588,6 +611,7 @@ Important:
           pendingToolCalls.length = 0;
           toolInputBuffers.clear();
           textAccum = '';
+          completionReviewPending = false;
         }
 
         nodeUsage.toolIterations = maxIterations;
@@ -597,8 +621,15 @@ Important:
 
       const result = await Promise.race([resultPromise, timeoutPromise]);
       return { result, usage: nodeUsage };
+    } catch (err) {
+      if (timedOut && resultPromise) {
+        releaseDeferred = true;
+        void resultPromise.then(release, release);
+      }
+      throw err;
     } finally {
-      release();
+      if (timeoutId) clearTimeout(timeoutId);
+      if (!releaseDeferred) release();
     }
   }
 

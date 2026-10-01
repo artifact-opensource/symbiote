@@ -9,6 +9,7 @@ import { runAgent } from '../agent/runner.js';
 import { buildSystemPrompt } from '../agent/system-prompt.js';
 import { createSandboxedRegistry, type SessionContext } from '../tools/sandbox.js';
 import { PolicyEngine } from '../tools/policy.js';
+import { BlinkController } from '../agent/blink.js';
 
 const MAX_DEPTH = 3;
 
@@ -105,6 +106,8 @@ Task: ${config.task}`,
     toolRegistry: ToolExecutor,
   ): Promise<void> {
     const maxIter = config.maxIterations ?? 25;
+    const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
+    const todoScope = `subagent-${randomUUID()}`;
     const policyEngine = new PolicyEngine();
     policyEngine.setSessionPolicy({
       sessionId: session.id,
@@ -136,12 +139,14 @@ Task: ${config.task}`,
           toolRegistry,
           maxIterations: maxIter,
           sessionId: session.id,
+          todoScope,
           policyEngine,
           abortSignal: runtime.abortController.signal,
+          blinkController: blinkCtrl,
         });
 
         session.messages = result.messages;
-        if (result.text) {
+        if (result.text && !result.maxIterationsHit) {
           session.messages.push({ role: 'assistant', content: result.text });
         }
 
@@ -162,6 +167,22 @@ Task: ${config.task}`,
         if (result.aborted) {
           handle.status = 'failed';
           handle.error = 'Sub-agent aborted before completion';
+          handle.completedAt = Date.now();
+          this.sessionManager.save(session);
+          this.onComplete?.(config.parentSessionId, handle);
+          return;
+        }
+
+        if (result.maxIterationsHit) {
+          if (blinkCtrl.needsBlink(true)) {
+            blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);
+            session.messages.push({ role: 'user', content: blinkCtrl.getResumeMessage() });
+            this.sessionManager.save(session);
+            await new Promise(resolve => setTimeout(resolve, blinkCtrl.getCooldownMs()));
+            continue;
+          }
+          handle.status = 'failed';
+          handle.error = 'Sub-agent reached its continuation limit before completing the task';
           handle.completedAt = Date.now();
           this.sessionManager.save(session);
           this.onComplete?.(config.parentSessionId, handle);

@@ -44,6 +44,12 @@ export class PulseBudgetManager {
 
   /** Record a completed session's iteration count and evaluate revert */
   recordSession(iterations: number): { reverted: boolean; effectiveCap: number } {
+    if (iterations >= EXPAND_THRESHOLD && this.state.effectiveCap < EXPANDED_CAP) {
+      this.state.effectiveCap = EXPANDED_CAP;
+      this.state.expandedAt = Date.now();
+      console.log(`[PULSE] Expanding effective cap ${DEFAULT_CAP} → ${EXPANDED_CAP} after ${iterations} iterations`);
+    }
+
     this.state.recentIterations.push(iterations);
 
     // Keep only the last REVERT_WINDOW entries

@@ -11,6 +11,7 @@ import type { TemperatureConfig, TaskCategory } from './temperature.js';
 import type { BlinkController } from './blink.js';
 import type { ContextStore } from './context-store.js';
 import { TodoManager } from './todo.js';
+import { randomUUID } from 'node:crypto';
 
 /** Minimal interface for tool registries (satisfied by both ToolRegistry and SandboxedToolRegistry) */
 export interface ToolExecutor {
@@ -31,6 +32,7 @@ export interface RunnerConfig {
   temperatureConfig?: TemperatureConfig;
   abortSignal?: AbortSignal;
   contextStore?: ContextStore;
+  todoScope?: string;
   blinkController?: BlinkController;
   onEvent?: (event: StreamEvent) => void;
   onToolStart?: (name: string, input: Record<string, unknown>) => void;
@@ -45,6 +47,26 @@ export interface RunResult {
   maxIterationsHit: boolean;
   aborted: boolean;  // True if agent was interrupted externally (SIGTERM, new message, etc.)
   temperatureHistory?: Array<{ iteration: number; category: TaskCategory; temperature: number }>;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  map: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(items.length, Math.max(1, Math.floor(limit)));
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      results[index] = await map(items[index], index);
+    }
+  }));
+
+  return results;
 }
 
 /**
@@ -71,7 +93,8 @@ export async function runAgent(
   let currentMessages = [...messages];
   let iterations = 0;
   let textAccum = '';
-  const todoManager = new TodoManager({ scope: config.sessionId ?? 'default', workspace: process.cwd() });
+  let completionReviewPending = false;
+  const todoManager = new TodoManager({ scope: config.todoScope ?? `run-${randomUUID()}`, workspace: process.cwd() });
 
   const ensureTodoPlan = () => {
     const userSummary = [...currentMessages].reverse().find(msg => msg.role === 'user');
@@ -112,10 +135,10 @@ export async function runAgent(
       if (active) {
         todoManager.updateTask(active.id, { status: 'in_progress' });
       }
-      console.log(`[todo] ${todoManager.renderMarkdown()}`);
     } else {
       ensureTodoPlan();
     }
+    if (iterations === 0) console.log(`[todo] ${todoManager.renderMarkdown()}`);
 
     iterations++;
 
@@ -312,8 +335,20 @@ export async function runAgent(
 
     // If no tool calls, we're done
     if (pendingToolCalls.length === 0) {
+      if (!completionReviewPending) {
+        const candidate = textAccum.trim();
+        if (candidate) currentMessages.push({ role: 'assistant', content: candidate });
+        currentMessages.push({
+          role: 'user',
+          content: 'Internal completion review: compare the original request with the work completed so far. If any requested work remains, continue it now using tools. If it is complete, provide the final user-facing response. If genuinely blocked, state the blocker and what remains. Do not mention this review.',
+        });
+        textAccum = '';
+        completionReviewPending = true;
+        continue;
+      }
+
       for (const task of todoManager.list()) {
-        if (task.status !== 'completed') {
+        if (task.status === 'in_progress' || task.status === 'pending') {
           todoManager.updateTask(task.id, { status: 'completed' });
         }
       }
@@ -332,9 +367,9 @@ export async function runAgent(
 
     // Execute tool calls concurrently and append results
     const MAX_RESULT_SIZE = 50 * 1024; // 50KB
-    const toolResults = await Promise.allSettled(
-      pendingToolCalls.map(async (tc) => {
-        config.onToolStart?.(tc.name, tc.input);
+    const toolResults = await mapWithConcurrency(pendingToolCalls, 5, async (tc) => {
+      try {
+        try { config.onToolStart?.(tc.name, tc.input); } catch { /* progress reporting is non-critical */ }
         try {
           let result = await config.toolRegistry.execute(tc.name, tc.input);
           if (result.length > MAX_RESULT_SIZE) {
@@ -346,21 +381,20 @@ export async function runAgent(
             logInjectionAttempt(tc.name, sanitized.patterns, result);
           }
           result = sanitized.text;
-          config.onToolEnd?.(tc.name, result);
+          try { config.onToolEnd?.(tc.name, result); } catch { /* progress reporting is non-critical */ }
           return { tc, result, isError: false };
         } catch (err) {
           const errMsg = JSON.stringify({ error: err instanceof Error ? err.message : String(err), is_error: true });
-          config.onToolEnd?.(tc.name, errMsg);
+          try { config.onToolEnd?.(tc.name, errMsg); } catch { /* progress reporting is non-critical */ }
           return { tc, result: errMsg, isError: true };
         }
-      }),
-    );
+      } catch (err) {
+        const errMsg = JSON.stringify({ error: err instanceof Error ? err.message : String(err), is_error: true });
+        return { tc, result: errMsg, isError: true };
+      }
+    });
 
-    for (const settled of toolResults) {
-      const { tc, result, isError } = settled.status === 'fulfilled'
-        ? settled.value
-        : { tc: pendingToolCalls[0], result: JSON.stringify({ error: 'Tool execution failed', is_error: true }), isError: true };
-
+    for (const { tc, result, isError } of toolResults) {
       allToolCalls.push({ name: tc.name, input: tc.input, result });
 
       currentMessages.push({
@@ -373,6 +407,7 @@ export async function runAgent(
 
     // Track recent tool names for ATM classification in next iteration
     recentToolNames = pendingToolCalls.map(tc => tc.name);
+    completionReviewPending = false;
 
     // Check abort after tool execution before next LLM call
     if (config.abortSignal?.aborted) {
