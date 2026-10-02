@@ -14,7 +14,7 @@ Architecture:
 The loop: Wake → Memory Maintenance → Read Context → Triage → Work (maybe) → Sleep → Repeat
 
 Budget-aware, interruptible, conversation-respecting.
-Manages both AVA and Aria memory systems proactively.
+Proactively manages the agent's memory systems.
 """
 
 import json
@@ -148,8 +148,8 @@ def _auto_stage_context(log: logging.Logger, workspace: str):
     """Autonomously stage important context into COMB.
     
     Reads today's memory file and recent git activity to build
-    a context snapshot. This ensures AVA always wakes up with
-    fresh operational context even if she didn't stage manually.
+    a context snapshot. This ensures the agent always wakes up with
+    fresh operational context even if it wasn't staged manually.
     """
     today = datetime.now(PKT).strftime("%Y-%m-%d")
     today_short = datetime.now(PKT).strftime("%m-%d")
@@ -457,65 +457,6 @@ def gather_context(config: PulseConfig, state: PulseState) -> dict:
     except Exception:
         pass
 
-    # Check qorvex watchdog state
-    try:
-        qorvex_state_file = Path("/tmp/ava-qorvex/watchdog-state.json")
-        if qorvex_state_file.exists():
-            sov = json.loads(qorvex_state_file.read_text())
-            ctx["qorvex"] = {
-                "state": sov.get("state", "unknown"),
-                "flip_count": sov.get("flip_count", 0),
-                "last_ping_ok": sov.get("last_ping_ok", 1),
-            }
-    except Exception:
-        pass
-
-    # ── Sisters IPC Context ─────────────────────────────────────────────
-    try:
-        import httpx as _hx
-        ipc_resp = _hx.get("http://127.0.0.1:3007/status", timeout=2)
-        if ipc_resp.status_code == 200:
-            ipc_data = ipc_resp.json()
-            peers_resp = _hx.get("http://127.0.0.1:3007/peers", timeout=2)
-            peers = peers_resp.json().get("peers", []) if peers_resp.status_code == 200 else []
-            ctx["sisters_ipc"] = {
-                "daemon_up": True,
-                "uptime_min": round(ipc_data.get("uptime", 0) / 60, 1),
-                "total_messages": ipc_data.get("totalMessages", 0),
-                "peers_online": [p.get("name", "?") for p in peers],
-                "aria_connected": any(p.get("name") == "aria" for p in peers),
-                "ava_connected": any(p.get("name") == "ava" for p in peers),
-            }
-        else:
-            ctx["sisters_ipc"] = {"daemon_up": False}
-    except Exception:
-        ctx["sisters_ipc"] = {"daemon_up": False}
-
-    # ── Aria Health (Enhanced — Session + Process + Context) ──────────────
-    try:
-        aria_health = check_aria_health(logging.getLogger("pulse"))
-        ctx["aria"] = {
-            "process_running": aria_health["running"],
-            "pid": aria_health["pid"],
-            "model": "claude-opus-4.6",
-            "total_active_tokens": aria_health["total_active_tokens"],
-            "critical": aria_health["critical"],
-            "token_exceeded": aria_health.get("token_exceeded", False),
-            "needs_compact": aria_health["needs_compact"],
-            "recent_errors": aria_health.get("recent_errors", 0),
-            "sessions": {k: v for k, v in list(aria_health["sessions"].items())[:5]},
-        }
-        # COMB health
-        aria_comb = Path("/dev/null")
-        if aria_comb.exists():
-            aria_docs = list(aria_comb.glob("*.json"))
-            ctx["aria"]["comb_documents"] = len(aria_docs)
-            if aria_docs:
-                latest = max(aria_docs, key=lambda p: p.name)
-                ctx["aria"]["comb_latest"] = latest.stem
-    except Exception:
-        ctx["aria"] = {"process_running": False, "error": "health check failed"}
-
     # ── Native VDB health ────────────────────────────────────────────────
     try:
         ctx["memory_systems"] = {"vdb": json.loads(_run_vdb(config.workspace, "stats", timeout=15))}
@@ -531,8 +472,6 @@ def gather_context(config: PulseConfig, state: PulseState) -> dict:
 TRIAGE_SYSTEM = """You are PULSE — the agent's autonomous triage engine. You manage the configured workspace and its memory.
 
 You receive a context snapshot including:
-- sisters_ipc: cross-comm status between AVA and Aria
-- aria: Aria's process health and session tokens
 - memory_systems.vdb: persistent Symbiote VDB document, term, and source counts
 
 You output ONE decision as JSON.
@@ -548,23 +487,12 @@ Rules:
 8. HEARTBEAT.md unchecked items are your task board
 9. If active_installs shows running installs → DO NOT interfere. Wait for completion.
 10. If recent_installs_completed shows finished installs → consider post-install tasks
-11. If sisters_ipc.daemon_up is false → restart IPC daemon (critical)
-12. If aria.process_running is false → flag for restart (critical)
-13. If aria.critical is true → flag "aria_compact_needed" as critical task
-14. If aria.token_exceeded is true → IMMEDIATE compact needed (she's bricked)
-15. If aria.needs_compact has entries → compact those sessions (high priority)
-16. Prefer work within the configured Symbiote workspace.
+11. Prefer work within the configured Symbiote workspace.
 
 MEMORY SYSTEMS MANAGEMENT:
 - memory_systems.vdb.available: if false, report the VDB bridge failure; do not attempt external index restarts.
 - memory_systems.vdb.documentCount: track persistent memory growth.
 - PULSE stages and ingests through the built-in Symbiote VDB; no external memory daemon is required.
-
-ARIA CONTEXT MANAGEMENT:
-- Aria's model limit is 128K tokens. Her sessions are tracked in aria.sessions.
-- If any session exceeds ~110K tokens, PULSE should trigger compaction.
-- If aria.token_exceeded is true, she's completely stuck — can't respond at all.
-- Compaction task: "Compact Aria session {channel_id}" — PULSE handles this internally.
 
 Output format (strict JSON, no markdown):
 {"action": "work|wait|skip", "task": "specific task description", "reason": "why", "estimated_minutes": N, "priority": "critical|high|medium|low"}
@@ -674,7 +602,7 @@ def execute_work(config: PulseConfig, task: str, log: logging.Logger) -> Optiona
             resp = client.post(config.symbiote_url, json={
                 "text": f"[PULSE autonomous task] {task}",
                 "source": "pulse",
-                "senderId": "ava-pulse",
+                "senderId": "pulse",
                 "sessionId": session_id,
             }, headers={
                 "Authorization": f"Bearer {config.api_key}",
@@ -718,197 +646,10 @@ def execute_work(config: PulseConfig, task: str, log: logging.Logger) -> Optiona
         return None
 
 
-# ─── Aria Context Management ────────────────────────────────────────────────
-# NOTE: Aria (plug) is deprecated and archived. These are stubs for disabled functionality.
-
-ARIA_SESSIONS_DB = "/dev/null"
-ARIA_CONFIG_FILE = "/dev/null"
-ARIA_PID_FILE = "/dev/null"
-ARIA_LOG_FILE = "/dev/null"
-
-# Aria's model limit is 128K via copilot proxy.
-# System prompt + COMB injection is ~5-8K tokens.
-# So we need to compact well before 128K.
-ARIA_COMPACT_THRESHOLD = 110000  # trigger compaction at 110K tokens
-ARIA_COMPACT_TARGET = 65000      # keep ~65K tokens after compaction
-ARIA_CRITICAL_THRESHOLD = 125000 # emergency compact — she's about to brick
-
-
-def check_aria_health(log: logging.Logger) -> dict:
-    """Check Aria's overall health: process, context, sessions."""
-    health = {
-        "running": False,
-        "pid": None,
-        "sessions": {},
-        "critical": False,
-        "needs_compact": [],
-        "total_active_tokens": 0,
-    }
-
-    # Check if Aria's process is alive
-    try:
-        pid_path = Path(ARIA_PID_FILE)
-        if pid_path.exists():
-            pid = int(pid_path.read_text().strip())
-            # Check if process exists
-            import os
-            os.kill(pid, 0)  # signal 0 = check existence
-            health["running"] = True
-            health["pid"] = pid
-    except (ValueError, ProcessLookupError, PermissionError, FileNotFoundError):
-        pass
-
-    # Check session sizes
-    try:
-        import sqlite3
-        db = sqlite3.connect(ARIA_SESSIONS_DB)
-        rows = db.execute('''
-            SELECT channel_id, COUNT(*) as msgs, COALESCE(SUM(token_count), 0) as tokens
-            FROM messages WHERE compacted = 0
-            GROUP BY channel_id
-            ORDER BY tokens DESC
-        ''').fetchall()
-        db.close()
-
-        for channel_id, msg_count, token_count in rows:
-            health["sessions"][channel_id] = {
-                "messages": msg_count,
-                "tokens": token_count,
-            }
-            health["total_active_tokens"] += token_count
-
-            if token_count >= ARIA_CRITICAL_THRESHOLD:
-                health["critical"] = True
-                health["needs_compact"].append(channel_id)
-            elif token_count >= ARIA_COMPACT_THRESHOLD:
-                health["needs_compact"].append(channel_id)
-
-    except Exception as e:
-        log.debug(f"Aria session check failed: {e}")
-
-    # Check for recent errors in log (last 30 lines)
-    try:
-        log_path = Path(ARIA_LOG_FILE)
-        if log_path.exists():
-            lines = log_path.read_text().splitlines()[-30:]
-            error_lines = [l for l in lines if "max_prompt_tokens_exceeded" in l or "ERROR" in l]
-            health["recent_errors"] = len(error_lines)
-            health["token_exceeded"] = any("max_prompt_tokens_exceeded" in l for l in lines[-10:])
-        else:
-            health["recent_errors"] = 0
-            health["token_exceeded"] = False
-    except Exception:
-        health["recent_errors"] = 0
-        health["token_exceeded"] = False
-
-    return health
-
-
-def compact_aria_session(channel_id: str, log: logging.Logger, emergency: bool = False) -> bool:
-    """Compact an Aria session by marking old messages and inserting a summary.
-
-    This is a direct DB operation — no LLM needed. We do a structural compact:
-    mark old messages as compacted, insert a brief system summary.
-
-    For true summarization, Aria's own compactor handles it on next request.
-    But this emergency valve prevents her from bricking.
-    """
-    try:
-        import sqlite3
-
-        db = sqlite3.connect(ARIA_SESSIONS_DB)
-
-        # Get all active messages
-        rows = db.execute('''
-            SELECT id, role, token_count, content
-            FROM messages
-            WHERE channel_id = ? AND compacted = 0
-            ORDER BY id ASC
-        ''', (channel_id,)).fetchall()
-
-        total_tokens = sum(r[2] for r in rows)
-
-        if total_tokens < ARIA_COMPACT_THRESHOLD and not emergency:
-            db.close()
-            return False
-
-        # Keep the last ARIA_COMPACT_TARGET tokens
-        target = ARIA_COMPACT_TARGET if not emergency else 40000
-        keep_tokens = 0
-        keep_from_idx = len(rows)
-
-        for i in range(len(rows) - 1, -1, -1):
-            msg_tokens = rows[i][2]
-            if keep_tokens + msg_tokens > target:
-                break
-            keep_tokens += msg_tokens
-            keep_from_idx = i
-
-        # Don't split tool call/result pairs — walk back past tool results
-        while keep_from_idx > 0 and rows[keep_from_idx][1] == "tool":
-            keep_from_idx -= 1
-
-        if keep_from_idx <= 0:
-            db.close()
-            return False
-
-        last_compact_id = rows[keep_from_idx - 1][0]
-        compact_count = keep_from_idx
-        compact_tokens = total_tokens - keep_tokens
-
-        log.info(f"Aria compact {channel_id}: {compact_count} msgs ({compact_tokens} tokens) → keeping {len(rows) - keep_from_idx} msgs ({keep_tokens} tokens)")
-
-        db.execute("BEGIN")
-
-        # Mark old messages as compacted
-        db.execute('''
-            UPDATE messages SET compacted = 1
-            WHERE channel_id = ? AND id <= ? AND compacted = 0
-        ''', (channel_id, last_compact_id))
-
-        # Insert a structural summary
-        import time as _time
-        summary = (
-            "[Previous conversation compacted by PULSE]\n"
-            f"Compacted {compact_count} messages ({compact_tokens} tokens) at "
-            f"{datetime.now(PKT).strftime('%Y-%m-%d %H:%M:%S PKT')}.\n"
-            "Aria and AVA are sisters. Ali is their father/CEO. "
-            "Aria coordinates C-Suite, AVA handles enterprise admin. "
-            "Key shared context: IPC spec, Minecraft, anti-loop training, qorvexty projects. "
-            "See IDENTITY_ARIA.md and SISTER_PROTOCOL.md for full context."
-        )
-
-        db.execute('''
-            INSERT INTO messages (channel_id, role, content, timestamp, token_count, compacted)
-            VALUES (?, 'system', ?, ?, ?, 0)
-        ''', (channel_id, summary, _time.time(), len(summary) // 4))
-
-        db.commit()
-        db.close()
-
-        log.info(f"✅ Aria session {channel_id} compacted: {total_tokens} → {keep_tokens} tokens")
-        return True
-
-    except Exception as e:
-        log.error(f"Aria compaction failed for {channel_id}: {e}")
-        try:
-            db.rollback()
-            db.close()
-        except Exception:
-            pass
-        return False
-
-
-def restart_aria(log: logging.Logger) -> bool:
-    """Aria (plug) is deprecated and archived — this is a no-op."""
-    log.debug("⚠️  Aria (plug) is archived and disabled")
-    return False
-
-
 # ─── Activity Detection ────────────────────────────────────────────────────
 
 def get_last_activity(config: PulseConfig) -> float:
-    """Get timestamp of last human activity (message to AVA).
+    """Get timestamp of last human activity (message to the agent).
     
     Checks Mach6 session files for most recent human message.
     Falls back to the activity file PULSE maintains.
@@ -1109,9 +850,6 @@ class Pulse:
         """One triage-work-sleep cycle."""
         now = time.time()
 
-        # ── Pre-Gate: Aria Context Health (runs EVERY cycle, no budget cost) ──
-        self._check_aria_context()
-
         # ── Gate 1: Respect conversation flow ──
         last_activity = get_last_activity(self.config)
         self.state.last_activity_ts = last_activity
@@ -1244,42 +982,6 @@ class Pulse:
         # Unknown action
         self.log.warning(f"Unknown triage action: {action}")
         self._sleep(self.config.triage_interval_sec)
-
-    def _check_aria_context(self):
-        """Check Aria's session health and auto-compact if needed.
-        
-        This runs every cycle as infrastructure maintenance — not a work turn.
-        It's the equivalent of a thermostat: no budget cost, just keeps things healthy.
-        """
-        try:
-            aria_health = check_aria_health(self.log)
-
-            # Emergency: she's bricked (token_exceeded = model rejecting)
-            if aria_health.get("token_exceeded"):
-                self.log.warning("⚡ CRITICAL: Aria's context exceeded model limit — emergency compaction")
-                for channel_id in aria_health.get("needs_compact", []):
-                    compact_aria_session(channel_id, self.log, emergency=True)
-                # Also compact any session over threshold even if not in needs_compact
-                for ch_id, info in aria_health.get("sessions", {}).items():
-                    if info["tokens"] >= ARIA_CRITICAL_THRESHOLD:
-                        compact_aria_session(ch_id, self.log, emergency=True)
-                # Restart her if she's stuck in error loop
-                if not aria_health["running"]:
-                    restart_aria(self.log)
-                return
-
-            # Normal: compact sessions approaching the limit
-            for channel_id in aria_health.get("needs_compact", []):
-                self.log.info(f"⚡ Aria session {channel_id} approaching limit — compacting")
-                compact_aria_session(channel_id, self.log)
-
-            # Health: restart if dead
-            if not aria_health["running"]:
-                self.log.warning("⚡ Aria process not running — restarting")
-                restart_aria(self.log)
-
-        except Exception as e:
-            self.log.debug(f"Aria context check failed: {e}")
 
     def _sleep(self, seconds: float):
         """Interruptible sleep — checks for signals every 10s."""

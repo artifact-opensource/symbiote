@@ -109,7 +109,7 @@ export function createDefaultSarsiModel(): SarsiModel {
     version: '1.0.0',
     updatedAt: new Date().toISOString(),
     identity: {
-      name: 'AVA',
+      name: 'Symbiant',
       role: 'Symbiote',
       description: 'Multi-channel AI agent — persistent daemon, real-time interrupts, tool execution.',
       style: 'adaptive',

@@ -6,10 +6,9 @@
  * 
  * Usage:
  *   const client = new IpcClient();
- *   const response = await client.chat('aria', 'Hey Aria, here is the roster...');
+ *   const response = await client.chat('sibling-agent', 'status update');
  * 
  * @module ipc-client
- * @author AVA — Artifact Virtual
  * @created 2026-03-11
  */
 

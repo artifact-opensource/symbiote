@@ -41,6 +41,7 @@ SOUL.md
 USER.md
 AGENTS.md
 HEARTBEAT.md
+TOOLS.md
 
 # Runtime logs
 *.log
@@ -70,3 +71,4 @@ symbiote.json
 .mach6.pid
 .symbiote/todos/
 
+__pycache__/

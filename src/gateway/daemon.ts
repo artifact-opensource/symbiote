@@ -1064,15 +1064,15 @@ export class SymbioteGateway {
     const sessionId = envelope.sessionId!;
 
     // ── Forward Routes ───────────────────────────────────────────────────
-    // If this chatId is mapped to a sibling gateway (e.g. Aria), forward
-    // the message via HTTP API instead of processing locally.
+    // If this chatId is mapped to a sibling gateway, forward the message
+    // via HTTP API instead of processing locally.
     const forwardRoutes = (this.config as any).forwardRoutes as Record<string, { url: string; apiKey?: string; name?: string }> | undefined;
     if (forwardRoutes && envelope.source.chatId in forwardRoutes) {
       const route = forwardRoutes[envelope.source.chatId];
       const routeName = route.name ?? route.url;
       console.log(`${palette.dim}  [forward]${palette.reset} → ${palette.cyan}${routeName}${palette.reset} (${envelope.source.chatId})`);
 
-      // Show typing indicator while Aria processes (sustained — will be paused when response arrives)
+      // Show typing indicator while the sibling gateway processes (sustained — paused when response arrives)
       try {
         const adapter = this.channelRegistry.get(envelope.source.adapterId);
         if (adapter && 'typing' in adapter && typeof (adapter as any).typing === 'function') {
