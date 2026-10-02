@@ -31,6 +31,11 @@ test('Memograph import preserves shard topology, scopes, and permission boundari
           owner: 'admin', scope: 'enterprise:private', domain: 'enterprise', parent_hash: null,
           permissions: ['admin'], timestamp: 1_790_000_002, version: 1, content_type: 'POLICY',
         },
+        verified: {
+          shard_hash: '3a7b0f9b0d4deae7fc9e2d829979dacbe2be0a5ce796c87323e08ce5310f3f37', content: { fact: 'integrity test' },
+          owner: 'agent', scope: 'project:alpha', domain: 'project', parent_hash: null,
+          permissions: ['agent'], timestamp: 1_790_000_003, version: 1, content_type: 'EPISTEMIC',
+        },
       },
       edges: { 'parent-hash': ['child-hash'] },
     }));
@@ -39,14 +44,21 @@ test('Memograph import preserves shard topology, scopes, and permission boundari
     const db = new VectorDB(join(root, 'workspace'));
     const imported = importMemoGraphSnapshots(db, graphDir);
     assert.equal(imported.files, 1);
-    assert.equal(imported.shards, 3);
-    assert.equal(imported.indexed, 3);
+    assert.equal(imported.shards, 4);
+    assert.equal(imported.indexed, 4);
     assert.equal(imported.failures, 1);
+    // Fixture shard_hash values are placeholders, not real SHA256 digests —
+    // they must all fail hash verification and be tagged unverified, except
+    // the one fixture built with a genuinely recomputed hash.
+    assert.equal(imported.hashVerified, 1);
+    assert.equal(imported.hashMismatches, 3);
 
     const parentId = 'memograph:project-alpha:parent-hash';
     const parent = db.getDocument(parentId);
     assert.equal(parent?.namespace, 'memograph:project-alpha:project:project:alpha');
     assert.equal(parent?.metadata?.memoryShardHash, 'parent-hash');
+    assert.equal(parent?.metadata?.memoryVerified, 'false');
+    assert.equal(db.getDocument('memograph:project-alpha:3a7b0f9b0d4deae7fc9e2d829979dacbe2be0a5ce796c87323e08ce5310f3f37')?.metadata?.memoryVerified, 'true');
     assert.deepEqual(JSON.parse(parent?.metadata?.memoryRelations ?? '[]'), [
       'memograph:project-alpha:child-hash',
     ]);

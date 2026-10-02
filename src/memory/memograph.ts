@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import type { VDBDocument, VectorDB } from './vdb.js';
 
 interface MemoGraphShard {
@@ -26,6 +27,8 @@ export interface MemoGraphImportResult {
   indexed: number;
   skipped: number;
   failures: number;
+  hashVerified: number;
+  hashMismatches: number;
 }
 
 function contentText(value: unknown): string {
@@ -38,6 +41,35 @@ function contentText(value: unknown): string {
     .join('\n');
 }
 
+/** Deterministic JSON serialization matching Python's json.dumps(sort_keys=True, separators=(",", ":")). */
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const keys = Object.keys(value as Record<string, unknown>).sort();
+  return `{${keys.map(k => `${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`).join(',')}}`;
+}
+
+/**
+ * Recompute a shard's content hash the same way Memograph's
+ * MemoryShard.compute_hash() does, to verify tamper-evidence independently
+ * on the Symbiote side rather than trusting the stored shard_hash blindly.
+ */
+function verifyShardHash(shard: MemoGraphShard): boolean {
+  if (!shard.shard_hash) return false;
+  const payload = {
+    content: shard.content ?? {},
+    owner: shard.owner ?? '',
+    scope: shard.scope ?? '',
+    domain: shard.domain ?? 'live',
+    parent_hash: shard.parent_hash ?? null,
+    permissions: [...(shard.permissions ?? [])].sort(),
+    version: shard.version ?? 1,
+    content_type: shard.content_type ?? 'CONVERSATIONAL',
+  };
+  const computed = crypto.createHash('sha256').update(canonicalJson(payload), 'utf-8').digest('hex');
+  return computed === shard.shard_hash;
+}
+
 export function resolveMemoGraphStorageDir(workspace: string, configuredPath = process.env.MEMOGRAPH_STORAGE_DIR): string {
   if (configuredPath) return path.resolve(configuredPath);
   return path.resolve(workspace, '..', 'memograph', '.memograph_storage');
@@ -47,7 +79,7 @@ export function importMemoGraphSnapshots(
   database: VectorDB,
   storageDir: string,
 ): MemoGraphImportResult {
-  const result: MemoGraphImportResult = { files: 0, shards: 0, indexed: 0, skipped: 0, failures: 0 };
+  const result: MemoGraphImportResult = { files: 0, shards: 0, indexed: 0, skipped: 0, failures: 0, hashVerified: 0, hashMismatches: 0 };
   const fail = (stage: string, target: string, error: unknown) => {
     result.failures++;
     const detail = error instanceof Error ? error.message : String(error);
@@ -137,6 +169,8 @@ export function importMemoGraphSnapshots(
       }
 
       const timestamp = shard.timestamp ?? Date.now();
+      const hashOk = verifyShardHash(shard);
+      if (hashOk) result.hashVerified++; else result.hashMismatches++;
       documents.push({
         id: `memograph:${graphId}:${shardHash}`,
         text: `Domain: ${domain}\nScope: ${scope}\n${body}`,
@@ -157,6 +191,7 @@ export function importMemoGraphSnapshots(
           memoryRelations: JSON.stringify([...relations].map(hash => `memograph:${graphId}:${hash}`)),
           memoryVersion: String(shard.version ?? 1),
           memoryContentType: shard.content_type ?? 'CONVERSATIONAL',
+          memoryVerified: String(hashOk),
         },
       });
       } catch (error) {
@@ -176,5 +211,8 @@ export function importMemoGraphSnapshots(
   }
 
   console.info(`[memograph] import complete: ${result.indexed} indexed, ${result.skipped} skipped, ${result.failures} failures across ${result.files} snapshots`);
+  if (result.hashVerified + result.hashMismatches > 0) {
+    console.info(`[memograph] integrity: ${result.hashVerified} hash-verified, ${result.hashMismatches} mismatched (stale/legacy hash, tagged unverified in metadata)`);
+  }
   return result;
 }
