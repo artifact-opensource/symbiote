@@ -255,6 +255,10 @@ export async function runAgent(
       console.log(`[runner] Iteration ${iterations}/${maxIter}: ${truncated.length} messages`);
     }
     const streamStartTime = Date.now();
+    effectiveProviderConfig = {
+      ...effectiveProviderConfig,
+      ...(config.abortSignal ? { signal: config.abortSignal } : {}),
+    };
 
     let stream;
     try {

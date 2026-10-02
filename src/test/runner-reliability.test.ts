@@ -121,3 +121,29 @@ test('runner reviews completion, bounds tool fan-out, throttles sends, and persi
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+test('runner propagates a live interrupt to the active provider stream', async () => {
+  const controller = new AbortController();
+  let providerSawSignal = false;
+  const provider: Provider = {
+    name: 'mock-abort',
+    async *stream(_messages, _tools, config) {
+      providerSawSignal = config.signal instanceof AbortSignal;
+      await new Promise<never>((_resolve, reject) => {
+        config.signal?.addEventListener('abort', () => reject(config.signal?.reason), { once: true });
+      });
+    },
+  };
+  const run = runAgent([{ role: 'user', content: 'long task' }], {
+    provider,
+    providerConfig: { model: 'mock' },
+    toolRegistry: { toProviderFormat: () => [], list: () => [], execute: async () => '' },
+    abortSignal: controller.signal,
+    maxIterations: 5,
+  });
+  setTimeout(() => controller.abort('user_interrupt'), 10);
+
+  const result = await run;
+  assert.equal(providerSawSignal, true);
+  assert.equal(result.aborted, true);
+});

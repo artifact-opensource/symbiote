@@ -42,6 +42,9 @@ The `/tools` command lists the exact active registry. Tool count varies with run
 | `/provider <name>` | Switch provider mid-session (e.g., `/provider anthropic`) |
 | `/spawn <task>` | Spawn a sub-agent with the given task |
 | `/status` | Session stats — tokens used, tool calls, active sub-agents |
+| `/queue <text>` | Queue a message while an agent turn is active; plain text is also queued |
+| `/steer <text>` | Cancel the current provider request, preserve partial state, and resume with the steering message |
+| `/interrupt` | Abort the active request and save partial session state |
 | `/sessions` | List all sessions with labels and timestamps |
 | `/history [N]` | Show last N messages (default: 10) |
 | `/clear` | Clear current session history |

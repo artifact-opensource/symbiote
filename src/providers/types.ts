@@ -60,6 +60,7 @@ export interface ProviderConfig {
   temperature?: number;
   timeoutMs?: number;
   systemPrompt?: string;
+  signal?: AbortSignal;
 }
 
 export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;

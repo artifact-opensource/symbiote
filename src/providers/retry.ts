@@ -6,6 +6,17 @@ const RETRY_DELAYS = [2000, 5000, 10000];
 // within a minute. Use a longer, dedicated backoff ladder for rate limits.
 const RATE_LIMIT_DELAYS = [2000, 5000, 10000, 20000, 40000];
 
+export function createRequestSignal(timeoutMs: number, parentSignal?: AbortSignal): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  if (!parentSignal) return timeoutSignal;
+  if (parentSignal.aborted) return parentSignal;
+
+  const controller = new AbortController();
+  parentSignal.addEventListener('abort', () => controller.abort(parentSignal.reason), { once: true });
+  timeoutSignal.addEventListener('abort', () => controller.abort(timeoutSignal.reason), { once: true });
+  return controller.signal;
+}
+
 // 400-class errors that are transient (backend quirks, not user errors)
 const RETRYABLE_400_PATTERNS = [
   'assistant message prefill',
@@ -36,11 +47,12 @@ export async function fetchWithRetry(
 ): Promise<Response> {
   let lastError: Error | undefined;
   for (let attempt = 0; attempt <= RATE_LIMIT_DELAYS.length; attempt++) {
+    if (init.signal?.aborted) {
+      throw init.signal.reason instanceof Error ? init.signal.reason : new Error('Request aborted');
+    }
     try {
-      // On retries, ensure a fresh abort signal (previous may have timed out)
-      const effectiveInit = attempt > 0 && init.signal instanceof AbortSignal
-        ? { ...init, signal: AbortSignal.timeout(retryTimeoutMs) }
-        : init;
+      const requestSignal = createRequestSignal(retryTimeoutMs, init.signal ?? undefined);
+      const effectiveInit = { ...init, signal: requestSignal };
       const res = await fetch(url, effectiveInit);
       if (res.ok) return res;
 
@@ -91,6 +103,7 @@ export async function fetchWithRetry(
       return res;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
+      if (init.signal?.aborted || /timeout/i.test(lastError.name)) throw lastError;
       if (attempt < RETRY_DELAYS.length) {
         await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
         continue;

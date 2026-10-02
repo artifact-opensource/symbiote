@@ -36,7 +36,7 @@ async function* streamFreeAI(messages: Message[], tools: ToolDef[], config: Prov
       'X-Title': 'Symbiote',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: config.signal,
   }, timeoutMs);
 
   if (!res.ok) {

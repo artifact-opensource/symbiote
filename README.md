@@ -113,7 +113,7 @@ node dist/index.js help
 node dist/index.js status
 ```
 
-REPL commands include `/help`, `/tools`, `/history`, `/model`, `/provider`, `/spawn`, `/status`, `/sessions`, `/clear`, and `/quit`. The prompt shows cumulative provider-reported token usage for the active session. Usage is cumulative billing usage, not the current context-window size.
+REPL commands include `/help`, `/tools`, `/history`, `/model`, `/provider`, `/spawn`, `/status`, `/sessions`, `/clear`, and `/quit`. During an active turn, plain text or `/queue <text>` queues the next message; `/steer <text>` cancels the current request and resumes with new guidance; `/interrupt` stops the turn and saves partial state. The prompt shows cumulative provider-reported token usage for the active session, not current context size.
 
 ## Development
 

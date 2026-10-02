@@ -91,7 +91,7 @@ async function* streamAihorde(
       'HTTP-Referer': 'https://github.com/Artifact-Virtual',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: config.signal,
   }, timeoutMs);
 
   if (!res.ok) {

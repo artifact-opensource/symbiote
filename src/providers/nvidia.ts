@@ -78,7 +78,7 @@ async function* streamNVIDIA(
       'Accept': 'text/event-stream',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: config.signal,
   }, timeoutMs);
 
   if (!res.ok) {

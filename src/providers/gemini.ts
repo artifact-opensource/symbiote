@@ -158,7 +158,7 @@ async function* streamGemini(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: config.signal,
   }, timeoutMs);
 
   if (!res.ok) {

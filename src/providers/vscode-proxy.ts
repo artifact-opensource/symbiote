@@ -4,6 +4,7 @@
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
 import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
+import { createRequestSignal } from './retry.js';
 
 const BRIDGE_URL = process.env.VSCODE_BRIDGE_URL || 'http://127.0.0.1:3033';
 
@@ -48,7 +49,7 @@ async function callVsCodeBridge(messages: Message[], config: ProviderConfig): Pr
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(config.timeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS),
+    signal: createRequestSignal(config.timeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS, config.signal),
   });
 
   if (!response.ok) {

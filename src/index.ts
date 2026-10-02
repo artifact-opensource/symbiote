@@ -159,7 +159,7 @@ async function main() {
   console.log();
    console.log(divider(42));
 
-  const runWithCallbacks = async (msgs: Message[], provConfig: ProviderConfig) => {
+  const runWithCallbacks = async (msgs: Message[], provConfig: ProviderConfig, abortSignal?: AbortSignal) => {
     const activity = createActivityIndicator();
     const latestUserMessage = [...msgs].reverse().find(message => message.role === 'user');
     const userText = typeof latestUserMessage?.content === 'string' ? latestUserMessage.content : '';
@@ -190,6 +190,7 @@ async function main() {
         sessionId,
         maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
         contextStore,
+        abortSignal,
         onProgress() {},
         onEvent(ev) {
           if (ev.type === 'usage') {
@@ -249,6 +250,9 @@ async function main() {
         ['/provider <name>', 'Switch provider mid-session'],
         ['/spawn <task>',    'Spawn a sub-agent'],
         ['/status',          'Session stats and usage'],
+        ['/queue <text>',    'Queue a message during an active turn'],
+        ['/steer <text>',    'Interrupt and continue with new guidance'],
+        ['/interrupt',       'Stop the active turn and save progress'],
         ['/sessions',        'List all sessions'],
         ['/clear',           'Clear session history'],
         ['/quit',            'Exit Symbiote'],
@@ -374,34 +378,117 @@ async function main() {
 
   // ── The Prompt ──────────────────────────────────────
 
+  const queuedMessages: string[] = [];
+  const steeringMessages: string[] = [];
+  let activeAbortController: AbortController | null = null;
+  let isBusy = false;
+  let isClosed = false;
+
   const prompt = () => {
-    const promptStr = `${palette.violet}❯${palette.reset} `;
-    rl.question(promptStr, async (input) => {
-      const trimmed = input.trim();
-      if (!trimmed) { prompt(); return; }
+    if (isClosed) return;
+    const prefix = isBusy ? `${palette.dim}running${palette.reset} ` : '';
+    rl.setPrompt(`${prefix}${palette.violet}❯${palette.reset} `);
+    rl.prompt();
+  };
 
-      if (trimmed.startsWith('/')) {
-        const handled = await handleCommand(trimmed);
-        if (trimmed === '/quit' || trimmed === '/exit') return;
-        if (handled) { prompt(); return; }
-      }
+  const processTurn = async (firstMessage: string): Promise<void> => {
+    if (isBusy || isClosed) return;
+    isBusy = true;
+    let nextMessage: string | undefined = firstMessage;
+    prompt();
 
-      session.messages.push({ role: 'user', content: trimmed });
+    while (nextMessage && !isClosed) {
+      session.messages.push({ role: 'user', content: nextMessage });
+      const controller = new AbortController();
+      activeAbortController = controller;
 
       try {
-         process.stdout.write('\n');
-        const result = await runWithCallbacks(session.messages, makeProviderConfig());
-        console.log('\n');
+        process.stdout.write('\n');
+        const result = await runWithCallbacks(session.messages, makeProviderConfig(), controller.signal);
         session.messages = result.messages;
         if (result.text) session.messages.push({ role: 'assistant', content: result.text });
         sessionMgr.save(session);
-      } catch (err) {
-        console.error(`\n${palette.red}  ✗ Error:${palette.reset} ${err instanceof Error ? err.message : err}\n`);
-      }
 
-      prompt();
-    });
+        if (result.aborted) {
+          const steering = steeringMessages.shift();
+          if (steering) {
+            console.log(`\n${palette.violet}↳ Steering applied${palette.reset}`);
+            nextMessage = steering;
+          } else {
+            console.log(`\n${palette.dim}Turn interrupted; partial state saved.${palette.reset}`);
+            nextMessage = queuedMessages.shift();
+          }
+        } else {
+          nextMessage = queuedMessages.shift();
+        }
+      } catch (err) {
+        console.error(`\n${palette.red}✗ Error:${palette.reset} ${err instanceof Error ? err.message : err}\n`);
+        nextMessage = queuedMessages.shift();
+      } finally {
+        activeAbortController = null;
+      }
+    }
+
+    isBusy = false;
+    prompt();
   };
+
+  rl.setPrompt(`${palette.violet}❯${palette.reset} `);
+  rl.on('line', async input => {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      prompt();
+      return;
+    }
+
+    if (isBusy) {
+      if (trimmed === '/interrupt') {
+        activeAbortController?.abort('user_interrupt');
+        console.log(`\n${palette.yellow}Interrupt requested${palette.reset}`);
+      } else if (trimmed === '/quit' || trimmed === '/exit') {
+        isClosed = true;
+        activeAbortController?.abort('user_exit');
+        rl.close();
+        return;
+      } else if (trimmed.startsWith('/steer ')) {
+        const steering = trimmed.slice(7).trim();
+        if (steering) {
+          steeringMessages.push(steering);
+          activeAbortController?.abort('user_steer');
+          console.log(`\n${palette.violet}Steering queued; current turn will stop at its next cancellation point.${palette.reset}`);
+        }
+      } else {
+        const queued = trimmed.startsWith('/queue ') ? trimmed.slice(7).trim() : trimmed;
+        if (queued) {
+          queuedMessages.push(queued);
+          console.log(`\n${palette.dim}Queued (${queuedMessages.length})${palette.reset}`);
+        }
+      }
+      prompt();
+      return;
+    }
+
+    if (trimmed === '/interrupt') {
+      console.log(`${palette.dim}No active turn to interrupt.${palette.reset}`);
+      prompt();
+      return;
+    }
+
+    if (trimmed.startsWith('/')) {
+      const handled = await handleCommand(trimmed);
+      if (trimmed === '/quit' || trimmed === '/exit') {
+        isClosed = true;
+        rl.close();
+        return;
+      }
+      if (handled) {
+        prompt();
+        return;
+      }
+    }
+
+    void processTurn(trimmed);
+  });
 
   prompt();
 }
