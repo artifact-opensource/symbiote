@@ -51,12 +51,12 @@ test('runner reviews completion, bounds tool fan-out, throttles sends, and persi
       name: 'mock-review',
       async *stream(): AsyncGenerator<StreamEvent> {
         reviewCalls++;
-        if (reviewCalls === 2) {
+        if (reviewCalls === 1) {
           yield { type: 'tool_use_start', id: 'review-tool', name: 'probe' };
           yield { type: 'tool_use_delta', id: 'review-tool', input: '{}' };
           yield { type: 'tool_use_end', id: 'review-tool' };
         } else {
-          yield { type: 'text_delta', text: reviewCalls === 4 ? 'final answer' : 'draft answer' };
+          yield { type: 'text_delta', text: reviewCalls === 3 ? 'final answer' : 'draft answer' };
         }
       },
     };
@@ -74,9 +74,29 @@ test('runner reviews completion, bounds tool fan-out, throttles sends, and persi
       },
       maxIterations: 10,
     });
-    assert.equal(reviewCalls, 4);
+    assert.equal(reviewCalls, 3);
     assert.equal(reviewToolCalls, 1);
     assert.equal(reviewResult.text, 'final answer');
+
+    // A pure conversational reply (no tool calls at all) must not trigger a
+    // review round-trip — that's the latency this mechanism used to add to
+    // every single turn, including plain greetings.
+    let noToolCalls = 0;
+    const noToolProvider: Provider = {
+      name: 'mock-no-tools',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        noToolCalls++;
+        yield { type: 'text_delta', text: 'hey' };
+      },
+    };
+    const noToolResult = await runAgent([{ role: 'user', content: 'Hi' }], {
+      provider: noToolProvider,
+      providerConfig: { model: 'mock' },
+      toolRegistry: { toProviderFormat: () => [], list: () => [], execute: async () => 'done' },
+      maxIterations: 10,
+    });
+    assert.equal(noToolCalls, 1);
+    assert.equal(noToolResult.text, 'hey');
 
     let fanoutCalls = 0;
     let activeTools = 0;
@@ -115,7 +135,7 @@ test('runner reviews completion, bounds tool fan-out, throttles sends, and persi
     });
     assert.equal(fanoutResult.toolCalls.length, 7);
     assert.ok(peakTools <= 5);
-    assert.equal(readdirSync(join(workspace, '.symbiote', 'todos')).length, 2);
+    assert.equal(readdirSync(join(workspace, '.symbiote', 'todos')).length, 3);
   } finally {
     process.chdir(originalCwd);
     rmSync(workspace, { recursive: true, force: true });

@@ -101,6 +101,7 @@ export async function runAgent(
   let iterations = 0;
   let textAccum = '';
   let completionReviewPending = false;
+  let completionReviewUsed = false;
   const todoManager = new TodoManager({ scope: config.todoScope ?? `run-${randomUUID()}`, workspace: process.cwd() });
 
   const ensureTodoPlan = () => {
@@ -359,7 +360,11 @@ export async function runAgent(
 
     // If no tool calls, we're done
     if (pendingToolCalls.length === 0) {
-      if (!completionReviewPending) {
+      // Only worth a review when the turn actually did tool-backed work that
+      // could be incomplete — skip it for plain conversational replies
+      // (greetings, Q&A) and never run it more than once per turn.
+      const needsReview = !completionReviewPending && !completionReviewUsed && allToolCalls.length > 0;
+      if (needsReview) {
         const candidate = textAccum.trim();
         if (candidate) currentMessages.push({ role: 'assistant', content: candidate });
         currentMessages.push({
@@ -368,6 +373,7 @@ export async function runAgent(
         });
         textAccum = '';
         completionReviewPending = true;
+        completionReviewUsed = true;
         continue;
       }
 
