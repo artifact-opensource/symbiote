@@ -30,6 +30,7 @@ import { ttsTool } from './builtin/tts.js';
 import { webFetchTool } from './builtin/web-fetch.js';
 import { memorySearchTool } from './builtin/memory.js';
 import { ingestWorkspaceSessions, vdbSearchTool, vdbIngestTool, vdbStatsTool } from './builtin/memory-vdb.js';
+import { cuaTools } from './builtin/web-browser.js';
 import { combRecallTool, combStageTool, setCombVdbHook } from './builtin/comb.js';
 import { getSharedVectorDB } from '../memory/vdb.js';
 import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from '../memory/memograph.js';
@@ -60,7 +61,7 @@ for (const tool of [
   readTool, writeTool, execTool, editTool, imageTool,
   processStartTool, processPollTool, processKillTool, processListTool,
   ttsTool, webFetchTool, memorySearchTool, vdbSearchTool, vdbIngestTool, vdbStatsTool,
-  combRecallTool, combStageTool,
+  combRecallTool, combStageTool, ...cuaTools,
 ]) {
   registry.register(tool);
 }

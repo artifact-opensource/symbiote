@@ -28,7 +28,7 @@ function ensureSidecar(): ChildProcess {
 
   const sidecarCandidates = [
     resolve(__dirname_esm, '..', '..', '..', 'web', 'browser-sidecar.py'),
-    resolve(__dirname_esm, '..', '..', 'src', 'web', 'browser-sidecar.py'),
+    resolve(__dirname_esm, '..', '..', '..', 'src', 'web', 'browser-sidecar.py'),
     resolve(process.cwd(), 'web', 'browser-sidecar.py'),
   ];
   const sidecarPath = sidecarCandidates.find((candidate) => {
@@ -39,7 +39,7 @@ function ensureSidecar(): ChildProcess {
     }
   });
   if (!sidecarPath) {
-    throw new Error('browser-sidecar.py not found. Ensure the web/ directory is present in the installation.');
+    throw new Error('browser-sidecar.py not found. Rebuild Symbiote to copy its runtime sidecars.');
   }
 
   const python = pythonCommand(sidecarPath);
@@ -360,11 +360,102 @@ export const webUploadTool: ToolDefinition = {
   },
 };
 
+export const cuaScreenshotTool: ToolDefinition = {
+  name: 'cua_screenshot',
+  description: 'Capture the active browser viewport for visual computer-use inspection. This controls the browser, not the host desktop.',
+  parameters: { type: 'object', properties: {} },
+  async execute() {
+    return JSON.stringify(await rpc('cua_screenshot'));
+  },
+};
+
+export const cuaClickTool: ToolDefinition = {
+  name: 'cua_click',
+  description: 'Click a coordinate in the active browser viewport. Take a fresh cua_screenshot first and use its viewport coordinates.',
+  parameters: {
+    type: 'object',
+    properties: {
+      x: { type: 'number', description: 'Horizontal viewport coordinate from screenshot' },
+      y: { type: 'number', description: 'Vertical viewport coordinate from screenshot' },
+      button: { type: 'string', enum: ['left', 'right', 'middle'], description: 'Mouse button (default left)' },
+      click_count: { type: 'number', description: 'Click count from 1 to 3' },
+    },
+    required: ['x', 'y'],
+  },
+  async execute(input) {
+    return JSON.stringify(await rpc('cua_click', input));
+  },
+};
+
+export const cuaMoveTool: ToolDefinition = {
+  name: 'cua_move',
+  description: 'Move the pointer to coordinates in the active browser viewport.',
+  parameters: {
+    type: 'object',
+    properties: {
+      x: { type: 'number', description: 'Horizontal viewport coordinate' },
+      y: { type: 'number', description: 'Vertical viewport coordinate' },
+    },
+    required: ['x', 'y'],
+  },
+  async execute(input) {
+    return JSON.stringify(await rpc('cua_move', input));
+  },
+};
+
+export const cuaTypeTool: ToolDefinition = {
+  name: 'cua_type',
+  description: 'Type text into the currently focused control in the active browser page.',
+  parameters: {
+    type: 'object',
+    properties: { text: { type: 'string', description: 'Text to type into the focused control' } },
+    required: ['text'],
+  },
+  async execute(input) {
+    return JSON.stringify(await rpc('cua_type', input));
+  },
+};
+
+export const cuaPressTool: ToolDefinition = {
+  name: 'cua_press',
+  description: 'Press a Playwright keyboard key or key chord in the active browser page (for example Enter, Tab, or Control+A).',
+  parameters: {
+    type: 'object',
+    properties: { key: { type: 'string', description: 'Playwright key name or key chord' } },
+    required: ['key'],
+  },
+  async execute(input) {
+    return JSON.stringify(await rpc('cua_press', input));
+  },
+};
+
+export const cuaScrollTool: ToolDefinition = {
+  name: 'cua_scroll',
+  description: 'Scroll the active browser viewport at a coordinate using wheel deltas.',
+  parameters: {
+    type: 'object',
+    properties: {
+      x: { type: 'number', description: 'Horizontal viewport coordinate' },
+      y: { type: 'number', description: 'Vertical viewport coordinate' },
+      delta_x: { type: 'number', description: 'Horizontal wheel delta' },
+      delta_y: { type: 'number', description: 'Vertical wheel delta' },
+    },
+    required: ['x', 'y', 'delta_y'],
+  },
+  async execute(input) {
+    return JSON.stringify(await rpc('cua_scroll', input));
+  },
+};
+
+export const cuaTools: ToolDefinition[] = [
+  cuaScreenshotTool, cuaClickTool, cuaMoveTool, cuaTypeTool, cuaPressTool, cuaScrollTool,
+];
+
 // ── Export all tools ──────────────────────────────────────────────────
 
 export const webTools: ToolDefinition[] = [
   webBrowseTool, webClickTool, webTypeTool, webScreenshotTool,
   webExtractTool, webScrollTool, webWaitTool, webSessionTool,
   webTabOpenTool, webTabSwitchTool, webTabCloseTool, webTabsTool,
-  webDownloadTool, webUploadTool,
+  webDownloadTool, webUploadTool, ...cuaTools,
 ];

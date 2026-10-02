@@ -241,4 +241,8 @@ Actions: `status` (check progress), `list` (all sub-agents), `kill` (terminate),
 
 See [Web Automation](web-automation.md) for full documentation including profiles, encryption, and security model.
 
+### Browser CUA
+
+`cua_screenshot`, `cua_click`, `cua_move`, `cua_type`, `cua_press`, and `cua_scroll` provide coordinate-based computer-use controls for the active Playwright browser viewport. Capture a fresh screenshot before choosing coordinates. This driver does not control the host operating system's desktop.
+
 Use `/tools` in the CLI or MCP `tools/list` to see the exact active registry. The set varies by runtime and configuration.

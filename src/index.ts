@@ -34,6 +34,7 @@ import { ttsTool } from './tools/builtin/tts.js';
 import { webFetchTool } from './tools/builtin/web-fetch.js';
 import { memorySearchTool } from './tools/builtin/memory.js';
 import { ingestWorkspaceSessions, vdbSearchTool, vdbIngestTool, vdbStatsTool } from './tools/builtin/memory-vdb.js';
+import { cuaTools } from './tools/builtin/web-browser.js';
 import { combRecallTool, combStageTool, setCombVdbHook } from './tools/builtin/comb.js';
 import { todoTool } from './tools/shared-todo.js';
 import { SessionManager } from './sessions/manager.js';
@@ -107,6 +108,7 @@ async function main() {
     registry.register(tool);
   }
   for (const tool of [vdbSearchTool, vdbIngestTool, vdbStatsTool]) registry.register(tool);
+  for (const tool of cuaTools) registry.register(tool);
   const memoryBootstrap = ingestWorkspaceSessions();
   const memographBootstrap = importMemoGraphSnapshots(
     getSharedVectorDB(config.workspace),

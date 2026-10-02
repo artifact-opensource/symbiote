@@ -49,7 +49,7 @@ import { combRecallTool, combStageTool, setCombVdbHook, flushMessages } from '..
 import { vdbSearchTool, vdbIngestTool, vdbStatsTool } from '../tools/builtin/memory-vdb.js';
 import { getSharedVectorDB } from '../memory/vdb.js';
 import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from '../memory/memograph.js';
-import { webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool, webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool, webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool } from '../tools/builtin/web-browser.js';
+import { webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool, webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool, webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool, cuaTools } from '../tools/builtin/web-browser.js';
 import { createSpawnTool, createSubAgentStatusTool } from '../tools/builtin/spawn.js';
 import { SubAgentManager } from '../sessions/sub-agent.js';
 import { createMessageTool, createTypingTool, createPresenceTool, createDeleteMessageTool, createMarkReadTool } from '../tools/builtin/message.js';
@@ -240,7 +240,7 @@ export class SymbioteGateway {
         vdbSearchTool, vdbIngestTool, vdbStatsTool,
         webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool,
         webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool,
-        webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool,
+        webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool, ...cuaTools,
       ]) {
         this.toolRegistry.register(tool);
       }

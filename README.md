@@ -100,7 +100,7 @@ node dist/cli/vdb-maintenance.js stage "Remember this for the next session"
 
 The gateway can connect configured Discord and WhatsApp adapters and expose an HTTP API. Channel access policies and owner IDs are configured in `symbiote.json`.
 
-Built-in tools cover file reading/writing/editing, shell and background process management, web fetching and browsing, image analysis, messaging, sub-agents, speech, persistent memory, and session continuity. The CLI and gateway display the actual number of tools registered for that process; the set can differ when tools or channels are disabled.
+Built-in tools cover file reading/writing/editing, shell and background process management, web fetching/browsing, native browser CUA (viewport screenshot, coordinate pointer, keyboard, and scroll), image analysis, messaging, sub-agents, speech, persistent memory, and session continuity. CUA controls the Playwright browser, not the host OS desktop. The CLI and gateway display the actual number of tools registered for that process; the set can differ when tools or channels are disabled.
 
 Agent tool calls run with bounded concurrency. Long tasks can continue across iteration budgets, and completion is reviewed before the runner accepts a final answer. Discord input queued during an active turn is processed in order.
 

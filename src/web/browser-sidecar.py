@@ -245,6 +245,93 @@ class BrowserEngine:
             return {'success': False, 'error': path}
         return {'success': True, 'path': path, 'url': page.url, 'title': page.title()}
 
+    def _cua_point(self, page: Page, p) -> tuple[Optional[float], Optional[float], Optional[str]]:
+        try:
+            x = float(p['x'])
+            y = float(p['y'])
+        except (KeyError, TypeError, ValueError):
+            return None, None, 'x and y must be numeric viewport coordinates'
+        viewport = page.viewport_size or page.evaluate('({width: window.innerWidth, height: window.innerHeight})')
+        if not (0 <= x < viewport['width'] and 0 <= y < viewport['height']):
+            return None, None, f"Point ({x}, {y}) is outside viewport {viewport['width']}x{viewport['height']}"
+        return x, y, None
+
+    def handle_cua_screenshot(self, p):
+        page = self._active_page()
+        path = self._take_screenshot(page, full=False)
+        if path.startswith('error:'):
+            return {'success': False, 'error': path}
+        viewport = page.viewport_size or page.evaluate('({width: window.innerWidth, height: window.innerHeight})')
+        return {'success': True, 'path': path, 'url': page.url, 'title': page.title(), 'viewport': viewport}
+
+    def handle_cua_click(self, p):
+        page = self._active_page()
+        x, y, error = self._cua_point(page, p)
+        if error:
+            return {'success': False, 'error': error}
+        button = p.get('button', 'left')
+        if button not in ('left', 'right', 'middle'):
+            return {'success': False, 'error': 'button must be left, right, or middle'}
+        click_count = p.get('click_count', 1)
+        if not isinstance(click_count, int) or not 1 <= click_count <= 3:
+            return {'success': False, 'error': 'click_count must be between 1 and 3'}
+        try:
+            page.mouse.click(x, y, button=button, click_count=click_count)
+            return {'success': True, 'x': x, 'y': y, 'url': page.url, 'title': page.title(), 'screenshot': self._take_screenshot(page)}
+        except Exception as e:
+            logger.exception('CUA click failed at (%s, %s)', x, y)
+            return {'success': False, 'error': str(e), 'screenshot': self._take_screenshot(page)}
+
+    def handle_cua_move(self, p):
+        page = self._active_page()
+        x, y, error = self._cua_point(page, p)
+        if error:
+            return {'success': False, 'error': error}
+        try:
+            page.mouse.move(x, y)
+            return {'success': True, 'x': x, 'y': y}
+        except Exception as e:
+            logger.exception('CUA pointer move failed at (%s, %s)', x, y)
+            return {'success': False, 'error': str(e)}
+
+    def handle_cua_type(self, p):
+        page = self._active_page()
+        text = p.get('text')
+        if not isinstance(text, str):
+            return {'success': False, 'error': 'text must be a string'}
+        try:
+            page.keyboard.insert_text(text)
+            return {'success': True, 'characters': len(text), 'screenshot': self._take_screenshot(page)}
+        except Exception as e:
+            logger.exception('CUA keyboard input failed')
+            return {'success': False, 'error': str(e)}
+
+    def handle_cua_press(self, p):
+        page = self._active_page()
+        key = p.get('key')
+        if not isinstance(key, str) or not key or len(key) > 40:
+            return {'success': False, 'error': 'key must be a non-empty Playwright key name'}
+        try:
+            page.keyboard.press(key)
+            return {'success': True, 'key': key, 'screenshot': self._take_screenshot(page)}
+        except Exception as e:
+            logger.exception('CUA key press failed for %s', key)
+            return {'success': False, 'error': str(e)}
+
+    def handle_cua_scroll(self, p):
+        page = self._active_page()
+        x, y, error = self._cua_point(page, p)
+        if error:
+            return {'success': False, 'error': error}
+        try:
+            delta_x = float(p.get('delta_x', 0))
+            delta_y = float(p.get('delta_y', 0))
+            page.mouse.wheel(delta_x, delta_y)
+            return {'success': True, 'delta_x': delta_x, 'delta_y': delta_y, 'screenshot': self._take_screenshot(page)}
+        except Exception as e:
+            logger.exception('CUA scroll failed at (%s, %s)', x, y)
+            return {'success': False, 'error': str(e)}
+
     def handle_extract(self, p):
         page = self._active_page()
         return {'success': True, 'text': self._extract_text(page, selector=p.get('selector'), max_tokens=p.get('max_tokens', 4000)), 'url': page.url}
@@ -356,6 +443,9 @@ class BrowserEngine:
 
     HANDLERS = {
         'browse': 'handle_browse', 'click': 'handle_click', 'type': 'handle_type',
+        'cua_screenshot': 'handle_cua_screenshot', 'cua_click': 'handle_cua_click',
+        'cua_move': 'handle_cua_move', 'cua_type': 'handle_cua_type',
+        'cua_press': 'handle_cua_press', 'cua_scroll': 'handle_cua_scroll',
         'screenshot': 'handle_screenshot', 'extract': 'handle_extract', 'scroll': 'handle_scroll',
         'wait': 'handle_wait', 'session': 'handle_session', 'tab_open': 'handle_tab_open',
         'tab_switch': 'handle_tab_switch', 'tab_close': 'handle_tab_close', 'tabs': 'handle_tabs',
