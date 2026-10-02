@@ -11,22 +11,40 @@ import type { ChannelCapabilities, OutboundFormatter } from './types.js';
 
 const discordFormatter: OutboundFormatter = {
   format(markdown: string): string {
-    // Discord supports standard markdown natively
-    // Only strip things Discord can't handle:
-    // - HTML tags
-    // - Very wide tables (convert to code blocks)
-    let result = markdown;
+    let result = markdown.replace(/```(?:\w+)?\s*\n?([\s\S]*?)```/g, '$1');
 
-    // Strip HTML tags
-    result = result.replace(/<[^>]+>/g, '');
+    // Keep Discord mentions/custom emoji intact while stripping other markup.
+    const discordTokens: string[] = [];
+    result = result.replace(/<(@!?&?\d+|#\d+|a?:[\w~]+:\d+|https?:\/\/[^>]+)>/g, (match, value: string) => {
+      const token = `\u0000${discordTokens.length}\u0000`;
+      discordTokens.push(value.startsWith('http') ? value : match);
+      return token;
+    });
 
-    // Convert markdown tables to code blocks (Discord doesn't render tables)
     result = result.replace(
       /(\|[^\n]+\|\n)((?:\|[-:| ]+\|\n))((?:\|[^\n]+\|\n?)+)/g,
-      (_, header, separator, body) => {
-        return '```\n' + header + separator + body + '```\n';
+      (_, header, _separator, body) => {
+        const columns = parsePipeRow(header);
+        return body.trim().split('\n').map((row: string) =>
+          parsePipeRow(row).map((cell, index) => columns[index] ? `${columns[index]}: ${cell}` : cell).join(' · '),
+        ).join('\n');
       },
     );
+
+    result = result
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/^\s*>\s?/gm, '')
+      .replace(/^\s*[-*+]\s+/gm, '• ')
+      .replace(/^\s*[-*_]{3,}\s*$/gm, '')
+      .replace(/\*\*(.+?)\*\*/g, '$1')
+      .replace(/__(.+?)__/g, '$1')
+      .replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '$1')
+      .replace(/(?<!_)_([^_]+?)_(?!_)/g, '$1')
+      .replace(/~~(.+?)~~/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+      .replace(/<\/?[a-z][^>]*>/gi, '')
+      .replace(/\u0000(\d+)\u0000/g, (_token, index: string) => discordTokens[Number(index)] ?? '');
 
     return result.trim();
   },

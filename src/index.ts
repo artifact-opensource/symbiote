@@ -142,6 +142,8 @@ async function main() {
   const systemPrompt = buildSystemPrompt({
     workspace: config.workspace,
     tools: registry.list().map(t => t.name),
+    channel: 'cli',
+    chatType: 'direct',
   });
   const contextStore = new ContextStore(getSharedVectorDB(config.workspace), { sessionId });
 

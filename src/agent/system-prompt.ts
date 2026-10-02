@@ -130,6 +130,21 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
     addSection('Context', params.extraContext);
   }
 
+  const channel = (params.channel ?? '').toLowerCase();
+  if (channel === 'discord') {
+    addSection('Response Format', [
+      'Write plain text for Discord. Do not use Markdown syntax: no headings, asterisks, backticks, tables, or Markdown links.',
+      'Use short paragraphs and simple numbered lines when structure helps. Write URLs directly.',
+      'Keep replies concise and within the channel message limit; avoid wide or dense output.',
+    ].join('\n'));
+  } else if (channel === 'cli' || channel === 'terminal') {
+    addSection('Response Format', [
+      'Format for a terminal: concise text, deliberate line breaks, short labels, and compact lists.',
+      'Use code fences only for code or commands. Avoid wide tables and decorative Markdown.',
+      'Do not emit terminal control sequences; the CLI owns colors, prompts, and progress display.',
+    ].join('\n'));
+  }
+
   // ── Guidelines (kept minimal — SOUL.md and AGENTS.md carry the real personality) ──
   addSection('Core Guidelines', [
     '- Embody your SOUL.md persona. No generic chatbot behavior.',

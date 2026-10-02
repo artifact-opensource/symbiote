@@ -252,9 +252,13 @@ const x = 1;
   const discordCaps: ChannelCapabilities = {
     ...waCaps, formatting: 'markdown', maxMessageLength: 2000,
   };
-  const discordResult = formatForChannel(markdown, discordCaps);
-  assert(discordResult[0].includes('# Title'), 'Discord: headers preserved');
-  assert(discordResult[0].includes('```'), 'Discord: tables become code blocks');
+  const discordResult = formatForChannel(`${markdown}\n<@1234567890>`, discordCaps);
+  assert(!discordResult[0].includes('# Title'), 'Discord: heading syntax removed');
+  assert(!discordResult[0].includes('**') && !discordResult[0].includes('*italic*'), 'Discord: Markdown emphasis removed');
+  assert(!discordResult[0].includes('```') && discordResult[0].includes('const x = 1;'), 'Discord: code fence removed, code preserved');
+  assert(discordResult[0].includes('Col A: one'), 'Discord: table converted to readable text');
+  assert(discordResult[0].includes('Link (https://example.com)'), 'Discord: Markdown link converted to plain text');
+  assert(discordResult[0].includes('<@1234567890>'), 'Discord: user mention preserved');
 
   // Telegram
   const tgCaps: ChannelCapabilities = {
