@@ -47,6 +47,8 @@ import { webFetchTool } from '../tools/builtin/web-fetch.js';
 import { memorySearchTool } from '../tools/builtin/memory.js';
 import { combRecallTool, combStageTool, setCombVdbHook, flushMessages } from '../tools/builtin/comb.js';
 import { vdbSearchTool, vdbIngestTool, vdbStatsTool } from '../tools/builtin/memory-vdb.js';
+import { getSharedVectorDB } from '../memory/vdb.js';
+import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from '../memory/memograph.js';
 import { webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool, webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool, webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool } from '../tools/builtin/web-browser.js';
 import { createSpawnTool, createSubAgentStatusTool } from '../tools/builtin/spawn.js';
 import { SubAgentManager } from '../sessions/sub-agent.js';
@@ -61,6 +63,7 @@ import { BlinkController } from '../agent/blink.js';
 import { loadConfig, type SymbioteConfig } from '../config/config.js';
 import { validateAndReport } from '../config/validator.js';
 import type { Provider, ProviderConfig } from '../providers/types.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from '../providers/types.js';
 import { selectProviderRoute, type ProviderRouteChoice } from '../providers/route.js';
 import { anthropicProvider } from '../providers/anthropic.js';
 import { openaiProvider } from '../providers/openai.js';
@@ -330,6 +333,7 @@ export class SymbioteGateway {
       model: this.model,
       maxTokens: this.config.maxTokens,
       temperature: this.config.temperature,
+      timeoutMs: this.config.timeouts?.llmRequestMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS,
       ...provCfg,
     };
     if (toolsEnabled) {
@@ -453,7 +457,14 @@ export class SymbioteGateway {
   private async initContextStore(): Promise<void> {
     if (!this.vdbInstance) {
       const { VectorDB } = await import("../memory/vdb.js");
-      this.vdbInstance = new VectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
+      this.vdbInstance = getSharedVectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
+    }
+    const memographImport = importMemoGraphSnapshots(
+      this.vdbInstance,
+      resolveMemoGraphStorageDir(this.config.workspace),
+    );
+    if (memographImport.indexed > 0 || memographImport.failures > 0) {
+      console.log(`[memograph] Startup import: ${memographImport.indexed} indexed, ${memographImport.skipped} skipped, ${memographImport.failures} failures`);
     }
     this.contextStore = new ContextStore(this.vdbInstance, {
       retrievalK: 5,
@@ -519,7 +530,7 @@ export class SymbioteGateway {
       // Lazy-init VDB
       if (!this.vdbInstance) {
         const { VectorDB } = await import("../memory/vdb.js");
-        this.vdbInstance = new VectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
+        this.vdbInstance = getSharedVectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
       }
 
       const sessions = this.sessionManager.list();
@@ -1280,8 +1291,8 @@ export class SymbioteGateway {
         console.log(`${palette.dim}  [gateway]${palette.reset} Archived ${archived} messages → ${session.messages.length} remaining`);
         // Feed archived messages to VDB for persistent memory
         try {
-          const { VectorDB, ingestSessions } = await import("../memory/vdb.js");
-          const vdb = new VectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
+          const { getSharedVectorDB, ingestSessions } = await import("../memory/vdb.js");
+          const vdb = getSharedVectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
           const archiveDir = path.join(this.config.sessionsDir ?? ".sessions", "archive");
           if (fs.existsSync(archiveDir)) {
             const result = ingestSessions(vdb, archiveDir);
@@ -1320,6 +1331,7 @@ export class SymbioteGateway {
       const provConfig: ProviderConfig = {
         maxTokens: this.config.maxTokens,
         temperature: this.config.temperature,
+        timeoutMs: this.config.timeouts?.llmRequestMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS,
         systemPrompt: this.systemPrompt,
         ...(thinkingCfg ? { thinking: thinkingCfg } : {}),
         ...providerCfg,

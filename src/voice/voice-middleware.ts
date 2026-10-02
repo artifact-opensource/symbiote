@@ -22,11 +22,8 @@ const execFileAsync = promisify(execFile);
 
 // Python environments
 const WORKSPACE = process.env.MACH6_WORKSPACE ?? process.cwd();
-const HEKTOR_PYTHON = process.env.SYMBIOTE_HEKTOR_PYTHON
-  ?? process.env.MACH6_HEKTOR_PYTHON;
 const VOICE_PYTHON = process.env.SYMBIOTE_VOICE_PYTHON
-  ?? process.env.MACH6_VOICE_PYTHON
-  ?? HEKTOR_PYTHON;
+  ?? process.env.MACH6_VOICE_PYTHON;
 const VOICE_DIR = process.env.SYMBIOTE_VOICE_DIR
   ?? process.env.MACH6_VOICE_DIR
   ?? path.join(WORKSPACE, 'voice');
@@ -66,7 +63,7 @@ export function isVoiceMessage(envelope: BusEnvelope): boolean {
  */
 export async function transcribeAudio(audioPath: string): Promise<TranscriptionResult> {
   try {
-    const python = pythonExec(path.join(VOICE_DIR, 'stt.py'), HEKTOR_PYTHON);
+    const python = pythonExec(path.join(VOICE_DIR, 'stt.py'), VOICE_PYTHON);
     const { stdout } = await execFileAsync(
       python.file,
       [...python.args, audioPath],
@@ -147,7 +144,7 @@ export async function generateVoiceReply(text: string): Promise<string | null> {
   
   try {
     if (useChunked) {
-      const python = pythonExec(path.join(VOICE_DIR, 'tts.py'), HEKTOR_PYTHON);
+      const python = pythonExec(path.join(VOICE_DIR, 'tts.py'), VOICE_PYTHON);
       await execFileAsync(
         python.file,
         [...python.args, text, '--output', outputPath],

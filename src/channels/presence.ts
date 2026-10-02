@@ -1,7 +1,7 @@
 // Symbiote — Social Presence Manager v2
 // Sustained typing + granular activity states.
 //
-// Shows what AVA is actually doing during a turn:
+// Shows what the agent is doing during a turn:
 // thinking, reading, writing, searching, executing, etc.
 //
 // Discord: setActivity("Reading files...") + sendTyping() refresh
@@ -74,7 +74,7 @@ const TOOL_ACTIVITY: Record<string, ActivityDisplay> = {
 };
 
 const THINKING_ACTIVITY: ActivityDisplay = { text: '🤔 Thinking...', type: ActivityType.Custom };
-const IDLE_ACTIVITY: ActivityDisplay = { text: process.env.IDLE_EMOJI ?? '🔮', type: ActivityType.Custom };
+const IDLE_ACTIVITY: ActivityDisplay = { text: process.env.IDLE_EMOJI ?? '', type: ActivityType.Custom };
 
 // ─── Presence Manager ──────────────────────────────────────────────────────
 
@@ -278,8 +278,7 @@ export class PresenceManager {
     for (const [, client] of this.discordClients) {
       try {
         if (activity.text === IDLE_ACTIVITY.text) {
-          // Clear to just the crystal ball
-          client.user?.setActivity('🔮', { type: ActivityType.Custom });
+          client.user?.setActivity(activity.text, { type: ActivityType.Custom });
         } else {
           client.user?.setActivity(activity.text, { type: ActivityType.Custom });
         }

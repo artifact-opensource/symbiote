@@ -18,7 +18,7 @@ const checks = [
   ['IDENTITY.md',   'AVA'],
   ['USER.md',       'Ali Shakil'],
   ['AGENTS.md',     'COMB'],
-  ['TOOLS.md',      'HEKTOR'],
+  ['TOOLS.md',      'VDB'],
   ['HEARTBEAT.md',  'HEARTBEAT_OK'],
   ['WORKFLOW_AUTO.md', 'Phoenix'],
   ['Today memory',  '2026-02-22'],

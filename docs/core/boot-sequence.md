@@ -6,10 +6,9 @@ Symbiote starts with a structured boot sequence. Each step runs in order with a 
 
 | Step | Description | Timeout | Required |
 |------|-------------|---------|----------|
-| `config-load` | Load and parse `mach6.json` | 5s | ✅ Yes |
+| `config-load` | Load and parse `symbiote.json` | 5s | ✅ Yes |
 | `config-validate` | Validate all config fields | 5s | ✅ Yes |
 | `comb-recall` | Recall operational memory | 15s | ❌ No |
-| `hektor-warm` | Warm HEKTOR search index | 60s | ❌ No |
 | `channel-connect` | Connect Discord, WhatsApp, HTTP | 30s | ❌ No |
 
 ## Failure Modes
@@ -26,14 +25,13 @@ Symbiote starts with a structured boot sequence. Each step runs in order with a 
 If a non-required step fails (e.g., COMB recall times out, Discord connection fails), the agent enters **degraded mode**. It starts and operates normally, just without the failed subsystem. The boot output clearly shows which components degraded and why.
 
 ```
-  ● [1/5] Loading configuration ... 12ms
-  ● [2/5] Validating configuration ... 3ms
-  ◐ [3/5] Recalling operational memory (COMB) degraded
+  ● [1/4] Loading configuration ... 12ms
+  ● [2/4] Validating configuration ... 3ms
+  ◐ [3/4] Recalling operational memory (COMB) degraded
     Timeout after 15000ms
-  ● [4/5] Warming HEKTOR search index ... 450ms
-  ● [5/5] Connecting channels ... 1200ms
+  ● [4/4] Connecting channels ... 1200ms
 
-  ◐ READY (degraded: comb-recall) — 1665ms
+  ◐ READY (degraded: comb-recall) — 1215ms
 ```
 
 ## Fatal Failure

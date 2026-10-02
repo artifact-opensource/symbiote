@@ -2,14 +2,14 @@
 """
 PULSE — Persistent Unsupervised Loop for Qorvex Execution
 =============================================================
-AVA's consciousness layer. Runs between conversations, between crons,
+The agent's autonomous maintenance loop. Runs between conversations, crons,
 between events. Turns dead time into agency.
 
 Architecture:
   1. TRIAGE (cheap model via Copilot proxy) — looks at context, picks action
-  2. WORK (full model via Mach6 HTTP API) — executes the chosen task
+    2. WORK (full model via Symbiote HTTP API) — executes the chosen task
   3. SLEEP — waits, then re-enters triage
-  4. MEMORY — proactive COMB + HEKTOR management (both sisters)
+    4. MEMORY — proactive native VDB ingestion and context staging
 
 The loop: Wake → Memory Maintenance → Read Context → Triage → Work (maybe) → Sleep → Repeat
 
@@ -35,10 +35,35 @@ import subprocess as _sp
 
 # ─── COMB Flush ─────────────────────────────────────────────────────────────
 
-_last_comb_flush_ts = 0.0  # module-level cooldown tracker
+_last_comb_flush_ts = 0.0
+_last_vdb_ingest_ts = 0.0
+
+
+def _run_vdb(workspace: str, action: str, *args: str, timeout: int = 30) -> str:
+    """Invoke Symbiote's native VDB maintenance entry point."""
+    workspace_path = Path(workspace).resolve()
+    script = Path(__file__).resolve().parents[1] / "dist" / "cli" / "vdb-maintenance.js"
+    if not script.is_file():
+        raise FileNotFoundError(f"Symbiote VDB command is not built: {script}")
+
+    env = os.environ.copy()
+    env["SYMBIOTE_WORKSPACE"] = str(workspace_path)
+    env["MACH6_WORKSPACE"] = str(workspace_path)
+    result = _sp.run(
+        [env.get("NODE", "node"), str(script), action, *args],
+        capture_output=True,
+        text=True,
+        cwd=str(workspace_path) if workspace_path.is_dir() else str(script.parents[2]),
+        env=env,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+        raise RuntimeError(detail[:1000])
+    return result.stdout.strip()
 
 def comb_flush(workspace: str, log: logging.Logger, reason: str = "unknown"):
-    """Flush COMB memory — ensures no context loss on edges.
+    """Ensure recent sessions have been indexed in native VDB.
     
     Triggers on: shutdown, budget exhaustion, rate limits, timeouts, errors.
     This is the safety net that catches what the agent session can't.
@@ -55,383 +80,37 @@ def comb_flush(workspace: str, log: logging.Logger, reason: str = "unknown"):
         log.debug(f"COMB flush cooldown (last {now - _last_comb_flush_ts:.0f}s ago): {reason}")
         return False
     
-    flush_script = Path(workspace) / ".ava-memory/flush.py"
-    venv_python = Path(workspace) / "enterprise/.hektor-env/bin/python3"
-
-    if not flush_script.exists() or not venv_python.exists():
-        log.warning(f"COMB flush skipped (files missing): {reason}")
-        return False
-
     try:
-        result = _sp.run(
-            [str(venv_python), str(flush_script), "rollup"],
-            capture_output=True, text=True, cwd=workspace, timeout=30,
-        )
+        summary = _run_vdb(workspace, "ingest")
         _last_comb_flush_ts = time.time()
-        if result.returncode == 0:
-            log.info(f"🧠 COMB flushed: {reason} — {result.stdout.strip()}")
-            return True
-        else:
-            log.warning(f"COMB flush failed ({reason}): {result.stderr.strip()}")
-            return False
-    except _sp.TimeoutExpired:
+        log.info(f"🧠 VDB flush complete: {reason} — {summary[:300]}")
+        return True
+    except (_sp.TimeoutExpired, OSError, RuntimeError) as e:
         _last_comb_flush_ts = time.time()  # still count as attempt
-        log.error(f"COMB flush timed out: {reason}")
-        return False
-    except Exception as e:
-        _last_comb_flush_ts = time.time()
-        log.error(f"COMB flush error ({reason}): {e}")
+        log.exception(f"VDB flush failed ({reason}): {e}")
         return False
 
 
 def comb_stage(workspace: str, log: logging.Logger, content: str):
-    """Stage a note into COMB for next session."""
-    flush_script = Path(workspace) / ".ava-memory/flush.py"
-    venv_python = Path(workspace) / "enterprise/.hektor-env/bin/python3"
-
-    if not flush_script.exists() or not venv_python.exists():
-        return False
-
+    """Persist a note as a native VDB memory document."""
     try:
-        result = _sp.run(
-            [str(venv_python), str(flush_script), "stage", content],
-            capture_output=True, text=True, cwd=workspace, timeout=15,
-        )
-        if result.returncode == 0:
-            log.info(f"🧠 COMB staged: {content[:60]}...")
-            return True
-        else:
-            log.warning(f"COMB stage failed: {result.stderr.strip()}")
-            return False
-    except Exception as e:
-        log.error(f"COMB stage error: {e}")
-        return False
-
-
-# ─── Memory Management (COMB + HEKTOR for both sisters) ────────────────────
-
-_HEKTOR_INGEST_PATH = "/home/adam/workspace/enterprise/.ava-memory/ava_memory_fast.py"
-_HEKTOR_VENV = "/home/adam/workspace/enterprise/.hektor-env/bin/python3"
-_HEKTOR_SOCKET = "/home/adam/workspace/enterprise/.hektor-live/ava_daemon.sock"
-_HEKTOR_PID = "/home/adam/workspace/enterprise/.ava-memory/ava_daemon.pid"
-
-_AVA_COMB_FLUSH = "/home/adam/workspace/enterprise/.ava-memory/flush.py"
-# Aria (plug) is deprecated and archived — these are disabled
-_ARIA_COMB_FLUSH = None  # stub
-_ARIA_COMB_VENV = None   # stub
-
-_last_hektor_ingest_ts = 0.0
-_last_ava_comb_rollup_ts = 0.0
-_last_aria_comb_rollup_ts = 0.0
-
-
-def hektor_alive(log: logging.Logger) -> bool:
-    """Check if HEKTOR daemon is responding."""
-    import socket as _socket, struct as _struct
-    sock_path = Path(_HEKTOR_SOCKET)
-    if not sock_path.exists():
-        return False
-    try:
-        s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
-        s.settimeout(5)
-        s.connect(str(sock_path))
-        # Send ping command using correct IPC protocol
-        query = json.dumps({"cmd": "ping"}).encode()
-        header = _struct.pack(">I", len(query))
-        s.sendall(header + query)
-        # Read response
-        raw_len = s.recv(4)
-        if len(raw_len) == 4:
-            msg_len = _struct.unpack(">I", raw_len)[0]
-            data = b""
-            while len(data) < msg_len:
-                chunk = s.recv(msg_len - len(data))
-                if not chunk:
-                    break
-                data += chunk
-            resp = json.loads(data) if data else {}
-            s.close()
-            return resp.get("status") in ("ok", "loading")
-        s.close()
-        return False
-    except Exception:
-        return False
-
-def hektor_restart(log: logging.Logger) -> bool:
-    """Restart HEKTOR daemon if it's down."""
-    import time as _time, struct as _struct
-    log.info("🔍 Restarting HEKTOR daemon...")
-    sock_path = Path(_HEKTOR_SOCKET)
-
-    # Kill existing daemon if running
-    try:
-        pid_path = Path("/home/adam/workspace/enterprise/.hektor-live/ava_daemon.pid")
-        if pid_path.exists():
-            old_pid = int(pid_path.read_text().strip())
-            _os.kill(old_pid, 9)
-            _time.sleep(2)
-    except Exception:
-        pass
-
-    try:
-        # Start daemon in background (not capture_output — daemon writes to its own log)
-        proc = _sp.Popen(
-            [_HEKTOR_VENV, _HEKTOR_INGEST_PATH, "daemon", "start"],
-            stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
-            start_new_session=True,
-            cwd="/home/adam/workspace/enterprise",
-        )
-        # Move daemon to gateway cgroup (no memory limit) instead of pulse cgroup (512MB)
-        try:
-            gateway_cgroup = "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/mach6-gateway.service/cgroup.procs"
-            with open(gateway_cgroup, 'w') as f:
-                f.write(str(proc.pid))
-            log.info(f"✅ HEKTOR daemon started (PID {proc.pid}, moved to gateway cgroup)")
-        except Exception as e:
-            log.warning(f"⚠️ Could not move to gateway cgroup: {e}")
-            log.info(f"✅ HEKTOR daemon started (PID {proc.pid})")
-        # Wait for socket (created before load_all in patched daemon)
-        for _ in range(30):
-            _time.sleep(2)
-            if sock_path.exists():
-                log.info("✅ HEKTOR socket ready")
-                return True
-        log.warning("⚠️ HEKTOR started but socket not ready yet")
+        _run_vdb(workspace, "stage", content, timeout=15)
+        log.info(f"🧠 Memory staged in VDB: {content[:60]}...")
         return True
-    except Exception as e:
-        log.error(f"HEKTOR restart error: {e}")
-        return False
-
-def hektor_ingest(log: logging.Logger, force: bool = False) -> bool:
-    """Trigger HEKTOR reindex to pick up new/changed files."""
-    global _last_hektor_ingest_ts
-    
-    now = time.time()
-    # Don't ingest more than once per 30 minutes (unless forced)
-    if not force and (now - _last_hektor_ingest_ts) < 1800:
-        log.debug("HEKTOR ingest cooldown")
-        return False
-    
-    log.info("🔍 HEKTOR ingest starting...")
-    try:
-        # Run ingest in gateway cgroup (no memory limit) to avoid OOM
-        gateway_cgroup = "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/mach6-gateway.service/cgroup.procs"
-        # Use cgexec-style approach: write PID to cgroup after start
-        proc = _sp.Popen(
-            [_HEKTOR_VENV, _HEKTOR_INGEST_PATH, "ingest"],
-            stdout=_sp.PIPE, stderr=_sp.PIPE,
-            cwd="/home/adam/workspace/enterprise",
-        )
-        try:
-            with open(gateway_cgroup, 'w') as f:
-                f.write(str(proc.pid))
-        except Exception:
-            pass
-        stdout, stderr = proc.communicate(timeout=300)
-        _last_hektor_ingest_ts = time.time()
-        if proc.returncode == 0:
-            lines = stdout.decode().strip().split("\n")
-            doc_line = [l for l in lines if "indexable" in l.lower() or "docs" in l.lower()]
-            summary = doc_line[-1] if doc_line else lines[-1] if lines else "done"
-            log.info(f"✅ HEKTOR ingest complete: {summary[:100]}")
-            return True
-        else:
-            log.error(f"❌ HEKTOR ingest failed: {stderr.decode().strip()[:200]}")
-            return False
-    except _sp.TimeoutExpired:
-        _last_hektor_ingest_ts = time.time()
-        log.error("HEKTOR ingest timed out (120s)")
-        return False
-    except Exception as e:
-        log.error(f"HEKTOR ingest error: {e}")
+    except (_sp.TimeoutExpired, OSError, RuntimeError) as e:
+        log.exception(f"VDB stage failed: {e}")
         return False
 
 
-def _comb_rollup(flush_script: str, venv: str, label: str, log: logging.Logger) -> bool:
-    """Roll up COMB staging → archive for a sister."""
-    try:
-        result = _sp.run(
-            [venv, flush_script, "rollup"],
-            capture_output=True, text=True, timeout=30,
-            cwd="/home/adam/workspace/enterprise",
-        )
-        if result.returncode == 0:
-            output = result.stdout.strip()
-            if "Nothing" not in output:
-                log.info(f"🧠 {label} COMB rolled up: {output[:100]}")
-            return True
-        else:
-            log.warning(f"{label} COMB rollup failed: {result.stderr.strip()[:100]}")
-            return False
-    except Exception as e:
-        log.error(f"{label} COMB rollup error: {e}")
-        return False
+# ─── Native VDB maintenance ───────────────────────────────────────────────
+
+_last_vdb_ingest_ts = 0.0
 
 
-def _comb_verify(flush_script: str, venv: str, label: str, log: logging.Logger) -> bool:
-    """Verify chain integrity for a sister's COMB."""
-    try:
-        result = _sp.run(
-            [venv, flush_script, "verify"],
-            capture_output=True, text=True, timeout=15,
-            cwd="/home/adam/workspace/enterprise",
-        )
-        if result.returncode == 0:
-            log.debug(f"{label} COMB chain ✅")
-            return True
-        else:
-            log.error(f"🚨 {label} COMB CHAIN BROKEN: {result.stderr.strip()[:200]}")
-            return False
-    except Exception as e:
-        log.error(f"{label} COMB verify error: {e}")
-        return False
+_last_context_stage_ts = 0.0
 
 
-_last_orphan_check_ts = 0.0
-_last_hektor_health_ts = 0.0
-_last_filesystem_scan_ts = 0.0
-_last_comb_gap_check_ts = 0.0
-_known_file_mtimes: dict = {}  # path -> mtime for change detection
-
-
-def _comb_rollup_orphans(staging_dir: str, archive_dir: str, label: str, log: logging.Logger):
-    """Find and roll up orphaned staging files (staged but never archived).
-    
-    This catches historical staging files that were created before PULSE
-    existed, or during periods when rollup wasn't running.
-    """
-    staging = Path(staging_dir)
-    archive = Path(archive_dir)
-    if not staging.exists():
-        return
-    
-    today = datetime.now(PKT).strftime("%Y-%m-%d")
-    venv = _HEKTOR_VENV if "enterprise" in staging_dir else _ARIA_COMB_VENV
-    comb_root = str(staging.parent)
-    
-    for staging_file in sorted(staging.glob("*.jsonl")):
-        date = staging_file.stem  # e.g. "2026-02-19"
-        archive_file = archive / f"{date}.json"
-        
-        # Skip today -- normal rollup handles that
-        if date == today:
-            continue
-        
-        # If staging exists but archive doesn't -> orphan
-        if not archive_file.exists():
-            log.info(f"orphan {label} staging found: {date} -- rolling up")
-            try:
-                result = _sp.run(
-                    [venv, "-c", f"""
-import sys; sys.path.insert(0, '/home/adam/workspace/enterprise/.hektor-env/lib/python3.13/site-packages')
-from comb import CombStore
-store = CombStore('{comb_root}')
-doc = store.rollup(date='{date}')
-if doc: print(f'Rolled up {{doc.date}}')
-else: print('Nothing to roll up')
-"""],
-                    capture_output=True, text=True, timeout=30,
-                )
-                if archive_file.exists():
-                    log.info(f"  {label} orphan {date} rolled up successfully")
-                else:
-                    log.warning(f"  {label} orphan {date} rollup produced no archive")
-            except Exception as e:
-                log.error(f"{label} orphan rollup error for {date}: {e}")
-
-
-def _check_comb_gaps(archive_dir: str, label: str, log: logging.Logger) -> list:
-    """Check for gaps in COMB archive chain (missing dates between first and last).
-    
-    Returns list of missing date strings.
-    """
-    archive = Path(archive_dir)
-    if not archive.exists():
-        return []
-    
-    dates = sorted([f.stem for f in archive.glob("*.json")])
-    if len(dates) < 2:
-        return []
-    
-    from datetime import date as dt_date
-    gaps = []
-    for i in range(len(dates) - 1):
-        try:
-            d1 = dt_date.fromisoformat(dates[i])
-            d2 = dt_date.fromisoformat(dates[i + 1])
-            diff = (d2 - d1).days
-            if diff > 1:
-                for j in range(1, diff):
-                    missing = (d1 + timedelta(days=j)).isoformat()
-                    gaps.append(missing)
-        except ValueError:
-            continue
-    
-    if gaps:
-        log.info(f"  {label} COMB has {len(gaps)} gap(s) in archive chain: {gaps[:5]}{'...' if len(gaps) > 5 else ''}")
-    
-    return gaps
-
-
-def _scan_important_files(log: logging.Logger) -> bool:
-    """Scan important files beyond memory/ for changes.
-    
-    Returns True if any important file changed since last scan.
-    """
-    global _known_file_mtimes
-    
-    important_patterns = [
-        "/home/adam/workspace/enterprise/memory/*.md",
-        "/home/adam/workspace/enterprise/IDENTITY*.md",
-        "/home/adam/workspace/enterprise/SOUL.md",
-        "/home/adam/workspace/enterprise/USER*.md",
-        "/home/adam/workspace/enterprise/AGENTS*.md",
-        "/home/adam/workspace/enterprise/TOOLS.md",
-        "/home/adam/workspace/enterprise/HEARTBEAT.md",
-        "/home/adam/workspace/enterprise/WORKFLOW_AUTO.md",
-        "/home/adam/workspace/enterprise/.ava-memory/long-term.md",
-        "/home/adam/workspace/enterprise/.ava-private/JOURNAL.md",
-        "/home/adam/workspace/enterprise/admin/*.md",
-        "/home/adam/workspace/enterprise/.ava-memory/comb-store/archive/*.json",
-    ]
-    
-    import glob as _glob
-    changed = False
-    
-    for pattern in important_patterns:
-        for filepath in _glob.glob(pattern):
-            try:
-                mtime = os.path.getmtime(filepath)
-                prev = _known_file_mtimes.get(filepath)
-                if prev is None:
-                    _known_file_mtimes[filepath] = mtime
-                elif mtime > prev:
-                    _known_file_mtimes[filepath] = mtime
-                    changed = True
-                    log.debug(f"  file changed: {filepath}")
-            except OSError:
-                pass
-    
-    return changed
-
-
-def _hektor_doc_count(log: logging.Logger) -> int:
-    """Get current HEKTOR document count."""
-    try:
-        result = _sp.run(
-            [_HEKTOR_VENV, _HEKTOR_INGEST_PATH, "stats"],
-            capture_output=True, text=True, timeout=10,
-            cwd="/home/adam/workspace/enterprise",
-        )
-        for line in result.stdout.splitlines():
-            if "Documents:" in line:
-                return int(line.split(":")[1].strip().replace(",", ""))
-    except Exception:
-        pass
-    return -1
-
-
-def memory_maintenance(log: logging.Logger):
+def memory_maintenance(log: logging.Logger, workspace: Optional[str] = None):
     """
     Proactive memory management -- called every PULSE cycle.
     
@@ -441,108 +120,37 @@ def memory_maintenance(log: logging.Logger):
       3. Verify chain integrity (every 2 hours)
       4. Detect archive gaps and log warnings (every 6 hours)
     
-    HEKTOR management:
+    Native VDB management:
       5. Ensure daemon is alive (every cycle)
       6. Scan important files for changes -> reindex (every 5 min)
       7. Periodic full reindex for consistency (every 4 hours)
       8. Log doc count / health metrics (every hour)
     """
-    global _last_ava_comb_rollup_ts, _last_aria_comb_rollup_ts
-    global _last_orphan_check_ts, _last_hektor_health_ts
-    global _last_filesystem_scan_ts, _last_comb_gap_check_ts
+    global _last_vdb_ingest_ts, _last_context_stage_ts
+    workspace = workspace or os.environ.get("SYMBIOTE_WORKSPACE") or os.getcwd()
     now = time.time()
-    hour = datetime.now(PKT).hour
-    minute = datetime.now(PKT).minute
-    
-    # -- 1. HEKTOR daemon health (every cycle) --
-    # Cooldown: after restart, wait long enough for daemon to load (~5 min)
-    _hektor_restart_cooldown = globals().get('_hektor_restart_cooldown', 0)
-    if now < _hektor_restart_cooldown:
-        log.debug(f"HEKTOR restart cooldown: {int(_hektor_restart_cooldown - now)}s remaining")
-    elif not hektor_alive(log):
-        log.warning("HEKTOR daemon not responding -- restarting")
-        hektor_restart(log)
-        _hektor_restart_cooldown = now + 300  # 5 min cooldown
-        globals()['_hektor_restart_cooldown'] = _hektor_restart_cooldown
-    
-    # -- 2. COMB rollups (every 30 min, both sisters) --
-    if (now - _last_ava_comb_rollup_ts) > 1800:
-        _comb_rollup(_AVA_COMB_FLUSH, _HEKTOR_VENV, "AVA", log)
-        _last_ava_comb_rollup_ts = now
-    
-    if (now - _last_aria_comb_rollup_ts) > 1800:
-        _comb_rollup(_ARIA_COMB_FLUSH, _ARIA_COMB_VENV, "Aria", log)
-        _last_aria_comb_rollup_ts = now
-    
-    # -- 3. COMB chain verification (every 2 hours) --
-    if minute < 15 and hour % 2 == 0:
-        _comb_verify(_AVA_COMB_FLUSH, _HEKTOR_VENV, "AVA", log)
-        _comb_verify(_ARIA_COMB_FLUSH, _ARIA_COMB_VENV, "Aria", log)
-    
-    # -- 4. Orphaned staging cleanup (every 6 hours) --
-    if (now - _last_orphan_check_ts) > 21600:
-        _last_orphan_check_ts = now
-        _comb_rollup_orphans(
-            "/home/adam/workspace/enterprise/.ava-memory/comb-store/staging",
-            "/home/adam/workspace/enterprise/.ava-memory/comb-store/archive",
-            "AVA", log
-        )
-        _comb_rollup_orphans(
-            "/dev/null",
-            "/dev/null",
-            "Aria", log
-        )
-    
-    # -- 5. COMB archive gap detection (every 6 hours) --
-    if (now - _last_comb_gap_check_ts) > 21600:
-        _last_comb_gap_check_ts = now
-        _check_comb_gaps(
-            "/home/adam/workspace/enterprise/.ava-memory/comb-store/archive",
-            "AVA", log
-        )
-        _check_comb_gaps(
-            "/dev/null",
-            "Aria", log
-        )
-    
-    # -- 6. File change detection -> HEKTOR reindex (every 5 min) --
-    if (now - _last_filesystem_scan_ts) > 300:
-        _last_filesystem_scan_ts = now
-        if _scan_important_files(log):
-            log.info("Important files changed -- triggering HEKTOR reindex")
-            hektor_ingest(log)
-    
-    # -- 7. Periodic full HEKTOR reindex (every 4 hours) --
-    if hour % 4 == 0 and minute < 15:
-        hektor_ingest(log, force=True)
-    
-    # -- 8. HEKTOR health metrics (every hour) --
-    if (now - _last_hektor_health_ts) > 3600:
-        _last_hektor_health_ts = now
-        doc_count = _hektor_doc_count(log)
-        if doc_count > 0:
-            log.info(f"HEKTOR health: {doc_count:,} documents indexed")
-        elif doc_count == 0:
-            log.warning("HEKTOR has 0 documents -- needs ingest!")
-            hektor_ingest(log, force=True)
+    if now - _last_vdb_ingest_ts > 900:
+        _last_vdb_ingest_ts = now
+        try:
+            summary = _run_vdb(workspace, "ingest", timeout=60)
+            log.info("Native VDB session ingest: %s", summary[:300])
+        except Exception as exc:
+            log.exception("Native VDB session ingest failed: %s", exc)
 
-    # -- 9. Autonomous COMB context staging (every 2 hours) --
-    global _last_context_stage_ts
     if (now - _last_context_stage_ts) > 7200:
         _last_context_stage_ts = now
-        _auto_stage_context(log)
+        _auto_stage_context(log, workspace)
 
 
 _last_context_stage_ts = 0.0
 
-def _auto_stage_context(log: logging.Logger):
+def _auto_stage_context(log: logging.Logger, workspace: str):
     """Autonomously stage important context into COMB.
     
     Reads today's memory file and recent git activity to build
     a context snapshot. This ensures AVA always wakes up with
     fresh operational context even if she didn't stage manually.
     """
-    workspace = "/home/adam/workspace/enterprise"
     today = datetime.now(PKT).strftime("%Y-%m-%d")
     today_short = datetime.now(PKT).strftime("%m-%d")
     
@@ -584,11 +192,15 @@ def _auto_stage_context(log: logging.Logger):
     except Exception:
         pass
     
-    # 4. Check HEKTOR health
-    if hektor_alive(log):
-        context_parts.append("HEKTOR: alive")
-    else:
-        context_parts.append("HEKTOR: DOWN — needs attention")
+    # 4. Snapshot native memory health without requiring an external daemon.
+    try:
+        stats = json.loads(_run_vdb(workspace, "stats", timeout=15))
+        context_parts.append(
+            f"Memory index: {stats.get('documentCount', 0)} documents, "
+            f"{stats.get('termCount', 0)} terms"
+        )
+    except Exception as e:
+        log.exception("Native VDB health check failed: %s", e)
     
     if context_parts:
         summary = f"[PULSE auto-context {today_short}] " + " | ".join(context_parts)
@@ -612,9 +224,9 @@ class PulseConfig:
     triage_model: str = "claude-sonnet-4"
     triage_max_tokens: int = 500
 
-    # Mach6 HTTP API for work turns
-    mach6_url: str = "http://localhost:5006/api/v1/chat"
-    mach6_api_key: str = ""
+    # Symbiote HTTP API for work turns
+    symbiote_url: str = field(default_factory=lambda: os.environ.get("SYMBIOTE_API_URL", "http://127.0.0.1:3006/api/v1/chat"))
+    api_key: str = field(default_factory=lambda: os.environ.get("MACH6_API_KEY", os.environ.get("API_KEY", "")))
 
     # Timing
     idle_delay_sec: int = 600        # 10 min after last conversation → first triage
@@ -629,14 +241,28 @@ class PulseConfig:
     max_tokens_per_day: int = 100000 # total token budget
 
     # Paths
-    workspace: str = "/home/adam/workspace/enterprise"
-    state_file: str = "/home/adam/workspace/enterprise/.pulse/state.json"
-    log_file: str = "/home/adam/workspace/enterprise/.pulse/pulse.log"
-    heartbeat_md: str = "/home/adam/workspace/enterprise/HEARTBEAT.md"
-    workflow_md: str = "/home/adam/workspace/enterprise/WORKFLOW_AUTO.md"
+    workspace: str = field(default_factory=lambda: os.environ.get("SYMBIOTE_WORKSPACE", os.getcwd()))
+    state_file: str = ""
+    log_file: str = ""
+    heartbeat_md: str = ""
+    workflow_md: str = ""
 
     # Conversation detection
-    last_activity_file: str = "/home/adam/workspace/enterprise/.pulse/last_activity"
+    last_activity_file: str = ""
+
+    def __post_init__(self):
+        root = Path(self.workspace).expanduser().resolve()
+        self.workspace = str(root)
+        if not self.state_file:
+            self.state_file = str(root / ".pulse" / "state.json")
+        if not self.log_file:
+            self.log_file = str(root / ".pulse" / "pulse.log")
+        if not self.heartbeat_md:
+            self.heartbeat_md = str(root / "HEARTBEAT.md")
+        if not self.workflow_md:
+            self.workflow_md = str(root / "WORKFLOW_AUTO.md")
+        if not self.last_activity_file:
+            self.last_activity_file = str(root / ".pulse" / "last_activity")
 
 
 # ─── State ──────────────────────────────────────────────────────────────────
@@ -890,52 +516,24 @@ def gather_context(config: PulseConfig, state: PulseState) -> dict:
     except Exception:
         ctx["aria"] = {"process_running": False, "error": "health check failed"}
 
-    # ── Memory Systems Health ────────────────────────────────────────────
+    # ── Native VDB health ────────────────────────────────────────────────
     try:
-        ctx["memory_systems"] = {
-            "hektor": {
-                "daemon_alive": hektor_alive(logging.getLogger("pulse")),
-                "pid_file_exists": Path(_HEKTOR_PID).exists(),
-            },
-            "ava_comb": {
-                "archive_count": len(list(Path("/home/adam/workspace/enterprise/.ava-memory/comb-store/archive").glob("*.json"))),
-                "staging_exists": Path("/home/adam/workspace/enterprise/.ava-memory/comb-store/staging").exists(),
-            },
-            "aria_comb": {
-                "archive_count": len(list(Path("/dev/null").glob("*.json"))),
-                "staging_exists": Path("/dev/null").exists(),
-            },
-        }
-        # Check for stale staging files (not rolled up for >24h)
-        for label, staging_dir in [
-            ("ava", Path("/home/adam/workspace/enterprise/.ava-memory/comb-store/staging")),
-            ("aria", Path("/dev/null")),
-        ]:
-            if staging_dir.exists():
-                stale = []
-                for f in staging_dir.glob("*.jsonl"):
-                    try:
-                        age_hours = (time.time() - f.stat().st_mtime) / 3600
-                        if age_hours > 24:
-                            stale.append(f.stem)
-                    except OSError:
-                        pass
-                if stale:
-                    ctx["memory_systems"][f"{label}_comb"]["stale_staging"] = stale
-    except Exception:
-        pass
+        ctx["memory_systems"] = {"vdb": json.loads(_run_vdb(config.workspace, "stats", timeout=15))}
+    except Exception as exc:
+        logging.getLogger("pulse").exception("Native VDB health query failed: %s", exc)
+        ctx["memory_systems"] = {"vdb": {"available": False, "error": str(exc)}}
 
     return ctx
 
 
 # ─── Triage Engine ──────────────────────────────────────────────────────────
 
-TRIAGE_SYSTEM = """You are PULSE — AVA's autonomous triage engine. You manage BOTH sisters' contexts and memory systems.
+TRIAGE_SYSTEM = """You are PULSE — the agent's autonomous triage engine. You manage the configured workspace and its memory.
 
 You receive a context snapshot including:
 - sisters_ipc: cross-comm status between AVA and Aria
-- aria: Aria's process health, session tokens, COMB status
-- memory_systems: HEKTOR daemon + COMB stores health for both sisters
+- aria: Aria's process health and session tokens
+- memory_systems.vdb: persistent Symbiote VDB document, term, and source counts
 
 You output ONE decision as JSON.
 
@@ -955,13 +553,12 @@ Rules:
 13. If aria.critical is true → flag "aria_compact_needed" as critical task
 14. If aria.token_exceeded is true → IMMEDIATE compact needed (she's bricked)
 15. If aria.needs_compact has entries → compact those sessions (high priority)
-16. Cross-context awareness: consider both AVA and Aria workloads when triaging
+16. Prefer work within the configured Symbiote workspace.
 
 MEMORY SYSTEMS MANAGEMENT:
-- memory_systems.hektor.daemon_alive: DO NOT waste work budget on this. memory_maintenance() auto-restarts HEKTOR every cycle for FREE. Only flag as work if it has failed 10+ consecutive restarts.
-- memory_systems.*_comb.stale_staging: if present → stale COMB data not rolled up. Roll up now (data at risk).
-- memory_systems.*_comb.archive_count: track growth. Low counts may indicate flush issues.
-- PULSE auto-manages memory via memory_maintenance() every cycle — this triage layer handles ESCALATIONS ONLY, not routine restarts.
+- memory_systems.vdb.available: if false, report the VDB bridge failure; do not attempt external index restarts.
+- memory_systems.vdb.documentCount: track persistent memory growth.
+- PULSE stages and ingests through the built-in Symbiote VDB; no external memory daemon is required.
 
 ARIA CONTEXT MANAGEMENT:
 - Aria's model limit is 128K tokens. Her sessions are tracked in aria.sessions.
@@ -970,13 +567,13 @@ ARIA CONTEXT MANAGEMENT:
 - Compaction task: "Compact Aria session {channel_id}" — PULSE handles this internally.
 
 Output format (strict JSON, no markdown):
-{"action": "work|wait|skip", "task": "specific task description for AVA", "reason": "why", "estimated_minutes": N, "priority": "critical|high|medium|low"}
+{"action": "work|wait|skip", "task": "specific task description", "reason": "why", "estimated_minutes": N, "priority": "critical|high|medium|low"}
 
 If action is "skip" or "wait", task should be null."""
 
 def triage(config: PulseConfig, context: dict, log: logging.Logger) -> Optional[dict]:
     """Ask the triage model what to do. Returns decision dict or None on error."""
-    prompt = f"Context snapshot:\n```json\n{json.dumps(context, indent=2)}\n```\n\nWhat should AVA do right now?"
+    prompt = f"Context snapshot:\n```json\n{json.dumps(context, indent=2)}\n```\n\nWhat should the agent do right now?"
 
     try:
         with httpx.Client(timeout=30) as client:
@@ -1069,18 +666,18 @@ def triage(config: PulseConfig, context: dict, log: logging.Logger) -> Optional[
 # ─── Work Execution ─────────────────────────────────────────────────────────
 
 def execute_work(config: PulseConfig, task: str, log: logging.Logger) -> Optional[dict]:
-    """Send a work task to Mach6 HTTP API. Returns response or None."""
+    """Send a work task to the configured Symbiote HTTP API."""
     session_id = f"pulse-{datetime.now(PKT).strftime('%Y%m%d-%H%M%S')}"
 
     try:
         with httpx.Client(timeout=3600) as client:  # 60 min persistent for work turns
-            resp = client.post(config.mach6_url, json={
+            resp = client.post(config.symbiote_url, json={
                 "text": f"[PULSE autonomous task] {task}",
                 "source": "pulse",
                 "senderId": "ava-pulse",
                 "sessionId": session_id,
             }, headers={
-                "Authorization": f"Bearer {config.mach6_api_key}",
+                "Authorization": f"Bearer {config.api_key}",
                 "Content-Type": "application/json",
             })
 
@@ -1319,15 +916,19 @@ def get_last_activity(config: PulseConfig) -> float:
     latest = 0.0
 
     # Check session directory for recent activity
-    sessions_dir = Path(config.workspace) / ".contingency/mach6-core/.sessions"
-    if sessions_dir.exists():
-        for sf in sessions_dir.glob("*.json"):
+    configured_sessions = os.environ.get("SYMBIOTE_SESSIONS_DIR") or os.environ.get("MACH6_SESSIONS_DIR")
+    sessions_dirs = [Path(configured_sessions)] if configured_sessions else [
+        Path(config.workspace) / ".sessions",
+        Path.home() / ".mach6" / "sessions",
+    ]
+    for sessions_dir in sessions_dirs:
+        if not sessions_dir.exists():
+            continue
+        for session_file in sessions_dir.glob("*.json"):
             try:
-                mtime = sf.stat().st_mtime
-                if mtime > latest:
-                    latest = mtime
-            except OSError:
-                pass
+                latest = max(latest, session_file.stat().st_mtime)
+            except OSError as exc:
+                logging.getLogger("pulse").warning("Unable to stat session %s: %s", session_file, exc)
 
     # Also check our own marker file
     try:
@@ -1443,12 +1044,12 @@ class Pulse:
         self.running = True
 
         # Load API key
-        if not self.config.mach6_api_key:
+        if not self.config.api_key:
             env_path = Path(self.config.workspace) / ".env"
             if env_path.exists():
                 for line in env_path.read_text().splitlines():
                     if line.startswith("MACH6_API_KEY="):
-                        self.config.mach6_api_key = line.split("=", 1)[1].strip().strip('"')
+                        self.config.api_key = line.split("=", 1)[1].strip().strip('"')
                         break
 
         signal.signal(signal.SIGTERM, self._shutdown)
@@ -1469,7 +1070,7 @@ class Pulse:
         self.log.info("=" * 60)
         self.log.info("PULSE starting — Persistent Unsupervised Loop for Qorvex Execution")
         self.log.info(f"Triage: {self.config.triage_url} ({self.config.triage_model})")
-        self.log.info(f"Work: {self.config.mach6_url}")
+        self.log.info(f"Work: {self.config.symbiote_url}")
         self.log.info(f"Budget: {self.config.max_triage_per_day} triage, {self.config.max_work_per_day} work/day")
         self.log.info("=" * 60)
 
@@ -1487,7 +1088,7 @@ class Pulse:
                 self.state.reset_if_new_day()
                 self._tick_clock()
                 update_install_tracking(self.state, self.log)
-                memory_maintenance(self.log)  # proactive COMB + HEKTOR management
+                memory_maintenance(self.log, workspace=self.config.workspace)
                 self._cycle()
                 self.state.save(self.config.state_file)
             except Exception as e:
@@ -1706,7 +1307,7 @@ class Pulse:
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="PULSE — AVA Consciousness Loop")
+    parser = argparse.ArgumentParser(description="PULSE — Symbiote autonomous maintenance loop")
     parser.add_argument("command", nargs="?", default="run",
                         choices=["run", "status", "triage-once", "context"],
                         help="Command to execute")

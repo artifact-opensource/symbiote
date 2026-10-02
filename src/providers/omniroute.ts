@@ -1,8 +1,9 @@
 // Symbiote — OmniRoute provider: seamless multi-model failover
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 import { fetchWithRetry } from './retry.js';
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_TIMEOUT_MS = DEFAULT_LLM_REQUEST_TIMEOUT_MS;
 
 function convertMessages(messages: Message[]): unknown[] {
   const out: unknown[] = [];
@@ -124,7 +125,7 @@ async function* streamOmniroute(
         },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(timeoutMs),
-      });
+      }, timeoutMs);
 
       if (!res.ok) {
         const text = await res.text();

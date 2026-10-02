@@ -1,12 +1,12 @@
 // Symbiote — Orchestrator Provider Wrapper
 // Exposes DualLLMOrchestrator as a standard Provider
-// Ported from Sirius B (Victus) — adapted for AVA's full provider ecosystem
+// Ported from Sirius B (Victus) — adapted for Symbiote's provider ecosystem
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from '../providers/types.js';
 import { DualLLMOrchestrator, OrchestratorConfig } from './dual-llm.js';
 import { loadConfig } from '../config/config.js';
 import { ToolRegistry } from '../tools/registry.js';
-// Import ALL providers available in AVA's ecosystem
+// Import providers available in Symbiote's ecosystem
 import { openrouterProvider } from '../providers/openrouter.js';
 import { anthropicProvider } from '../providers/anthropic.js';
 import { openaiProvider } from '../providers/openai.js';
@@ -42,7 +42,7 @@ export async function initializeOrchestrator(toolRegistry: ToolRegistry): Promis
     throw new Error('Orchestrator enabled but no local models configured');
   }
 
-  // Build cloud provider based on cloudProvider setting (supports ALL AVA providers)
+  // Build cloud provider based on cloudProvider setting.
   const cloudProviderName = orchCfg.cloudProvider ?? 'github-copilot';
   const cloudProvider = getProviderByName(cloudProviderName);
   if (!cloudProvider) {
@@ -107,7 +107,7 @@ export function getOrchestratorProvider(): Provider | null {
 }
 
 /**
- * Full provider lookup — covers every provider in AVA's ecosystem.
+ * Full provider lookup — covers every provider in Symbiote's ecosystem.
  * This is the orchestrator's own registry (separate from daemon's PROVIDERS map).
  */
 function getProviderByName(name: string): Provider {

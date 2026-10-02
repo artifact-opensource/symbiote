@@ -13,6 +13,8 @@ import type { ContextStore } from './context-store.js';
 import { TodoManager } from './todo.js';
 import { randomUUID } from 'node:crypto';
 
+export const DEFAULT_MAX_CONTEXT_TOKENS = 100_000;
+
 /** Minimal interface for tool registries (satisfied by both ToolRegistry and SandboxedToolRegistry) */
 export interface ToolExecutor {
   toProviderFormat(): ToolDef[];
@@ -34,10 +36,15 @@ export interface RunnerConfig {
   contextStore?: ContextStore;
   todoScope?: string;
   blinkController?: BlinkController;
+  onProgress?: (event: RunnerProgressEvent) => void;
   onEvent?: (event: StreamEvent) => void;
   onToolStart?: (name: string, input: Record<string, unknown>) => void;
   onToolEnd?: (name: string, result: string) => void;
 }
+
+export type RunnerProgressEvent =
+  | { type: 'iteration'; iteration: number; maxIterations: number; messageCount: number }
+  | { type: 'response'; elapsedMs: number };
 
 export interface RunResult {
   text: string;
@@ -86,7 +93,7 @@ export async function runAgent(
   const PULSE_EXPAND_THRESHOLD = 18;
   const PULSE_EXPANDED_CAP = 100;
   let maxIter = initialMaxIter;
-  const maxCtx = config.maxContextTokens ?? 100_000;
+  const maxCtx = config.maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS;
   const allToolCalls: RunResult['toolCalls'] = [];
   const temperatureHistory: Array<{ iteration: number; category: TaskCategory; temperature: number }> = [];
   let recentToolNames: string[] = [];
@@ -138,8 +145,6 @@ export async function runAgent(
     } else {
       ensureTodoPlan();
     }
-    if (iterations === 0) console.log(`[todo] ${todoManager.renderMarkdown()}`);
-
     iterations++;
 
     // PULSE dynamic expansion: if approaching cap, expand to full budget
@@ -215,8 +220,18 @@ export async function runAgent(
       }
     }
 
-    // Truncate context if needed
-    const truncated = truncateContext(currentMessages, maxCtx);
+    // Retrieve long-term memories into the request context without persisting them in the transcript.
+    const requestMessages = [...currentMessages];
+    const retrievedMemory = config.contextStore?.retrieve(currentMessages);
+    if (retrievedMemory) requestMessages.push(retrievedMemory);
+
+    // Truncate context if needed and preserve discarded conversation text in the VDB.
+    const truncated = truncateContext(requestMessages, maxCtx);
+    if (config.contextStore) {
+      const retained = new Set(truncated);
+      const dropped = requestMessages.filter(message => !retained.has(message));
+      if (dropped.length > 0) config.contextStore.absorb(dropped);
+    }
 
     // Adaptive Temperature Modulation (ATM): classify task and adjust temperature
     let effectiveProviderConfig = config.providerConfig;
@@ -234,7 +249,11 @@ export async function runAgent(
 
     // Stream from LLM
     const tools = config.toolRegistry.toProviderFormat();
-    console.log(`[runner] Iteration ${iterations}/${maxIter}: ${truncated.length} messages, calling LLM...`);
+    if (config.onProgress) {
+      config.onProgress({ type: 'iteration', iteration: iterations, maxIterations: maxIter, messageCount: truncated.length });
+    } else {
+      console.log(`[runner] Iteration ${iterations}/${maxIter}: ${truncated.length} messages`);
+    }
     const streamStartTime = Date.now();
 
     let stream;
@@ -325,7 +344,8 @@ export async function runAgent(
     }
 
     const streamElapsed = Date.now() - streamStartTime;
-    console.log(`[runner] Stream complete (${streamElapsed}ms): ${pendingToolCalls.length} tool calls, ${textAccum.length} chars text`);
+    if (config.onProgress) config.onProgress({ type: 'response', elapsedMs: streamElapsed });
+    else console.log(`[runner] Response ready (${streamElapsed}ms)`);
 
     // Finalize tool call inputs
     for (const tc of pendingToolCalls) {
@@ -352,8 +372,6 @@ export async function runAgent(
           todoManager.updateTask(task.id, { status: 'completed' });
         }
       }
-      console.log(`[runner] Agent complete after ${iterations} iterations, ${allToolCalls.length} total tool calls`);
-      console.log(`[todo] ${todoManager.renderMarkdown()}`);
       return { text: textAccum, messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
     }
 

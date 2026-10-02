@@ -6,6 +6,7 @@
  */
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 import { fetchWithRetry } from './retry.js';
 
 const DEFAULT_BASE_URL = 'https://integrate.api.nvidia.com';
@@ -68,6 +69,7 @@ async function* streamNVIDIA(
   if (config.maxTokens) body.max_tokens = config.maxTokens;
   if (tools.length > 0) body.tools = convertTools(tools);
 
+  const timeoutMs = config.timeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS;
   const res = await fetchWithRetry(`${baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers: {
@@ -76,8 +78,8 @@ async function* streamNVIDIA(
       'Accept': 'text/event-stream',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(((config as unknown as Record<string, unknown>).timeoutMs as number) ?? 120_000),
-  });
+    signal: AbortSignal.timeout(timeoutMs),
+  }, timeoutMs);
 
   if (!res.ok) {
     const text = await res.text();

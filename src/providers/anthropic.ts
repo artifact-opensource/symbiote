@@ -1,6 +1,7 @@
 // Symbiote — Anthropic Messages API streaming provider (raw HTTP, no libraries)
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider, ContentBlock } from './types.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 import { fetchWithRetry } from './retry.js';
 
 const DEFAULT_BASE_URL = 'https://api.anthropic.com';
@@ -115,7 +116,8 @@ async function* streamAnthropic(
   if (config.temperature !== undefined) body.temperature = config.temperature;
   if (tools.length > 0) body.tools = convertTools(tools);
 
-  const res = await fetchWithRetry(`${baseUrl}/v1/messages`, {
+    const timeoutMs = config.timeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS;
+    const res = await fetchWithRetry(`${baseUrl}/v1/messages`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -123,8 +125,8 @@ async function* streamAnthropic(
       'anthropic-version': API_VERSION,
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(((config as unknown as Record<string, unknown>).timeoutMs as number) ?? 30_000),
-  });
+      signal: AbortSignal.timeout(timeoutMs),
+    }, timeoutMs);
 
   if (!res.ok) {
     const text = await res.text();

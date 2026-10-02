@@ -18,6 +18,7 @@
 * [Blink — Seamless Continuation](core/blink.md)
 * [Pulse — Adaptive Budget](core/pulse.md)
 * [COMB — Memory Persistence](core/comb.md)
+* [Memograph Integration](core/memograph.md)
 * [Heartbeat Scheduling](core/heartbeat.md)
 * [Boot Sequence](core/boot-sequence.md)
 

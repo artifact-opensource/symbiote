@@ -17,10 +17,10 @@ const bgRgb = (r: number, g: number, b: number) => colorEnabled ? `\x1b[48;2;${r
 // ── Brand Palette ───────────────────────────────────────────────
 
 export const palette = {
-  // Primary — lagoon teal to open sky
-  violet:      rgb(76, 205, 173),
-  purple:      rgb(49, 139, 164),
-  deepPurple:  rgb(34, 83, 104),
+  // Primary — restrained indigo
+  violet:      rgb(119, 129, 205),
+  purple:      rgb(82, 91, 164),
+  deepPurple:  rgb(48, 55, 112),
 
   // Accent — restrained amber
   gold:        rgb(255, 190, 112),
@@ -98,8 +98,8 @@ export function multiGradient(text: string, stops: [number, number, number][]): 
  * Compact connected-node mark for startup and help surfaces.
  */
 export function banner(): string {
-  const mark = gradient('◇─◈─◇', [76, 205, 173], [105, 190, 231]);
-  const name = gradient('SYMBIOTE', [76, 205, 173], [105, 190, 231]);
+  const mark = gradient('◇─◈─◇', [82, 91, 164], [145, 153, 224]);
+  const name = gradient('SYMBIOTE', [82, 91, 164], [145, 153, 224]);
   return `  ${mark}  ${palette.bold}${name}${palette.reset}`;
 }
 
@@ -107,7 +107,7 @@ export function banner(): string {
  * Compact one-line logo for prompts and headers.
  */
 export function logo(): string {
-  return `${palette.bold}${gradient('◇ Symbiote', [76, 205, 173], [105, 190, 231])}${palette.reset}`;
+  return `${palette.bold}${gradient('◇ Symbiote', [82, 91, 164], [145, 153, 224])}${palette.reset}`;
 }
 
 export function createActivityIndicator() {
@@ -119,7 +119,8 @@ export function createActivityIndicator() {
 
   const render = () => {
     if (!enabled) return;
-    process.stdout.write(`\r  ${palette.cyan}${frames[frame++ % frames.length]}${palette.reset} ${palette.dim}${label}${palette.reset}`);
+    const shortLabel = label.length > 20 ? `${label.slice(0, 19)}…` : label;
+    process.stdout.write(`\r  ${palette.violet}${frames[frame++ % frames.length]}${palette.reset} ${palette.dim}${shortLabel}${palette.reset}`);
   };
 
   return {

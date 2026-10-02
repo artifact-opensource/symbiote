@@ -1,8 +1,7 @@
-// Symbiote — Memory Index Integrity (fixes Pain #15)
-// Validate on startup. Auto-rebuild if corrupt. Atomic writes.
+// Symbiote — Embedded VDB Integrity
+// Validates the actual JSONL document store and metadata index.
 
 import fs from 'node:fs';
-import path from 'node:path';
 
 export interface IntegrityCheckResult {
   healthy: boolean;
@@ -11,122 +10,81 @@ export interface IntegrityCheckResult {
 }
 
 export interface IndexPaths {
-  indexDir: string;
-  vectorsFile: string;  // e.g. vectors.bin
-  hnswFile: string;     // e.g. index.hnsw
-  bm25File: string;     // e.g. bm25_index.json
-  minVectorsSize?: number; // minimum expected size in bytes
-  minHnswSize?: number;
+  documentsFile: string;
+  indexFile: string;
 }
 
-/**
- * Validate HEKTOR index files. Check sizes, basic consistency.
- */
 export function validateIndex(paths: IndexPaths): { healthy: boolean; issues: string[] } {
   const issues: string[] = [];
+  const documents = new Set<string>();
 
-  // Check vectors file
-  if (!fs.existsSync(paths.vectorsFile)) {
-    issues.push(`Vectors file missing: ${paths.vectorsFile}`);
-  } else {
-    const size = fs.statSync(paths.vectorsFile).size;
-    if (size < (paths.minVectorsSize ?? 1000)) {
-      issues.push(`Vectors file suspiciously small: ${size} bytes (expected > ${paths.minVectorsSize ?? 1000})`);
+  if (fs.existsSync(paths.documentsFile)) {
+    let lines: string[];
+    try {
+      lines = fs.readFileSync(paths.documentsFile, 'utf-8').split(/\r?\n/);
+    } catch (error) {
+      return { healthy: false, issues: [`Unable to read ${paths.documentsFile}: ${String(error)}`] };
+    }
+
+    for (let lineNumber = 1; lineNumber <= lines.length; lineNumber++) {
+      const line = lines[lineNumber - 1].trim();
+      if (!line) continue;
+      try {
+        const document = JSON.parse(line) as Record<string, unknown>;
+        if (typeof document.id !== 'string' || typeof document.text !== 'string') {
+          issues.push(`Invalid VDB document at ${paths.documentsFile}:${lineNumber}: id/text missing`);
+          continue;
+        }
+        if (documents.has(document.id)) {
+          issues.push(`Duplicate VDB document ID ${document.id} at line ${lineNumber}`);
+          continue;
+        }
+        documents.add(document.id);
+      } catch (error) {
+        issues.push(`Invalid JSON at ${paths.documentsFile}:${lineNumber}: ${String(error)}`);
+      }
     }
   }
 
-  // Check HNSW index
-  if (!fs.existsSync(paths.hnswFile)) {
-    issues.push(`HNSW index missing: ${paths.hnswFile}`);
-  } else {
-    const size = fs.statSync(paths.hnswFile).size;
-    if (size < (paths.minHnswSize ?? 100)) {
-      issues.push(`HNSW index suspiciously small: ${size} bytes — likely corrupt (empty index)`);
-    }
-  }
-
-  // Check BM25 index
-  if (!fs.existsSync(paths.bm25File)) {
-    issues.push(`BM25 index missing: ${paths.bm25File}`);
-  } else {
-    const size = fs.statSync(paths.bm25File).size;
-    if (size < 50) {
-      issues.push(`BM25 index suspiciously small: ${size} bytes`);
+  if (fs.existsSync(paths.indexFile)) {
+    try {
+      const metadata = JSON.parse(fs.readFileSync(paths.indexFile, 'utf-8')) as Record<string, unknown>;
+      if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        issues.push(`Invalid VDB metadata index: ${paths.indexFile}`);
+      } else {
+        for (const key of ['documentCount', 'termCount', 'lastSaved']) {
+          if (typeof metadata[key] !== 'number') issues.push(`VDB metadata index missing numeric ${key}`);
+        }
+      }
+    } catch (error) {
+      issues.push(`Unable to parse VDB metadata index ${paths.indexFile}: ${String(error)}`);
     }
   }
 
   return { healthy: issues.length === 0, issues };
 }
 
-/**
- * Run a test query against the index to verify it actually works.
- */
-export async function testQuery(
-  searchFn: (query: string) => Promise<string>,
-): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const result = await searchFn('test query health check');
-    if (result.includes('error') || result.includes('Error')) {
-      return { ok: false, error: result.slice(0, 200) };
-    }
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-/**
- * Atomic file write: write to .tmp, fsync, rename.
- * Prevents corruption from interrupted writes.
- */
-export function atomicWrite(filePath: string, data: Buffer | string): void {
-  const tmpPath = filePath + '.tmp';
-  const fd = fs.openSync(tmpPath, 'w');
-  try {
-    if (typeof data === 'string') {
-      fs.writeSync(fd, data);
-    } else {
-      fs.writeSync(fd, data, 0, data.length);
-    }
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-  fs.renameSync(tmpPath, filePath);
-}
-
-/**
- * Full integrity check + auto-rebuild if needed.
- */
 export async function checkAndRepair(
   paths: IndexPaths,
   rebuildFn: () => Promise<void>,
 ): Promise<IntegrityCheckResult> {
   const validation = validateIndex(paths);
+  if (validation.healthy) return { healthy: true, issues: [], rebuilt: false };
 
-  if (validation.healthy) {
-    return { healthy: true, issues: [], rebuilt: false };
-  }
+  console.warn('[vdb] Integrity issues found:');
+  for (const issue of validation.issues) console.warn(`  - ${issue}`);
 
-  console.warn(`⚠️  Index integrity issues found:`);
-  for (const issue of validation.issues) {
-    console.warn(`   - ${issue}`);
-  }
-
-  console.log('🔄 Auto-rebuilding index from source data...');
   try {
     await rebuildFn();
-    // Re-validate after rebuild
     const recheck = validateIndex(paths);
-    if (recheck.healthy) {
-      console.log('✅ Index rebuilt successfully');
-      return { healthy: true, issues: validation.issues, rebuilt: true };
-    } else {
-      console.error('❌ Index still unhealthy after rebuild');
-      return { healthy: false, issues: recheck.issues, rebuilt: true };
-    }
-  } catch (err) {
-    console.error('❌ Index rebuild failed:', err);
-    return { healthy: false, issues: [...validation.issues, `Rebuild failed: ${err}`], rebuilt: false };
+    return {
+      healthy: recheck.healthy,
+      issues: validation.issues,
+      rebuilt: true,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error(`[vdb] Rebuild failed: ${detail}`);
+    return { healthy: false, issues: [...validation.issues, `Rebuild failed: ${detail}`], rebuilt: false };
   }
 }

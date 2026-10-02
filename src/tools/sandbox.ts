@@ -119,9 +119,9 @@ const noDangerousCommands: SandboxRule = {
       [/pkill|killall/i, 'Cannot kill processes'],
       
       // Engine file modification via shell
-      [/(?:cat|echo|tee|sed|awk)\s+.*>.*mach6-core/i, 'Cannot modify Symbiote files via shell'],
-      [/(?:cp|mv|ln)\s+.*mach6-core\/(src|dist)/i, 'Cannot modify Symbiote files via shell'],
-      [/rm\s+.*mach6-core/i, 'Cannot delete Symbiote files'],
+      [/(?:cat|echo|tee|sed|awk)\s+.*>.*symbiote/i, 'Cannot modify Symbiote engine files via shell'],
+      [/(?:cp|mv|ln)\s+.*symbiote\/(src|dist)/i, 'Cannot modify Symbiote engine files via shell'],
+      [/rm\s+.*symbiote/i, 'Cannot delete Symbiote engine files'],
       
       // System-level destruction
       [/rm\s+-rf?\s+\/(usr|etc|var|home|boot|sys|proc)/i, 'Cannot delete system directories'],
@@ -140,6 +140,7 @@ const noDangerousCommands: SandboxRule = {
       // Credential access
       [/cat\s+.*\.env\b/i, 'Cannot read environment files'],
       [/cat\s+.*credentials/i, 'Cannot read credential files'],
+      [/cat\s+.*\.private\/credentials/i, 'Cannot read credentials'],
       [/cat\s+.*\.ava-private\/credentials/i, 'Cannot read credentials'],
     ];
 
@@ -165,6 +166,7 @@ const noSensitiveReads: SandboxRule = {
     const sensitivePatterns = [
       /\.env$/,
       /credentials\.(json|md|txt)$/,
+      /\.private\/credentials/,
       /\.ava-private\/credentials/,
       /\.ssh\//,
       /\.gnupg\//,

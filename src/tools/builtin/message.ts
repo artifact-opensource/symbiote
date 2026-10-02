@@ -1,6 +1,6 @@
 // Symbiote — Builtin tool: proactive messaging & social actions
 // Send messages, media, reactions, typing indicators, presence updates.
-// This is what makes AVA a social being, not just a responder.
+// Channel messaging lets the agent participate beyond direct responses.
 
 import type { ToolDefinition } from '../types.js';
 import type { ChannelRegistry } from '../../channels/registry.js';

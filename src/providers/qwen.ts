@@ -1,6 +1,7 @@
 // Qwen provider (Hugging Face Inference API)
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 
 function messagesToPrompt(messages: Message[]) {
   return messages.map(m => `${m.role}: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`).join('\n');
@@ -27,7 +28,7 @@ async function* streamQwen(messages: Message[], _tools: ToolDef[], config: Provi
       'User-Agent': 'Symbiote/QwenProvider',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(config.timeoutMs ?? 120_000),
+    signal: AbortSignal.timeout(config.timeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS),
   });
 
   if (!res.ok) {

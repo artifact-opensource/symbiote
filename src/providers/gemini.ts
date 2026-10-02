@@ -3,6 +3,7 @@
 // Supports: streaming, function calling, thinking, system instructions
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 import { fetchWithRetry } from './retry.js';
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
@@ -152,12 +153,13 @@ async function* streamGemini(
   // Gemini streaming endpoint: models/{model}:streamGenerateContent?alt=sse
   const endpoint = `${baseUrl}/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
+  const timeoutMs = config.timeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS;
   const res = await fetchWithRetry(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(((config as any).timeoutMs as number) ?? 120_000),
-  });
+    signal: AbortSignal.timeout(timeoutMs),
+  }, timeoutMs);
 
   if (!res.ok) {
     const text = await res.text();

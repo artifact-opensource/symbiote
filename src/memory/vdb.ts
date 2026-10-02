@@ -33,6 +33,7 @@ export interface VDBDocument {
   source: string;        // "whatsapp", "discord", "comb", "manual"
   role: string;          // "user", "assistant", "context"
   timestamp: number;     // epoch ms
+  namespace?: string;
   sessionId?: string;
   metadata?: Record<string, string>;
 }
@@ -55,8 +56,10 @@ export interface SearchResult {
   source: string;
   role: string;
   timestamp: number;
+  namespace?: string;
   score: number;
   sessionId?: string;
+  metadata?: Record<string, string>;
 }
 
 export interface VDBStats {
@@ -92,8 +95,8 @@ function tokenize(text: string): string[] {
     .filter(t => t.length > 1 && !STOP_WORDS.has(t));
 }
 
-function makeDocId(text: string, timestamp: number): string {
-  return crypto.createHash('md5').update(`${timestamp}:${text.slice(0, 200)}`).digest('hex').slice(0, 12);
+function makeDocId(text: string, timestamp: number, namespace = ''): string {
+  return crypto.createHash('md5').update(`${namespace}:${timestamp}:${text.slice(0, 200)}`).digest('hex').slice(0, 12);
 }
 
 // ── VDB Engine ───────────────────────────────────────────────────────────
@@ -120,15 +123,16 @@ export class VectorDB {
     fs.mkdirSync(this.dir, { recursive: true });
   }
 
-  /** Index a document. Deduplicates by content hash. */
+  /** Index a document. Deduplicates by stable document identity and content. */
   index(doc: VDBDocument): boolean {
     this.ensureLoaded();
 
-    const hash = crypto.createHash('md5').update(doc.text).digest('hex');
+    const id = doc.id || makeDocId(doc.text, doc.timestamp, `${doc.namespace ?? ''}:${doc.source}:${doc.sessionId ?? ''}`);
+    const deduplicationKey = doc.namespace ? `${id}\0${doc.text}` : doc.text;
+    const hash = crypto.createHash('md5').update(deduplicationKey).digest('hex');
     if (this.seenHashes.has(hash)) return false;
     this.seenHashes.add(hash);
 
-    const id = doc.id || makeDocId(doc.text, doc.timestamp);
     if (this.docs!.has(id)) return false;
 
     const terms = tokenize(doc.text);
@@ -181,7 +185,13 @@ export class VectorDB {
   }
 
   /** Hybrid search: BM25 + TF-IDF cosine. */
-  search(query: string, k = 5, filter?: { source?: string; role?: string; minTimestamp?: number }): SearchResult[] {
+  search(query: string, k = 5, filter?: {
+    source?: string;
+    role?: string;
+    namespace?: string;
+    minTimestamp?: number;
+    metadata?: Record<string, string>;
+  }): SearchResult[] {
     this.ensureLoaded();
     this.lastAccess = Date.now();
 
@@ -201,7 +211,9 @@ export class VectorDB {
       if (!doc) continue;
       if (filter?.source && doc.source !== filter.source) continue;
       if (filter?.role && doc.role !== filter.role) continue;
+      if (filter?.namespace && doc.namespace !== filter.namespace) continue;
       if (filter?.minTimestamp && doc.timestamp < filter.minTimestamp) continue;
+      if (filter?.metadata && Object.entries(filter.metadata).some(([key, value]) => doc.metadata?.[key] !== value)) continue;
 
       let score = ((bm25Scores.get(id) ?? 0) / bm25Max) * 0.4
                 + ((tfidfScores.get(id) ?? 0) / tfidfMax) * 0.6;
@@ -219,9 +231,20 @@ export class VectorDB {
       .slice(0, k)
       .map(([id, score]) => {
         const doc = this.docs!.get(id)!;
-        return { id: doc.id, text: doc.text, source: doc.source, role: doc.role,
-                 timestamp: doc.timestamp, score, sessionId: doc.sessionId };
+        return {
+          id: doc.id, text: doc.text, source: doc.source, role: doc.role,
+          timestamp: doc.timestamp, namespace: doc.namespace, score,
+          sessionId: doc.sessionId, metadata: doc.metadata,
+        };
       });
+  }
+
+  getDocument(id: string): VDBDocument | undefined {
+    this.ensureLoaded();
+    const doc = this.docs!.get(id);
+    if (!doc) return undefined;
+    const { terms: _terms, tfidf: _tfidf, ...document } = doc;
+    return document;
   }
 
   /** Get the k most recent documents from a specific source (chronological). */
@@ -285,7 +308,7 @@ export class VectorDB {
     for (const doc of this.docs!.values()) {
       lines.push(JSON.stringify({
         id: doc.id, text: doc.text, source: doc.source, role: doc.role,
-        timestamp: doc.timestamp, sessionId: doc.sessionId, metadata: doc.metadata,
+        timestamp: doc.timestamp, namespace: doc.namespace, sessionId: doc.sessionId, metadata: doc.metadata,
         terms: doc.terms, tfidf: doc.tfidf.filter(v => v !== undefined),
       }));
     }
@@ -367,7 +390,8 @@ export class VectorDB {
         try {
           const doc = JSON.parse(line) as StoredDocument;
           this.docs.set(doc.id, doc);
-          this.seenHashes.add(crypto.createHash('md5').update(doc.text).digest('hex'));
+          const deduplicationKey = doc.namespace ? `${doc.id}\0${doc.text}` : doc.text;
+          this.seenHashes.add(crypto.createHash('md5').update(deduplicationKey).digest('hex'));
           for (const term of doc.terms) {
             if (!this.globalTerms.has(term)) this.globalTerms.set(term, this.globalTerms.size);
           }
@@ -393,7 +417,7 @@ export class VectorDB {
   private appendDoc(doc: StoredDocument): void {
     const line = JSON.stringify({
       id: doc.id, text: doc.text, source: doc.source, role: doc.role,
-      timestamp: doc.timestamp, sessionId: doc.sessionId, metadata: doc.metadata,
+      timestamp: doc.timestamp, namespace: doc.namespace, sessionId: doc.sessionId, metadata: doc.metadata,
       terms: doc.terms, tfidf: doc.tfidf.filter(v => v !== undefined),
     });
     fs.appendFileSync(this.docsFile, line + '\n');
@@ -408,6 +432,18 @@ export class VectorDB {
     fs.writeFileSync(this.indexFile, JSON.stringify(meta));
     this.dirty = false;
   }
+}
+
+const sharedDatabases = new Map<string, VectorDB>();
+
+export function getSharedVectorDB(baseDir: string): VectorDB {
+  const workspace = path.resolve(baseDir);
+  let database = sharedDatabases.get(workspace);
+  if (!database) {
+    database = new VectorDB(workspace);
+    sharedDatabases.set(workspace, database);
+  }
+  return database;
 }
 
 // ── Session Ingester ─────────────────────────────────────────────────────
@@ -436,7 +472,7 @@ export function extractFromSession(sessionPath: string, source = 'whatsapp'): VD
       if (text.includes('BLINK APPROACHING') || text.includes('BLINK COMPLETE')) continue;
       const indexText = text.length > 2000 ? text.slice(0, 2000) : text;
       docs.push({
-        id: makeDocId(indexText, baseTimestamp + i),
+        id: makeDocId(indexText, baseTimestamp + i, `${source}:${sessionId}`),
         text: indexText, source, role: msg.role,
         timestamp: baseTimestamp + i * 1000, sessionId,
       });

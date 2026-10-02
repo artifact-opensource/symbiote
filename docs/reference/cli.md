@@ -7,8 +7,8 @@ node dist/index.js --config=symbiote.json
 ```
 
 ```
-Symbiote v3.0.0 | groq/llama-3.3-70b-versatile | session: default
-Tools (18): read, write, edit, exec, image, web_fetch, tts, ...
+Symbiote v4.0.0 | openrouter/openrouter/free | session: default
+Tools: runtime-registered count
 Type /help for commands
 
 ❯ _
@@ -30,6 +30,8 @@ node dist/index.js "Summarize the README in this directory"
 
 Runs a single turn and exits. Useful for scripting and CI/CD.
 
+The `/tools` command lists the exact active registry. Tool count varies with runtime and configuration.
+
 ## Session Commands
 
 | Command | Description |
@@ -38,11 +40,9 @@ Runs a single turn and exits. Useful for scripting and CI/CD.
 | `/tools` | List available tools with descriptions |
 | `/model <name>` | Switch model mid-session (e.g., `/model gpt-4o`) |
 | `/provider <name>` | Switch provider mid-session (e.g., `/provider anthropic`) |
-| `/temperature <value>` | Set temperature for next turn |
 | `/spawn <task>` | Spawn a sub-agent with the given task |
 | `/status` | Session stats — tokens used, tool calls, active sub-agents |
 | `/sessions` | List all sessions with labels and timestamps |
-| `/session rename <label>` | Rename the current session |
 | `/history [N]` | Show last N messages (default: 10) |
 | `/clear` | Clear current session history |
 | `/quit` | Exit the REPL |

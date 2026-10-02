@@ -1,4 +1,5 @@
 // Symbiote — Simple retry wrapper for provider fetch calls
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 
 const RETRY_DELAYS = [2000, 5000, 10000];
 // 429s are survivable if we wait long enough — OpenRouter/most providers reset
@@ -28,28 +29,24 @@ function parseRetryAfter(res: Response): number | undefined {
   return undefined;
 }
 
-export async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+export async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  retryTimeoutMs = DEFAULT_LLM_REQUEST_TIMEOUT_MS,
+): Promise<Response> {
   let lastError: Error | undefined;
   for (let attempt = 0; attempt <= RATE_LIMIT_DELAYS.length; attempt++) {
     try {
       // On retries, ensure a fresh abort signal (previous may have timed out)
       const effectiveInit = attempt > 0 && init.signal instanceof AbortSignal
-        ? { ...init, signal: AbortSignal.timeout(120_000) }
+        ? { ...init, signal: AbortSignal.timeout(retryTimeoutMs) }
         : init;
       const res = await fetch(url, effectiveInit);
       if (res.ok) return res;
 
-      // 401 — token expired (e.g., copilot session token). Invalidate cache and retry once.
-      if (res.status === 401 && attempt < RETRY_DELAYS.length) {
-        console.warn(`[retry] 401 Unauthorized (attempt ${attempt + 1}) — token may have expired, retrying...`);
-        // Signal to callers that cached tokens should be refreshed
-        (res as any)._tokenExpired = true;
-        if (attempt === 0) {
-          await new Promise(r => setTimeout(r, 500));
-          continue;
-        }
-        return res;
-      }
+      // Authentication failures are provider-specific and are not transient.
+      // Copilot owns its token-refresh loop; API-key providers should fail fast.
+      if (res.status === 401) return res;
 
       // Retry on 429 (rate limit) — honor Retry-After header when present,
       // otherwise fall back to an extended backoff ladder. Daily-quota

@@ -28,7 +28,6 @@ const STEP_ICONS: Record<string, string> = {
   'config-load':     '◈',
   'config-validate': '◈',
   'comb-recall':     '◎',
-  'hektor-warm':     '◉',
   'channel-connect': '◇',
 };
 
@@ -132,14 +131,12 @@ export function createDefaultBootSteps(hooks: {
   loadConfig: () => Promise<void>;
   validateConfig: () => Promise<void>;
   combRecall: () => Promise<void>;
-  hektorWarm: () => Promise<void>;
   channelConnect: () => Promise<void>;
 }): BootStep[] {
   return [
     { name: 'config-load', description: 'Loading configuration', timeoutMs: 5_000, required: true, execute: hooks.loadConfig },
     { name: 'config-validate', description: 'Validating configuration', timeoutMs: 5_000, required: true, execute: hooks.validateConfig },
     { name: 'comb-recall', description: 'Recalling operational memory (COMB)', timeoutMs: 15_000, required: false, execute: hooks.combRecall },
-    { name: 'hektor-warm', description: 'Warming HEKTOR search index', timeoutMs: 60_000, required: false, execute: hooks.hektorWarm },
     { name: 'channel-connect', description: 'Connecting channels', timeoutMs: 30_000, required: false, execute: hooks.channelConnect },
   ];
 }

@@ -19,7 +19,7 @@ The [guided setup flow](wizard.md) walks you through provider, channel, access, 
 
 Output:
 
-- **`mach6.json`** — agent configuration
+- **`symbiote.json`** — agent configuration
 - **`.env`** — secrets (API keys, bot tokens)
 - **Identity files** — SOUL.md, IDENTITY.md, USER.md, AGENTS.md, HEARTBEAT.md
 
@@ -32,13 +32,12 @@ node dist/gateway/daemon.js --config=mach6.json
 You'll see the [boot sequence](../core/boot-sequence.md):
 
 ```
-⚡ BOOT SEQUENCE
+◇ BOOT SEQUENCE
 ─────────────────────────────
-  ● [1/5] Loading configuration ... 12ms
-  ● [2/5] Validating configuration ... 3ms
-  ● [3/5] Recalling operational memory (COMB) ... 45ms
-  ● [4/5] Warming HEKTOR search index ... 450ms
-  ● [5/5] Connecting channels ... 1200ms
+  ● [1/4] Loading configuration ... 12ms
+  ● [2/4] Validating configuration ... 3ms
+  ● [3/4] Recalling operational memory (COMB) ... 45ms
+  ● [4/4] Connecting channels ... 1200ms
 
   ⚡ READY — 1710ms
 ```
@@ -54,7 +53,7 @@ You'll see the [boot sequence](../core/boot-sequence.md):
 ## Manual Setup (Without Wizard)
 
 ```bash
-cp mach6.example.json mach6.json
+cp mach6.example.json symbiote.json
 cp .env.example .env
 ```
 
@@ -72,9 +71,9 @@ GROQ_API_KEY=gsk_your_key_here
 ```json
 {
   "defaultProvider": "groq",
-  "defaultModel": "llama-3.3-70b-versatile",
+  "defaultModel": "openrouter/free",
   "workspace": ".",
-  "providers": { "groq": {} }
+  "providers": { "openrouter": {} }
 }
 ```
 

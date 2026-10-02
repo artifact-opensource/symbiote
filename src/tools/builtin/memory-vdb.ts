@@ -1,30 +1,52 @@
 // Symbiote — VDB Memory Tools
 //
 // Native persistent memory search powered by the embedded VDB.
-// Replaces HEKTOR dependency for session-based memory.
+// Native persistent memory search and ingestion for Symbiote sessions.
 // Zero external deps, zero RAM when idle.
 
 import type { ToolDefinition } from '../types.js';
-import { VectorDB, ingestSessions } from '../../memory/vdb.js';
+import { getSharedVectorDB, ingestSessions, type VectorDB } from '../../memory/vdb.js';
+import { loadConfig } from '../../config/config.js';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 function getWorkspace(): string {
   return process.env.MACH6_WORKSPACE ?? process.cwd();
 }
 
-// Singleton VDB per workspace
-let _vdb: VectorDB | null = null;
-let _vdbWs: string = '';
-let _lastIngest: number = 0;
+const lastIngestByWorkspace = new Map<string, number>();
 
 function getVDB(): VectorDB {
-  const ws = getWorkspace();
-  if (!_vdb || _vdbWs !== ws) {
-    _vdb = new VectorDB(ws);
-    _vdbWs = ws;
+  return getSharedVectorDB(getWorkspace());
+}
+
+function getSessionDirectories(): string[] {
+  const workspace = getWorkspace();
+  const configured = process.env.SYMBIOTE_SESSIONS_DIR
+    ?? process.env.MACH6_SESSIONS_DIR
+    ?? loadConfig().sessionsDir
+    ?? path.join(os.homedir(), '.mach6', 'sessions');
+  return [...new Set([
+    path.resolve(configured),
+    path.join(workspace, '.sessions'),
+  ])];
+}
+
+export function ingestWorkspaceSessions(): { processed: number; indexed: number } {
+  const db = getVDB();
+  let processed = 0;
+  let indexed = 0;
+
+  for (const dir of getSessionDirectories()) {
+    if (!fs.existsSync(dir)) continue;
+    const result = ingestSessions(db, dir, 'session');
+    processed += result.processed;
+    indexed += result.indexed;
   }
-  return _vdb;
+
+  lastIngestByWorkspace.set(getWorkspace(), Date.now());
+  return { processed, indexed };
 }
 
 /**
@@ -33,30 +55,15 @@ function getVDB(): VectorDB {
  */
 function maybeIngest(db: VectorDB): void {
   const now = Date.now();
-  if (now - _lastIngest < 10 * 60 * 1000) return;
-  _lastIngest = now;
+  const workspace = getWorkspace();
+  const lastIngest = lastIngestByWorkspace.get(workspace) ?? 0;
+  if (now - lastIngest < 10 * 60 * 1000) return;
+  lastIngestByWorkspace.set(workspace, now);
 
   try {
-    const ws = getWorkspace();
-    // Find all session directories
-    const sessionDirs = [
-      path.join(ws, '.sessions'),                    // primary sessions
-      path.join(ws, '..', '.sessions'),              // parent workspace
-    ];
-
-    // Also check for mach6-core sessions (AVA's legacy dir)
-    const coreDir = path.join(ws, 'mach6-core', '.sessions');
-    if (fs.existsSync(coreDir)) sessionDirs.push(coreDir);
-
-    let totalIndexed = 0;
-    for (const dir of sessionDirs) {
-      if (!fs.existsSync(dir)) continue;
-      const result = ingestSessions(db, dir);
-      totalIndexed += result.indexed;
-    }
-
-    if (totalIndexed > 0) {
-      console.log(`[vdb] Auto-ingested ${totalIndexed} new documents from sessions`);
+    const result = ingestWorkspaceSessions();
+    if (result.indexed > 0) {
+      console.log(`[vdb] Auto-ingested ${result.indexed} new documents from sessions`);
     }
 
     // Idle eviction check
@@ -74,7 +81,7 @@ export const vdbSearchTool: ToolDefinition = {
     properties: {
       query: { type: 'string', description: 'What to search for in memory' },
       k: { type: 'number', description: 'Number of results (default 5)' },
-      source: { type: 'string', description: 'Filter by source: whatsapp, discord, webchat, comb (optional)', enum: ['whatsapp', 'discord', 'webchat', 'comb'] },
+      source: { type: 'string', description: 'Filter by source: session, whatsapp, discord, webchat, comb (optional)', enum: ['session', 'whatsapp', 'discord', 'webchat', 'comb'] },
     },
     required: ['query'],
   },
@@ -116,35 +123,13 @@ export const vdbIngestTool: ToolDefinition = {
     required: [],
   },
   async execute() {
-    const db = getVDB();
-    const ws = getWorkspace();
-
-    const sessionDirs: string[] = [];
-
-    // Discover all session directories
-    const candidates = [
-      path.join(ws, '.sessions'),
-      path.join(ws, 'mach6-core', '.sessions'),
-    ];
-
-    for (const dir of candidates) {
-      if (fs.existsSync(dir)) sessionDirs.push(dir);
-    }
-
-    if (sessionDirs.length === 0) {
+    const sessionDirs = getSessionDirectories();
+    if (!sessionDirs.some(dir => fs.existsSync(dir))) {
       return 'No session directories found.';
     }
-
-    let totalProcessed = 0;
-    let totalIndexed = 0;
+    const { processed: totalProcessed, indexed: totalIndexed } = ingestWorkspaceSessions();
+    const db = getVDB();
     const lines: string[] = ['VDB Ingestion Report:\n'];
-
-    for (const dir of sessionDirs) {
-      const result = ingestSessions(db, dir);
-      totalProcessed += result.processed;
-      totalIndexed += result.indexed;
-      lines.push(`  ${dir}: ${result.processed} messages processed, ${result.indexed} new indexed`);
-    }
 
     const stats = db.stats();
     lines.push('');
@@ -152,7 +137,6 @@ export const vdbIngestTool: ToolDefinition = {
     lines.push(`VDB: ${stats.documentCount} documents, ${stats.termCount} terms, ${(stats.diskBytes / 1024).toFixed(0)}KB on disk`);
     lines.push(`Sources: ${JSON.stringify(stats.sources)}`);
 
-    _lastIngest = Date.now();
     return lines.join('\n');
   },
 };

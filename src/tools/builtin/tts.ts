@@ -31,13 +31,11 @@ function resolveEdgeTtsCommand(workspace: string): string {
 
   const candidates = isWindows()
     ? [
-        path.join(workspace, '.hektor-env', 'Scripts', 'edge-tts.exe'),
         path.join(workspace, '.venv', 'Scripts', 'edge-tts.exe'),
         'edge-tts.exe',
         'edge-tts',
       ]
     : [
-        path.join(workspace, '.hektor-env', 'bin', 'edge-tts'),
         path.join(workspace, '.venv', 'bin', 'edge-tts'),
         'edge-tts',
       ];

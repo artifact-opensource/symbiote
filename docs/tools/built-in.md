@@ -1,6 +1,6 @@
 # Built-in Tools
 
-Symbiote ships with 31 built-in tools available to the agent. Tools are sandboxed per-session via the [policy engine](policy.md).
+Symbiote registers built-in tools according to enabled capabilities and channel setup. The live CLI and `/tools` command report the exact active count. Tools are sandboxed per-session via the [policy engine](policy.md).
 
 ## File System
 
@@ -98,9 +98,9 @@ Generates audio files from text. Returns the path to the generated audio file. S
 | Tool | Description |
 |------|-------------|
 | `memory_recall` | Search persistent memory — past conversations, decisions, context |
-| `memory_ingest` | Ingest all conversation history into persistent memory |
+## Memory Compatibility Alias
 | `memory_stats` | Show persistent memory database statistics |
-
+Uses the embedded VDB and the same hybrid BM25 + sparse TF-IDF retrieval as `memory_recall`.
 VDB is the embedded persistent memory engine. See [VDB documentation](../core/vdb.md) for details.
 
 ### memory_recall
@@ -127,11 +127,11 @@ Run once to bootstrap memory from session archives. Auto-ingestion handles new s
 
 Returns document count, term count, disk usage, last indexed timestamp, and per-source breakdown.
 
-## Memory (HEKTOR)
+## Memory Search Compatibility Alias
 
 | Tool | Description |
 |------|-------------|
-| `memory_search` | Hybrid BM25 + vector search over indexed workspace files (requires HEKTOR daemon) |
+| `memory_search` | Compatibility alias for native `memory_recall` |
 
 ### memory_search
 
@@ -139,7 +139,7 @@ Returns document count, term count, disk usage, last indexed timestamp, and per-
 { "query": "authentication middleware", "mode": "hybrid", "k": 5 }
 ```
 
-Searches indexed files using HEKTOR's hybrid retrieval (BM25 keyword + 384-dim vector embeddings). Modes: `bm25`, `vector`, `hybrid`. Requires the external HEKTOR daemon to be running.
+Uses the same embedded VDB as `memory_recall`; no external memory daemon or embedding service is required.
 
 ## Session Memory (COMB)
 
@@ -220,21 +220,7 @@ Spawns an isolated sub-agent that runs in the background. Returns a session ID f
 
 Actions: `status` (check progress), `list` (all sub-agents), `kill` (terminate), `steer` (send guidance message).
 
-## Summary
-
-| Category | Tools | Count |
-|----------|-------|-------|
-| File System | `read`, `write`, `edit` | 3 |
-| Shell | `exec` | 1 |
-| Process | `process_start`, `process_poll`, `process_kill`, `process_list` | 4 |
-| Web & Media | `web_fetch`, `image`, `tts` | 3 |
-| Memory (VDB) | `memory_recall`, `memory_ingest`, `memory_stats` | 3 |
-| Memory (HEKTOR) | `memory_search` | 1 |
-| Session Memory | `comb_recall`, `comb_stage` | 2 |
-| Communication | `message`, `typing`, `presence`, `delete_message`, `mark_read` | 5 |
-| Agent | `spawn`, `subagent_status` | 2 |
-
-## Web Automation (14 tools)
+## Web Automation
 
 | Tool | Description |
 |------|-------------|
@@ -255,18 +241,4 @@ Actions: `status` (check progress), `list` (all sub-agents), `kill` (terminate),
 
 See [Web Automation](web-automation.md) for full documentation including profiles, encryption, and security model.
 
-## Updated Summary
-
-| Category | Tools | Count |
-|----------|-------|-------|
-| File System | `read`, `write`, `edit` | 3 |
-| Shell | `exec` | 1 |
-| Process | `process_start`, `process_poll`, `process_kill`, `process_list` | 4 |
-| Web & Media | `web_fetch`, `image`, `tts` | 3 |
-| Web Automation | `web_browse`, `web_click`, `web_type`, `web_screenshot`, `web_extract`, `web_scroll`, `web_wait`, `web_session`, `web_tab_open`, `web_tab_switch`, `web_tab_close`, `web_tabs`, `web_download`, `web_upload` | 14 |
-| Memory (VDB) | `memory_recall`, `memory_ingest`, `memory_stats` | 3 |
-| Memory (HEKTOR) | `memory_search` | 1 |
-| Session Memory | `comb_recall`, `comb_stage` | 2 |
-| Communication | `message`, `typing`, `presence`, `delete_message`, `mark_read` | 5 |
-| Agent | `spawn`, `subagent_status` | 2 |
-| **Total** | | **38** |
+Use `/tools` in the CLI or MCP `tools/list` to see the exact active registry. The set varies by runtime and configuration.

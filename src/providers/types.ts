@@ -62,6 +62,8 @@ export interface ProviderConfig {
   systemPrompt?: string;
 }
 
+export const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 15 * 60 * 1000;
+
 export interface Provider {
   name: string;
   stream(

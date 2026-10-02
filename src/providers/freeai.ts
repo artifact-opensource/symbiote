@@ -1,6 +1,7 @@
 // Symbiote — FreeTheAi Provider (OpenAI-compatible)
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 import { fetchWithRetry } from './retry.js';
 
 const DEFAULT_BASE_URL = 'https://api.freetheai.xyz/v1';
@@ -26,6 +27,7 @@ async function* streamFreeAI(messages: Message[], tools: ToolDef[], config: Prov
   if (tools.length > 0) body.tools = convertTools(tools);
 
   const endpoint = `${baseUrl}/chat/completions`;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS;
   const res = await fetchWithRetry(endpoint, {
     method: 'POST',
     headers: {
@@ -34,8 +36,8 @@ async function* streamFreeAI(messages: Message[], tools: ToolDef[], config: Prov
       'X-Title': 'Symbiote',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(300_000),
-  });
+    signal: AbortSignal.timeout(timeoutMs),
+  }, timeoutMs);
 
   if (!res.ok) {
     const text = await res.text();

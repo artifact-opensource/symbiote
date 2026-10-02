@@ -1,4 +1,4 @@
-// Symbiote — MCP Server
+// Symbiote â€” MCP Server
 // Exposes all Symbiote tools via MCP protocol (JSON-RPC over stdio)
 // Connect from VS Code: add to .vscode/mcp.json or global mcp.json
 //
@@ -29,10 +29,13 @@ import { processStartTool, processPollTool, processKillTool, processListTool } f
 import { ttsTool } from './builtin/tts.js';
 import { webFetchTool } from './builtin/web-fetch.js';
 import { memorySearchTool } from './builtin/memory.js';
-import { combRecallTool, combStageTool } from './builtin/comb.js';
+import { ingestWorkspaceSessions, vdbSearchTool, vdbIngestTool, vdbStatsTool } from './builtin/memory-vdb.js';
+import { combRecallTool, combStageTool, setCombVdbHook } from './builtin/comb.js';
+import { getSharedVectorDB } from '../memory/vdb.js';
+import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from '../memory/memograph.js';
 import { APP_VERSION } from '../meta/version.js';
 
-// ── Types ──────────────────────────────────────────────────────────────────
+// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface JsonRpcMessage {
   jsonrpc: '2.0';
@@ -43,7 +46,7 @@ interface JsonRpcMessage {
   error?: { code: number; message: string; data?: unknown };
 }
 
-// ── Server State ───────────────────────────────────────────────────────────
+// â”€â”€ Server State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const SERVER_NAME = 'symbiote';
 const SERVER_VERSION = APP_VERSION;
@@ -56,7 +59,7 @@ const registry = new ToolRegistry();
 for (const tool of [
   readTool, writeTool, execTool, editTool, imageTool,
   processStartTool, processPollTool, processKillTool, processListTool,
-  ttsTool, webFetchTool, memorySearchTool,
+  ttsTool, webFetchTool, memorySearchTool, vdbSearchTool, vdbIngestTool, vdbStatsTool,
   combRecallTool, combStageTool,
 ]) {
   registry.register(tool);
@@ -77,13 +80,32 @@ try {
   log(`No config at ${configPath}, using cwd: ${process.cwd()}`);
 }
 
-// ── Logging (to stderr, stdout is for JSON-RPC) ───────────────────────────
+const workspace = process.env.MACH6_WORKSPACE ?? process.cwd();
+process.env.MACH6_WORKSPACE = workspace;
+const workspaceVdb = getSharedVectorDB(workspace);
+setCombVdbHook(
+  (text, source) => {
+    workspaceVdb.index({ id: '', text, source, role: 'context', timestamp: Date.now(), sessionId: 'mcp' });
+  },
+  (source, count) => workspaceVdb.recent(source, count),
+);
+try {
+  const sessions = ingestWorkspaceSessions();
+  const memograph = importMemoGraphSnapshots(workspaceVdb, resolveMemoGraphStorageDir(workspace));
+  if (sessions.indexed > 0 || memograph.indexed > 0) {
+    log(`Indexed ${sessions.indexed} sessions and ${memograph.indexed} Memograph shards`);
+  }
+} catch (error) {
+  log(`VDB bootstrap failed: ${error instanceof Error ? error.message : String(error)}`);
+}
+
+// â”€â”€ Logging (to stderr, stdout is for JSON-RPC) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function log(msg: string): void {
   process.stderr.write(`[mcp-server] ${msg}\n`);
 }
 
-// ── JSON-RPC helpers ──────────────────────────────────────────────────────
+// â”€â”€ JSON-RPC helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function sendResponse(id: number | string, result: unknown): void {
   const msg = JSON.stringify({ jsonrpc: '2.0', id, result });
@@ -104,7 +126,7 @@ function sendNotification(method: string, params?: Record<string, unknown>): voi
   process.stdout.write(msg + '\n');
 }
 
-// ── Tool schema conversion ────────────────────────────────────────────────
+// â”€â”€ Tool schema conversion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function getToolSchemas(): Array<{
   name: string;
@@ -131,12 +153,12 @@ function getToolSchemas(): Array<{
   }));
 }
 
-// ── Request handlers ──────────────────────────────────────────────────────
+// â”€â”€ Request handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleRequest(msg: JsonRpcMessage): Promise<void> {
   const { id, method, params } = msg;
 
-  // Notifications (no id) — handle silently
+  // Notifications (no id) â€” handle silently
   if (id === undefined) {
     if (method === 'notifications/initialized') {
       log('Client initialized notification received');
@@ -157,7 +179,7 @@ async function handleRequest(msg: JsonRpcMessage): Promise<void> {
           version: SERVER_VERSION,
         },
       });
-      log(`Initialized — protocol ${PROTOCOL_VERSION}`);
+      log(`Initialized â€” protocol ${PROTOCOL_VERSION}`);
       break;
     }
 
@@ -201,7 +223,7 @@ async function handleRequest(msg: JsonRpcMessage): Promise<void> {
         });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        log(`Tool error: ${toolName} — ${errMsg}`);
+        log(`Tool error: ${toolName} â€” ${errMsg}`);
         sendResponse(id, {
           content: [{ type: 'text', text: JSON.stringify({ error: errMsg }) }],
           isError: true,
@@ -222,7 +244,7 @@ async function handleRequest(msg: JsonRpcMessage): Promise<void> {
   }
 }
 
-// ── Main loop (stdio JSON-RPC) ────────────────────────────────────────────
+// â”€â”€ Main loop (stdio JSON-RPC) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const rl = readline.createInterface({ input: process.stdin });
 
@@ -238,18 +260,18 @@ rl.on('line', async (line: string) => {
 });
 
 rl.on('close', () => {
-  log('stdin closed — shutting down');
+  log('stdin closed â€” shutting down');
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  log('SIGTERM — shutting down');
+  log('SIGTERM â€” shutting down');
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
-  log('SIGINT — shutting down');
+  log('SIGINT â€” shutting down');
   process.exit(0);
 });
 
-log(`Symbiote MCP Server v${SERVER_VERSION} ready — ${registry.list().length} tools`);
+log(`Symbiote MCP Server v${SERVER_VERSION} ready â€” ${registry.list().length} tools`);

@@ -34,7 +34,7 @@ export const execTool: ToolDefinition = {
     ];
     for (const pat of SELF_KILL_PATTERNS) {
       if (pat.test(command)) {
-        return `Error: Cannot restart/kill the gateway service from within the agent. Use the 'ava restart' CLI command from a terminal instead. This is a safety guard to prevent self-termination.`;
+        return `Error: Cannot restart/kill the gateway service from within the agent. Use the 'symbiote restart' CLI command from a terminal instead. This is a safety guard to prevent self-termination.`;
       }
     }
 

@@ -35,7 +35,7 @@ export function clearSharedTodoScope(scope: string): string {
 
 export const todoTool: ToolDefinition = {
   name: 'todo',
-  description: 'Manage the agent task list using a VS Code-like checklist with persistent state.',
+  description: 'Manage the agent task list using a persistent checklist.',
   parameters: {
     type: 'object',
     properties: {

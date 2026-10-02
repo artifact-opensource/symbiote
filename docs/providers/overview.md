@@ -1,29 +1,34 @@
 # Providers Overview
 
-Symbiote supports 8 LLM providers through a unified streaming interface. Providers are hot-swappable mid-session — switch models without losing conversation context.
+Symbiote's CLI and gateway registries expose 10 LLM providers through a unified streaming interface. Providers are hot-swappable mid-session — switch models without losing conversation context. A routed provider is selected only when it is registered and configured; otherwise the configured default is used.
 
 ## Supported Providers
 
 | Provider | Config Key | Auth Method | GPU Required | Speed |
 |----------|-----------|-------------|--------------|-------|
-| [Groq](groq.md) | `groq` | `GROQ_API_KEY` env var | No | ⚡ Fastest |
-| [Anthropic](anthropic.md) | `anthropic` | `ANTHROPIC_API_KEY` env var | No | Fast |
-| [OpenAI](openai.md) | `openai` | `OPENAI_API_KEY` env var | No | Fast |
-| [Gemini](gemini.md) | `gemini` | `GEMINI_API_KEY` env var | No | Fast |
-| [xAI (Grok)](xai.md) | `xai` | `XAI_API_KEY` env var | No | Fast |
-| [GitHub Copilot](github-copilot.md) | `github-copilot` | Auto-resolved from `gh` CLI | No | Moderate |
-| [Ollama](ollama.md) | `ollama` | None (local) | Optional | Varies |
+| [OpenRouter](openrouter.md) | `openrouter` | `OPENROUTER_API_KEY` | No | Varies |
+| [Anthropic](anthropic.md) | `anthropic` | `ANTHROPIC_API_KEY` | No | Fast |
+| [OpenAI](openai.md) | `openai` | `OPENAI_API_KEY` | No | Fast |
+| [Groq](groq.md) | `groq` | `GROQ_API_KEY` | No | Fast |
+| [Gemini](gemini.md) | `gemini` | `GEMINI_API_KEY` | No | Fast |
+| [xAI (Grok)](xai.md) | `xai` | `XAI_API_KEY` | No | Fast |
+| [GitHub Copilot](github-copilot.md) | `github-copilot` | `gh auth` | No | Varies |
+| [Ollama](ollama.md) | `ollama` | Local service | Optional | Varies |
 | [Gladius](gladius.md) | `gladius` | Local HTTP endpoint | Optional | Local |
+| NVIDIA | `nvidia` | `NVIDIA_API_KEY` | No | Varies |
 
-> **Default provider:** Groq — free tier, 280-1000 tok/sec, no credit card needed. [Get a key →](https://console.groq.com/keys)
+Provider modules for Qwen, AI Horde, FreeAI, and OmniRoute exist in source but are not currently registered for CLI/gateway selection.
+
+> **Default provider:** OpenRouter (`openrouter/free`). Set `OPENROUTER_API_KEY` in `.env` or configure `providers.openrouter.apiKey`.
 
 ## Configuration
 
-Register providers in `mach6.json`:
+Register providers in `symbiote.json`:
 
 ```json
 {
   "providers": {
+    "openrouter": { "baseUrl": "https://openrouter.ai/api/v1" },
     "groq": { "baseUrl": "https://api.groq.com/openai" },
     "anthropic": {},
     "openai": {},
@@ -33,8 +38,8 @@ Register providers in `mach6.json`:
     "github-copilot": {},
     "gladius": { "baseUrl": "http://127.0.0.1:8741" }
   },
-  "defaultProvider": "groq",
-  "defaultModel": "llama-3.3-70b-versatile"
+  "defaultProvider": "openrouter",
+  "defaultModel": "openrouter/free"
 }
 ```
 
@@ -72,10 +77,10 @@ Groq, xAI, and Ollama are built on the OpenAI-compatible adapter — they use th
 
 All OpenAI-compatible providers (Groq, xAI, Ollama, OpenAI) include automatic retry:
 
-- **Rate limits (429)** — parses server-specified retry delay, retries up to 3 times
-- **Buffer** — adds 500ms to the server-specified delay to avoid hitting the limit again immediately
-- **Fallback delay** — 10-15 seconds if the server doesn't specify a retry window
-- **Non-429 errors** — thrown immediately, no retry
+- **Rate limits (429)** — observes `Retry-After`, with bounded backoff for temporary limits
+- **Daily quota** — fails fast because retrying before quota reset cannot help
+- **Authentication (401)** — fails fast; providers do not share credential-refresh behavior
+- **Server errors (5xx)** — bounded retry with backoff
 
 ## Diagnostics
 

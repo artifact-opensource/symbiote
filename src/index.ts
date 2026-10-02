@@ -16,8 +16,10 @@ import { openaiProvider } from './providers/openai.js';
 import { openrouterProvider } from './providers/openrouter.js';
 import { selectProviderRoute } from './providers/route.js';
 import { githubCopilotProvider } from './providers/github-copilot.js';
+import { geminiProvider } from './providers/gemini.js';
 import { gladiusProvider } from './providers/gladius.js';
 import { groqProvider } from './providers/groq.js';
+import { nvidiaProvider } from './providers/nvidia.js';
 import { ollamaProvider } from './providers/ollama.js';
 import { xaiProvider } from './providers/xai.js';
 import type { Provider, ProviderConfig } from './providers/types.js';
@@ -31,12 +33,17 @@ import { processStartTool, processPollTool, processKillTool, processListTool } f
 import { ttsTool } from './tools/builtin/tts.js';
 import { webFetchTool } from './tools/builtin/web-fetch.js';
 import { memorySearchTool } from './tools/builtin/memory.js';
-import { combRecallTool, combStageTool } from './tools/builtin/comb.js';
+import { ingestWorkspaceSessions, vdbSearchTool, vdbIngestTool, vdbStatsTool } from './tools/builtin/memory-vdb.js';
+import { combRecallTool, combStageTool, setCombVdbHook } from './tools/builtin/comb.js';
 import { todoTool } from './tools/shared-todo.js';
 import { SessionManager } from './sessions/manager.js';
 import { SubAgentManager } from './sessions/sub-agent.js';
 import { buildSystemPrompt } from './agent/system-prompt.js';
-import { runAgent } from './agent/runner.js';
+import { DEFAULT_MAX_CONTEXT_TOKENS, runAgent } from './agent/runner.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './providers/types.js';
+import { ContextStore } from './agent/context-store.js';
+import { getSharedVectorDB } from './memory/vdb.js';
+import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from './memory/memograph.js';
 import type { Message } from './providers/types.js';
 import type { Session } from './sessions/types.js';
 import {
@@ -53,8 +60,10 @@ const providers = new Map<string, Provider>([
   ['openai', openaiProvider],
   ['openrouter', openrouterProvider],
   ['github-copilot', githubCopilotProvider],
+  ['gemini', geminiProvider],
   ['gladius', gladiusProvider],
   ['groq', groqProvider],
+  ['nvidia', nvidiaProvider],
   ['ollama', ollamaProvider],
   ['xai', xaiProvider],
 ]);
@@ -69,6 +78,7 @@ async function main() {
   const oneShot = args.find(a => !a.startsWith('--'));
 
   const config = loadConfig(configPath);
+  process.env.MACH6_WORKSPACE ??= config.workspace;
 
   // Mutable provider/model for mid-session switching
   let currentProviderName = providerArg ?? config.defaultProvider;
@@ -86,6 +96,7 @@ async function main() {
       model: currentModel,
       maxTokens: config.maxTokens,
       temperature: config.temperature,
+      timeoutMs: config.timeouts?.llmRequestMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS,
       ...providerCfg,
     };
   };
@@ -94,6 +105,25 @@ async function main() {
   const registry = new ToolRegistry();
   for (const tool of [readTool, writeTool, editTool, execTool, imageTool, processStartTool, processPollTool, processKillTool, processListTool, ttsTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool, todoTool]) {
     registry.register(tool);
+  }
+  for (const tool of [vdbSearchTool, vdbIngestTool, vdbStatsTool]) registry.register(tool);
+  const memoryBootstrap = ingestWorkspaceSessions();
+  const memographBootstrap = importMemoGraphSnapshots(
+    getSharedVectorDB(config.workspace),
+    resolveMemoGraphStorageDir(config.workspace),
+  );
+  const workspaceVdb = getSharedVectorDB(config.workspace);
+  setCombVdbHook(
+    (text, source) => {
+      workspaceVdb.index({ id: '', text, source, role: 'context', timestamp: Date.now(), sessionId });
+    },
+    (source, count) => workspaceVdb.recent(source, count),
+  );
+  if (memoryBootstrap.indexed > 0) {
+    console.log(`[vdb] Loaded ${memoryBootstrap.indexed} session memories`);
+  }
+  if (memographBootstrap.indexed > 0 || memographBootstrap.failures > 0) {
+    console.log(`[memograph] Loaded ${memographBootstrap.indexed} shards; ${memographBootstrap.failures} failures`);
   }
 
   // Setup session manager
@@ -113,6 +143,7 @@ async function main() {
     workspace: config.workspace,
     tools: registry.list().map(t => t.name),
   });
+  const contextStore = new ContextStore(getSharedVectorDB(config.workspace), { sessionId });
 
   if (session.messages.length === 0 || session.messages[0].role !== 'system') {
     session.messages.unshift({ role: 'system', content: systemPrompt });
@@ -123,11 +154,10 @@ async function main() {
   console.log(versionBanner(APP_VERSION));
 
   const providerDisplay = `${palette.cyan}${currentProvider!.name}${palette.reset}${palette.dim}/${palette.reset}${palette.white}${currentModel}${palette.reset}`;
-  console.log(`  ${palette.green}●${palette.reset} ${providerDisplay}  ${palette.dim}·${palette.reset} ${palette.gold}${registry.list().length}${palette.reset} tools  ${palette.dim}·${palette.reset} session ${palette.violet}${sessionId}${palette.reset}`);
-  console.log(`  ${palette.dim}/help${palette.reset} ${palette.silver}for commands${palette.reset}`);
+   console.log(`  ${palette.violet}●${palette.reset} ${providerDisplay}`);
+   console.log(`  ${palette.dim}${registry.list().length} tools${palette.reset}  ${palette.dim}·${palette.reset} ${palette.silver}session ${sessionId}${palette.reset}  ${palette.dim}· /help${palette.reset}`);
   console.log();
-  console.log(divider(54));
-  console.log();
+   console.log(divider(42));
 
   const runWithCallbacks = async (msgs: Message[], provConfig: ProviderConfig) => {
     const activity = createActivityIndicator();
@@ -158,6 +188,9 @@ async function main() {
         providerConfig: { ...routeConfig, systemPrompt },
         toolRegistry: registry,
         sessionId,
+        maxContextTokens: DEFAULT_MAX_CONTEXT_TOKENS,
+        contextStore,
+        onProgress() {},
         onEvent(ev) {
           if (ev.type === 'usage') {
             sessionMgr.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
@@ -166,18 +199,19 @@ async function main() {
         onToolStart(name) {
           activity.stop();
           sessionMgr.trackToolCall(session, name);
-          console.log(`\n${palette.violet}  ◈ ${name}${palette.reset}`);
+           console.log(`  ${palette.violet}◈ ${name}${palette.reset}`);
           activity.start(`Running ${name}`);
         },
         onToolEnd(name, result) {
           activity.stop();
-          const preview = result.length > 200 ? result.slice(0, 200) + '...' : result;
-          console.log(`${palette.green}  ✓ ${name}${palette.reset} ${palette.dim}${preview.split('\n')[0]}${palette.reset}`);
+           const failed = result.includes('"is_error":true');
+           const status = failed ? `${palette.red}failed${palette.reset}` : `${palette.green}done${palette.reset}`;
+           console.log(`  ${palette.dim}${name}${palette.reset} ${status}`);
           activity.start();
         },
       });
       activity.stop();
-      if (result.text) process.stdout.write(result.text);
+      if (result.text) process.stdout.write(`${palette.green}>${palette.reset} ${result.text}`);
       return result;
     } catch (err) {
       activity.stop();
@@ -340,9 +374,8 @@ async function main() {
 
   // ── The Prompt ──────────────────────────────────────
 
-  const promptStr = `${palette.violet}❯${palette.reset} `;
-
   const prompt = () => {
+    const promptStr = `${palette.violet}❯${palette.reset} `;
     rl.question(promptStr, async (input) => {
       const trimmed = input.trim();
       if (!trimmed) { prompt(); return; }
@@ -356,6 +389,7 @@ async function main() {
       session.messages.push({ role: 'user', content: trimmed });
 
       try {
+         process.stdout.write('\n');
         const result = await runWithCallbacks(session.messages, makeProviderConfig());
         console.log('\n');
         session.messages = result.messages;

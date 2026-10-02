@@ -99,7 +99,7 @@ Agent identity is pulled from `mach6.json`:
 ```jsonc
 {
   "name": "AVA",           // Displayed in the header
-  "emoji": "🔮"            // Displayed next to the name
+  "emoji": ""              // Optional display emoji
 }
 ```
 

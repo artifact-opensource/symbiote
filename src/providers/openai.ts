@@ -1,6 +1,7 @@
 // Symbiote — OpenAI Chat Completions streaming provider (raw HTTP)
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 import { fetchWithRetry } from './retry.js';
 
 const DEFAULT_BASE_URL = 'https://api.openai.com';
@@ -70,6 +71,7 @@ async function* streamOpenAI(
     ? `${baseUrl}/chat/completions`
     : `${baseUrl}/v1/chat/completions`;
   const extraHeaders = (config as unknown as Record<string, unknown>).extraHeaders as Record<string, string> | undefined;
+    const timeoutMs = config.timeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS;
   const res = await fetchWithRetry(endpoint, {
     method: 'POST',
     headers: {
@@ -78,8 +80,8 @@ async function* streamOpenAI(
       ...extraHeaders,
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(((config as unknown as Record<string, unknown>).timeoutMs as number) ?? 120_000),
-  });
+      signal: AbortSignal.timeout(timeoutMs),
+    }, timeoutMs);
 
   if (!res.ok) {
     const text = await res.text();

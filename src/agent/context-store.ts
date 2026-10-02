@@ -40,6 +40,8 @@ export interface ContextStoreConfig {
   sessionSource: string;
   /** Current session ID */
   sessionId: string;
+  actor: string;
+  graphNeighbors: number;
 }
 
 export const DEFAULT_CONTEXT_STORE_CONFIG: ContextStoreConfig = {
@@ -49,6 +51,8 @@ export const DEFAULT_CONTEXT_STORE_CONFIG: ContextStoreConfig = {
   queryDepth: 3,
   sessionSource: 'session',
   sessionId: 'unknown',
+  actor: 'agent',
+  graphNeighbors: 2,
 };
 
 // ── Rough token estimation (matches context.ts) ─────────────────────────
@@ -102,8 +106,14 @@ export class ContextStore {
     const query = queryParts.join(' ');
     if (query.length < 20) return null;
 
-    // Search vdb
-    const results = this.vdb.search(query, this.config.retrievalK * 2); // over-fetch, filter by threshold
+    // Search VDB and fail closed for malformed Memograph permissions.
+    let results: SearchResult[];
+    try {
+      results = this.vdb.search(query, this.config.retrievalK * 3);
+    } catch (error) {
+      console.error(`[context-store] VDB search failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
 
     // Filter by threshold and dedup against current context
     const currentTexts = new Set(
@@ -112,10 +122,13 @@ export class ContextStore {
         .filter(t => t.length > 0)
     );
 
+    const candidates = this.expandMemographNeighbors(results
+      .filter(result => this.canRead(result))
+      .map(result => ({ ...result, score: this.contextScore(result, query) })));
     const relevant: SearchResult[] = [];
     let tokenBudget = this.config.retrievalBudget;
 
-    for (const result of results) {
+    for (const result of candidates) {
       if (result.score < this.config.retrievalThreshold) continue;
 
       // Skip if this content is already in the current context window
@@ -140,7 +153,12 @@ export class ContextStore {
 
     for (const r of relevant) {
       const age = this.formatAge(r.timestamp);
-      const source = r.source === 'absorbed' ? 'earlier this conversation' : r.source;
+      const domain = r.metadata?.memoryDomain?.toUpperCase();
+      const scope = r.metadata?.memoryScope;
+      const hash = r.metadata?.memoryShardHash;
+      const source = domain
+        ? `${domain}${scope ? ` · ${scope}` : ''}${hash ? ` · ${hash.slice(0, 10)}` : ''}`
+        : r.source === 'absorbed' ? 'earlier this conversation' : r.source;
       parts.push(`[${source}, ${age}, relevance=${(r.score * 100).toFixed(0)}%] ${r.text}`);
     }
 
@@ -148,6 +166,55 @@ export class ContextStore {
       role: 'user',
       content: parts.join('\n\n'),
     };
+  }
+
+  private canRead(result: SearchResult): boolean {
+    if (result.source !== 'memograph') return true;
+    try {
+      const permissions = JSON.parse(result.metadata?.memoryPermissions ?? '[]') as unknown;
+      return Array.isArray(permissions)
+        && (permissions.includes('*') || permissions.includes(this.config.actor));
+    } catch (error) {
+      console.warn(`[context-store] Invalid permissions for shard ${result.id}: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
+  private contextScore(result: SearchResult, query: string): number {
+    if (result.source !== 'memograph') return result.score;
+    const authority: Record<string, number> = { live: 0.5, project: 0.8, enterprise: 1 };
+    const domain = result.metadata?.memoryDomain ?? 'live';
+    const scope = result.metadata?.memoryScope?.toLowerCase().replace(/[:_]/g, ' ') ?? '';
+    const affinity = scope && query.toLowerCase().includes(scope) ? 1 : 0;
+    return result.score * 0.75 + (authority[domain] ?? 0.5) * 0.15 + affinity * 0.1;
+  }
+
+  private expandMemographNeighbors(results: SearchResult[]): SearchResult[] {
+    const expanded = new Map(results.map(result => [result.id, result]));
+    for (const result of results) {
+      if (result.source !== 'memograph' || this.config.graphNeighbors <= 0) continue;
+      let relationIds: unknown;
+      try {
+        relationIds = JSON.parse(result.metadata?.memoryRelations ?? '[]');
+      } catch (error) {
+        console.warn(`[context-store] Invalid topology for shard ${result.id}: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
+      if (!Array.isArray(relationIds)) continue;
+
+      for (const relatedId of relationIds.slice(0, this.config.graphNeighbors)) {
+        if (typeof relatedId !== 'string' || expanded.has(relatedId)) continue;
+        try {
+          const document = this.vdb.getDocument(relatedId);
+          if (!document || document.source !== 'memograph') continue;
+          const neighbor: SearchResult = { ...document, score: result.score * 0.85 };
+          if (this.canRead(neighbor)) expanded.set(neighbor.id, neighbor);
+        } catch (error) {
+          console.warn(`[context-store] Topology expansion failed for ${relatedId}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+    return [...expanded.values()].sort((a, b) => b.score - a.score);
   }
 
   /**

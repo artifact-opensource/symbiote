@@ -1,7 +1,8 @@
 // Symbiote — OpenRouter Provider (OpenAI-compatible)
-// Ported from Sirius B (Victus) — adapted for AVA's Symbiote
+// Ported from Sirius B (Victus) — adapted for Symbiote
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 import { fetchWithRetry } from './retry.js';
 
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
@@ -66,6 +67,10 @@ async function* streamOpenRouter(
   config: ProviderConfig,
 ): AsyncIterable<StreamEvent> {
   const baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
+  const apiKey = config.apiKey?.trim();
+  if (!apiKey) {
+    throw new Error('OpenRouter API key is missing. Set OPENROUTER_API_KEY or providers.openrouter.apiKey.');
+  }
 
   const body: Record<string, unknown> = {
     model: config.model,
@@ -77,20 +82,24 @@ async function* streamOpenRouter(
   if (tools.length > 0) body.tools = convertTools(tools);
 
   const endpoint = `${baseUrl}/chat/completions`;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS;
   const res = await fetchWithRetry(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey ?? ''}`,
+      'Authorization': `Bearer ${apiKey}`,
       'X-Title': 'Symbiote',
       'HTTP-Referer': 'https://github.com/Artifact-Virtual',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(300_000), // 5 minutes
-  });
+    signal: AbortSignal.timeout(timeoutMs),
+  }, timeoutMs);
 
   if (!res.ok) {
     const text = await res.text();
+    if (res.status === 401) {
+      throw new Error(`OpenRouter authentication failed (401). This request included a Bearer authorization header; verify the key is active for OpenRouter and the running process uses the current configuration. Provider response: ${text}`);
+    }
     throw new Error(`OpenRouter API error ${res.status}: ${text}`);
   }
 

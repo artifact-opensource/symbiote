@@ -7,6 +7,7 @@
 // provider makes a single non-streaming fetch and converts the full
 // response into StreamEvents.
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 import { fetchWithRetry } from './retry.js';
 
 const DEFAULT_BASE_URL = 'https://oai.aihorde.net/v1';
@@ -80,6 +81,7 @@ async function* streamAihorde(
   if (tools.length > 0) body.tools = convertTools(tools);
 
   const endpoint = `${baseUrl}/chat/completions`;
+  const timeoutMs = config.timeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS;
   const res = await fetchWithRetry(endpoint, {
     method: 'POST',
     headers: {
@@ -89,8 +91,8 @@ async function* streamAihorde(
       'HTTP-Referer': 'https://github.com/Artifact-Virtual',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(300_000), // 5 minutes — Horde queues can be slow
-  });
+    signal: AbortSignal.timeout(timeoutMs),
+  }, timeoutMs);
 
   if (!res.ok) {
     const text = await res.text();
