@@ -138,7 +138,7 @@ async function main() {
   }
 
   // Setup session manager
-  const sessionMgr = new SessionManager(config.sessionsDir);
+  const sessionMgr = new SessionManager(config.sessionsDir ?? '.sessions');
   let session = sessionMgr.load(sessionId) ?? sessionMgr.create(sessionId, {
     provider: currentProviderName,
     model: currentModel,

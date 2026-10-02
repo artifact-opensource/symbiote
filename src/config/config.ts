@@ -133,6 +133,7 @@ const DEFAULT_CONFIG: SymbioteConfig = {
   temperature: 0.7,
   maxIterations: 50,
   workspace: process.cwd(),
+  sessionsDir: '.sessions',
   ownerIds: [],
   apiPort: 3006,
   apiHost: '127.0.0.1',

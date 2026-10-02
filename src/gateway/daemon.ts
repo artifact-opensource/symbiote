@@ -261,7 +261,7 @@ export class SymbioteGateway {
     });
 
     // Sessions
-    this.sessionManager = new SessionManager(this.config.sessionsDir);
+    this.sessionManager = new SessionManager(this.config.sessionsDir ?? '.sessions');
 
     // v2.0 — Metrics collector
     this.metrics = getMetrics({
