@@ -45,6 +45,8 @@ import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './providers/types.js';
 import { ContextStore } from './agent/context-store.js';
 import { getSharedVectorDB } from './memory/vdb.js';
 import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from './memory/memograph.js';
+import { importSkillFiles, resolveSkillsDir } from './memory/skills.js';
+import { personaDigestTool } from './tools/builtin/consolidate.js';
 import type { Message } from './providers/types.js';
 import type { Session } from './sessions/types.js';
 import {
@@ -104,7 +106,7 @@ async function main() {
 
   // Setup tools
   const registry = new ToolRegistry();
-  for (const tool of [readTool, writeTool, editTool, execTool, imageTool, processStartTool, processPollTool, processKillTool, processListTool, ttsTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool, todoTool]) {
+  for (const tool of [readTool, writeTool, editTool, execTool, imageTool, processStartTool, processPollTool, processKillTool, processListTool, ttsTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool, todoTool, personaDigestTool]) {
     registry.register(tool);
   }
   for (const tool of [vdbSearchTool, vdbIngestTool, vdbStatsTool]) registry.register(tool);
@@ -113,6 +115,10 @@ async function main() {
   const memographBootstrap = importMemoGraphSnapshots(
     getSharedVectorDB(config.workspace),
     resolveMemoGraphStorageDir(config.workspace),
+  );
+  const skillsBootstrap = importSkillFiles(
+    getSharedVectorDB(config.workspace),
+    resolveSkillsDir(config.workspace),
   );
   const workspaceVdb = getSharedVectorDB(config.workspace);
   setCombVdbHook(
@@ -126,6 +132,9 @@ async function main() {
   }
   if (memographBootstrap.indexed > 0 || memographBootstrap.failures > 0) {
     console.log(`[memograph] Loaded ${memographBootstrap.indexed} shards; ${memographBootstrap.failures} failures`);
+  }
+  if (skillsBootstrap.indexed > 0 || skillsBootstrap.failures > 0) {
+    console.log(`[skills] Loaded ${skillsBootstrap.indexed} skill files; ${skillsBootstrap.failures} failures`);
   }
 
   // Setup session manager

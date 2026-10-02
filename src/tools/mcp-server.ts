@@ -34,6 +34,8 @@ import { cuaTools } from './builtin/web-browser.js';
 import { combRecallTool, combStageTool, setCombVdbHook } from './builtin/comb.js';
 import { getSharedVectorDB } from '../memory/vdb.js';
 import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from '../memory/memograph.js';
+import { importSkillFiles, resolveSkillsDir } from '../memory/skills.js';
+import { personaDigestTool } from './builtin/consolidate.js';
 import { APP_VERSION } from '../meta/version.js';
 
 // â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -61,7 +63,7 @@ for (const tool of [
   readTool, writeTool, execTool, editTool, imageTool,
   processStartTool, processPollTool, processKillTool, processListTool,
   ttsTool, webFetchTool, memorySearchTool, vdbSearchTool, vdbIngestTool, vdbStatsTool,
-  combRecallTool, combStageTool, ...cuaTools,
+  combRecallTool, combStageTool, ...cuaTools, personaDigestTool,
 ]) {
   registry.register(tool);
 }
@@ -93,8 +95,9 @@ setCombVdbHook(
 try {
   const sessions = ingestWorkspaceSessions();
   const memograph = importMemoGraphSnapshots(workspaceVdb, resolveMemoGraphStorageDir(workspace));
-  if (sessions.indexed > 0 || memograph.indexed > 0) {
-    log(`Indexed ${sessions.indexed} sessions and ${memograph.indexed} Memograph shards`);
+  const skills = importSkillFiles(workspaceVdb, resolveSkillsDir(workspace));
+  if (sessions.indexed > 0 || memograph.indexed > 0 || skills.indexed > 0) {
+    log(`Indexed ${sessions.indexed} sessions, ${memograph.indexed} Memograph shards, ${skills.indexed} skill files`);
   }
 } catch (error) {
   log(`VDB bootstrap failed: ${error instanceof Error ? error.message : String(error)}`);

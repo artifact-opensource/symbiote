@@ -46,9 +46,11 @@ import { ttsTool } from '../tools/builtin/tts.js';
 import { webFetchTool } from '../tools/builtin/web-fetch.js';
 import { memorySearchTool } from '../tools/builtin/memory.js';
 import { combRecallTool, combStageTool, setCombVdbHook, flushMessages } from '../tools/builtin/comb.js';
+import { personaDigestTool } from '../tools/builtin/consolidate.js';
 import { vdbSearchTool, vdbIngestTool, vdbStatsTool } from '../tools/builtin/memory-vdb.js';
 import { getSharedVectorDB } from '../memory/vdb.js';
 import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from '../memory/memograph.js';
+import { importSkillFiles, resolveSkillsDir } from '../memory/skills.js';
 import { webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool, webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool, webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool, cuaTools } from '../tools/builtin/web-browser.js';
 import { createSpawnTool, createSubAgentStatusTool } from '../tools/builtin/spawn.js';
 import { SubAgentManager } from '../sessions/sub-agent.js';
@@ -240,7 +242,7 @@ export class SymbioteGateway {
         vdbSearchTool, vdbIngestTool, vdbStatsTool,
         webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool,
         webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool,
-        webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool, ...cuaTools,
+        webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool, ...cuaTools, personaDigestTool,
       ]) {
         this.toolRegistry.register(tool);
       }
@@ -465,6 +467,13 @@ export class SymbioteGateway {
     );
     if (memographImport.indexed > 0 || memographImport.failures > 0) {
       console.log(`[memograph] Startup import: ${memographImport.indexed} indexed, ${memographImport.skipped} skipped, ${memographImport.failures} failures`);
+    }
+    const skillsImport = importSkillFiles(
+      this.vdbInstance,
+      resolveSkillsDir(this.config.workspace),
+    );
+    if (skillsImport.indexed > 0 || skillsImport.failures > 0) {
+      console.log(`[skills] Startup import: ${skillsImport.indexed} indexed, ${skillsImport.skipped} skipped, ${skillsImport.failures} failures`);
     }
     this.contextStore = new ContextStore(this.vdbInstance, {
       retrievalK: 5,

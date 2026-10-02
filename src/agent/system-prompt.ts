@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getSarsiPrompt } from '../sarsi/index.js';
+import { listSkillSummaries } from '../memory/skills.js';
 import os from 'node:os';
 
 export interface SystemPromptParams {
@@ -128,6 +129,15 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
   // ── Extra context (channel-specific, message metadata, etc.) ──
   if (params.extraContext) {
     addSection('Context', params.extraContext);
+  }
+
+  // ── Skills (indexed into VDB; use memory_recall/read for full content) ──
+  const skills = listSkillSummaries(params.workspace);
+  if (skills.length > 0) {
+    addSection('Available Skills', [
+      'Domain-specific instruction sets, searchable in memory (source="skill") and readable in full from their file path.',
+      ...skills.map(s => `- **${s.name}**${s.description ? ` — ${s.description}` : ''} (${s.file})`),
+    ].join('\n'));
   }
 
   const channel = (params.channel ?? '').toLowerCase();
