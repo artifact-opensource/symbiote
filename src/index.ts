@@ -28,6 +28,7 @@ import { readTool } from './tools/builtin/read.js';
 import { writeTool } from './tools/builtin/write.js';
 import { execTool } from './tools/builtin/exec.js';
 import { editTool } from './tools/builtin/edit.js';
+import { adminTools } from './tools/builtin/system.js';
 import { imageTool } from './tools/builtin/image.js';
 import { processStartTool, processPollTool, processKillTool, processListTool } from './tools/builtin/process.js';
 import { ttsTool } from './tools/builtin/tts.js';
@@ -111,6 +112,7 @@ async function main() {
   }
   for (const tool of [vdbSearchTool, vdbIngestTool, vdbStatsTool]) registry.register(tool);
   for (const tool of cuaTools) registry.register(tool);
+  for (const tool of adminTools) registry.register(tool);
   const memoryBootstrap = ingestWorkspaceSessions();
   const memographBootstrap = importMemoGraphSnapshots(
     getSharedVectorDB(config.workspace),

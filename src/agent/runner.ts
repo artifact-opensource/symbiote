@@ -46,12 +46,61 @@ export interface RunnerConfig {
 
 const MAX_STREAM_RETRIES = 3;
 const MAX_EMPTY_NUDGES = 2;
+const MAX_RESULT_SIZE = 50 * 1024;
+const REPEAT_CALL_THRESHOLD = 3;
+const envMs = (name: string, fallback: number): number => {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+};
+// A hung tool or silent stream must never stall the loop forever.
+const toolTimeoutMs = (): number => envMs('SYMBIOTE_TOOL_TIMEOUT_MS', 15 * 60_000);
+const streamIdleMs = (): number => envMs('SYMBIOTE_STREAM_IDLE_MS', 3 * 60_000);
 
 function isTransientStreamError(err: unknown): boolean {
   const e = err as { name?: string; message?: string; cause?: { code?: string } } | undefined;
   const text = `${e?.name ?? ''} ${e?.message ?? ''} ${e?.cause?.code ?? ''}`;
-  return /terminated|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR|fetch failed|socket|premature|TimeoutError|network/i.test(text);
+  return /terminated|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR|fetch failed|socket|premature|TimeoutError|network|stream idle/i.test(text);
 }
+
+/** Reject if `promise` takes longer than `ms` or `signal` aborts. */
+function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortSignal | undefined, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => finish(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`))), ms);
+    const onAbort = () => finish(() => reject(new Error(`${label} aborted`)));
+    const finish = (settle: () => void) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      settle();
+    };
+    if (signal?.aborted) return onAbort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    promise.then(v => finish(() => resolve(v)), e => finish(() => reject(e)));
+  });
+}
+
+/** Wrap a stream so that a provider that goes silent fails fast and gets retried. */
+async function* withIdleTimeout<T>(source: AsyncIterable<T>, ms: number, signal?: AbortSignal): AsyncGenerator<T> {
+  const it = source[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      const next = await withTimeout(it.next(), ms, signal, 'stream idle:');
+      if (next.done) return;
+      yield next.value;
+    }
+  } finally {
+    void Promise.resolve(it.return?.()).catch(() => { /* already closed */ });
+  }
+}
+
+/** Keep the head and tail of oversized output; errors and summaries usually sit at the end. */
+function clipResult(result: string): string {
+  if (result.length <= MAX_RESULT_SIZE) return result;
+  const head = Math.floor(MAX_RESULT_SIZE * 0.65);
+  const tail = MAX_RESULT_SIZE - head;
+  return `${result.slice(0, head)}\n\n[... ${result.length - MAX_RESULT_SIZE} bytes omitted ...]\n\n${result.slice(-tail)}`;
+}
+
+const looksFailed = (result: string): boolean => /^Error\b|"is_error":\s*true|"error":|Exit code: [1-9]/.test(result);
 
 export type RunnerProgressEvent =
   | { type: 'iteration'; iteration: number; maxIterations: number; messageCount: number }
@@ -114,6 +163,7 @@ export async function runAgent(
   let completionReviewPending = false;
   let completionReviewUsed = false;
   let emptyNudges = 0;
+  const callCounts = new Map<string, number>();
   const todoManager = new TodoManager({ scope: config.todoScope ?? `run-${randomUUID()}`, workspace: process.cwd() });
 
   const ensureTodoPlan = () => {
@@ -276,7 +326,6 @@ export async function runAgent(
     // Collect response (transient mid-stream failures are retried so one dropped connection cannot kill a long run)
     const pendingToolCalls: ToolCall[] = [];
     const toolInputBuffers = new Map<string, string>(); // id → accumulated JSON string
-    let currentToolId = '';
 
     for (let attempt = 0; ; attempt++) {
     pendingToolCalls.length = 0;
@@ -284,7 +333,7 @@ export async function runAgent(
     textAccum = '';
     try {
       const stream = config.provider.stream(truncated, tools, effectiveProviderConfig);
-      for await (const event of stream) {
+      for await (const event of withIdleTimeout(stream, streamIdleMs(), config.abortSignal)) {
         config.onEvent?.(event);
 
         switch (event.type) {
@@ -293,30 +342,16 @@ export async function runAgent(
             break;
 
           case 'tool_use_start':
-            currentToolId = event.id;
             toolInputBuffers.set(event.id, '');
             break;
 
-          case 'tool_use_delta':
+          case 'tool_use_delta': {
             // Accumulate tool input JSON fragments
-            const existing = toolInputBuffers.get(event.id) ?? '';
-            toolInputBuffers.set(event.id, existing + event.input);
-            break;
-
-          case 'tool_use_end': {
-            const rawInput = toolInputBuffers.get(event.id) ?? '{}';
-            let parsedInput: Record<string, unknown> = {};
-            try { parsedInput = JSON.parse(rawInput); } catch { /* empty */ }
-
-            // Find the tool name from the start event
-            const startEvent = pendingToolCalls.find(tc => tc.id === event.id);
-            if (!startEvent) {
-              // This end corresponds to a start we haven't pushed yet — shouldn't happen
-              // but handle gracefully
-            }
+            toolInputBuffers.set(event.id, (toolInputBuffers.get(event.id) ?? '') + event.input);
             break;
           }
 
+          case 'tool_use_end':
           case 'done':
             break;
         }
@@ -356,10 +391,12 @@ export async function runAgent(
     if (config.onProgress) config.onProgress({ type: 'response', elapsedMs: streamElapsed });
     else console.log(`[runner] Response ready (${streamElapsed}ms)`);
 
-    // Finalize tool call inputs
+    // Finalize tool call inputs; unparseable JSON (often a response cut off by the token limit) must not run as {}
+    const invalidInputs = new Set<string>();
     for (const tc of pendingToolCalls) {
-      const rawInput = toolInputBuffers.get(tc.id) ?? '{}';
-      try { tc.input = JSON.parse(rawInput); } catch { tc.input = {}; }
+      const rawInput = (toolInputBuffers.get(tc.id) ?? '').trim();
+      if (!rawInput) { tc.input = {}; continue; }
+      try { tc.input = JSON.parse(rawInput); } catch { tc.input = {}; invalidInputs.add(tc.id); }
     }
 
     // If no tool calls, we're done
@@ -407,21 +444,22 @@ export async function runAgent(
     textAccum = '';
 
     // Execute tool calls concurrently and append results
-    const MAX_RESULT_SIZE = 50 * 1024; // 50KB
     const toolResults = await mapWithConcurrency(pendingToolCalls, 5, async (tc) => {
       try {
+        if (invalidInputs.has(tc.id)) {
+          const errMsg = JSON.stringify({ error: `Arguments for ${tc.name} were not valid JSON (the response was probably cut off). Retry with smaller or simpler arguments.`, is_error: true });
+          try { config.onToolEnd?.(tc.name, errMsg); } catch { /* progress reporting is non-critical */ }
+          return { tc, result: errMsg, isError: true };
+        }
         try { config.onToolStart?.(tc.name, tc.input); } catch { /* progress reporting is non-critical */ }
         try {
-          let result = await config.toolRegistry.execute(tc.name, tc.input);
-          if (result.length > MAX_RESULT_SIZE) {
-            result = result.slice(0, MAX_RESULT_SIZE) + `\n\n[Truncated: result was ${result.length} bytes, limit is ${MAX_RESULT_SIZE}]`;
-          }
+          let result = clipResult(await withTimeout(config.toolRegistry.execute(tc.name, tc.input), toolTimeoutMs(), config.abortSignal, `Tool ${tc.name}`));
           // Sanitize tool result before it enters the LLM context
           const sanitized = sanitizeToolResult(tc.name, result);
           if (sanitized.injectionDetected) {
             logInjectionAttempt(tc.name, sanitized.patterns, result);
           }
-          result = sanitized.text;
+          result = sanitized.text || '(no output)';
           try { config.onToolEnd?.(tc.name, result); } catch { /* progress reporting is non-critical */ }
           return { tc, result, isError: false };
         } catch (err) {
@@ -435,7 +473,16 @@ export async function runAgent(
       }
     });
 
-    for (const { tc, result, isError } of toolResults) {
+    for (const entry of toolResults) {
+      const { tc, isError } = entry;
+      let result = entry.result;
+      // Break repeat-failure loops: the same call failing again will not succeed on its own
+      const key = `${tc.name}:${JSON.stringify(tc.input)}`;
+      const seen = (callCounts.get(key) ?? 0) + 1;
+      callCounts.set(key, seen);
+      if (seen >= REPEAT_CALL_THRESHOLD && (isError || looksFailed(result))) {
+        result += `\n\n[runner: this exact ${tc.name} call has now failed ${seen} times. Change the approach or arguments instead of repeating it, or report the blocker.]`;
+      }
       allToolCalls.push({ name: tc.name, input: tc.input, result });
 
       currentMessages.push({

@@ -35,6 +35,8 @@ import { readTool } from '../tools/builtin/read.js';
 import { writeTool } from '../tools/builtin/write.js';
 import { execTool } from '../tools/builtin/exec.js';
 import { editTool } from '../tools/builtin/edit.js';
+import { adminTools } from '../tools/builtin/system.js';
+import { todoTool } from '../tools/shared-todo.js';
 import { imageTool } from '../tools/builtin/image.js';
 import {
   processStartTool,
@@ -243,6 +245,7 @@ export class SymbioteGateway {
         webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool,
         webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool,
         webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool, ...cuaTools, personaDigestTool,
+        ...adminTools, todoTool,
       ]) {
         this.toolRegistry.register(tool);
       }

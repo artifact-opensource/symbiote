@@ -24,6 +24,7 @@ import { readTool } from './builtin/read.js';
 import { writeTool } from './builtin/write.js';
 import { execTool } from './builtin/exec.js';
 import { editTool } from './builtin/edit.js';
+import { adminTools } from './builtin/system.js';
 import { imageTool } from './builtin/image.js';
 import { processStartTool, processPollTool, processKillTool, processListTool } from './builtin/process.js';
 import { ttsTool } from './builtin/tts.js';
@@ -63,7 +64,7 @@ for (const tool of [
   readTool, writeTool, execTool, editTool, imageTool,
   processStartTool, processPollTool, processKillTool, processListTool,
   ttsTool, webFetchTool, memorySearchTool, vdbSearchTool, vdbIngestTool, vdbStatsTool,
-  combRecallTool, combStageTool, ...cuaTools, personaDigestTool,
+  combRecallTool, combStageTool, ...cuaTools, personaDigestTool, ...adminTools,
 ]) {
   registry.register(tool);
 }
