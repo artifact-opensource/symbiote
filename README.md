@@ -16,7 +16,8 @@ v5.2.0 · Node.js 20+ · TypeScript · MIT
 
 Symbiote runs an LLM agent in a persistent local process. It connects configured providers and messaging channels to a tool-enabled agent loop, stores sessions on disk, and provides an embedded memory index.
 
-The runtime does not require Docker, Redis, or an external vector database. Provider APIs and optional channel services still require their own credentials and network access.
+The runtime does not require Docker, Redis, or an external vector database. 
+Provider APIs and optional channel services require their own credentials and network access.
 
 ## Quick Start
 
