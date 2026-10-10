@@ -7,13 +7,13 @@
 | File | Description |
 |------|-------------|
 | `xmcp-server.js` / `.cjs` | XMCP server — handles tool/resource registration and invocation |
-| `xmcp-proxy.js` | Proxy layer — forwards MCP requests to the Mach6 gateway |
+| `xmcp-proxy.js` | Proxy layer — forwards MCP requests to the Symbiote gateway |
 | `mcp-server.js` / `.cjs` | Core MCP server — base protocol implementation |
-| `mcp-bridge.js` | Bridge — connects MCP clients to the Mach6 tool system |
+| `mcp-bridge.js` | Bridge — connects MCP clients to the Symbiote tool system |
 | `mcp-sse-bridge.cjs` | SSE bridge — Server-Sent Events transport for MCP |
 | `xmcp_api_key` | API key for XMCP authentication |
 | `README-mcp-bridge.md` | Detailed MCP bridge documentation |
-| `linkedin-mach6-xmcp.md` | LinkedIn article draft about XMCP |
+| `linkedin-symbiote-xmcp.md` | LinkedIn article draft about XMCP |
 
 ## Architecture
 
@@ -32,12 +32,12 @@ MCP Client (AI Agent)
          │
          ▼
 ┌─────────────────┐
-│  mcp-bridge.js   │  ← Connects to Mach6 tools
+│  mcp-bridge.js   │  ← Connects to Symbiote tools
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│  Mach6 Gateway   │  ← Port 3006
+│  Symbiote Gateway   │  ← Port 3006
 └─────────────────┘
 ```
 
@@ -46,11 +46,11 @@ MCP Client (AI Agent)
 | Port | Service |
 |------|---------|
 | 3009 | XMCP (reserved) |
-| 3006 | Mach6 Gateway |
+| 3006 | Symbiote Gateway |
 
 ## Usage
 
-The XMCP server is started as part of the Mach6 daemon. It does not run as a standalone service — it's embedded in the gateway process.
+The XMCP server is started as part of the Symbiote daemon. It does not run as a standalone service — it's embedded in the gateway process.
 
 ## API Key
 

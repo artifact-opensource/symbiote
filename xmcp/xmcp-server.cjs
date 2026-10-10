@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = Number(process.env.XMCP_PORT || 3011);
-const KEY_PATH = process.env.XMCP_KEY_PATH || '/opt/ava/mach6/.mcp/xmcp_api_key';
+const KEY_PATH = process.env.XMCP_KEY_PATH || path.join(__dirname, '..', '.mcp', 'xmcp_api_key');
 let API_KEY = process.env.XMCP_API_KEY || null;
 if (!API_KEY) {
   try {

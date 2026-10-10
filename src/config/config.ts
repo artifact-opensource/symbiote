@@ -191,17 +191,17 @@ function resolveEnvKeys(config: SymbioteConfig): SymbioteConfig {
     config.discord = { ...(config.discord ?? {}), token: process.env.DISCORD_BOT_TOKEN };
   }
 
-  if (process.env.MACH6_API_PORT && !config.apiPort) {
-    config.apiPort = Number(process.env.MACH6_API_PORT);
+  if (process.env.SYMBIOTE_API_PORT && !config.apiPort) {
+    config.apiPort = Number(process.env.SYMBIOTE_API_PORT);
   }
-  if (process.env.MACH6_PORT && !config.webPort) {
-    config.webPort = Number(process.env.MACH6_PORT);
+  if (process.env.SYMBIOTE_PORT && !config.webPort) {
+    config.webPort = Number(process.env.SYMBIOTE_PORT);
   }
-  if (process.env.MACH6_API_HOST && !config.apiHost) {
-    config.apiHost = process.env.MACH6_API_HOST;
+  if (process.env.SYMBIOTE_API_HOST && !config.apiHost) {
+    config.apiHost = process.env.SYMBIOTE_API_HOST;
   }
-  if (process.env.MACH6_WEB_HOST && !config.webHost) {
-    config.webHost = process.env.MACH6_WEB_HOST;
+  if (process.env.SYMBIOTE_WEB_HOST && !config.webHost) {
+    config.webHost = process.env.SYMBIOTE_WEB_HOST;
   }
 
   return config;

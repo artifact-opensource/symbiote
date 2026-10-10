@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "mach6": "dist/index.js",
+    "symbiote": "dist/index.js",
     "symbiote": "dist/index.js"
   },
   "files": [
@@ -13,7 +13,7 @@
     "web",
     "README.md",
     "LICENSE",
-    "mach6.example.json",
+    "symbiote.example.json",
     ".env.example",
     "symbiote.sh",
     "symbiote.ps1",
@@ -25,7 +25,7 @@
   ],
   "scripts": {
     "build": "tsc && node scripts/copy-runtime-assets.mjs",
-    "start": "node dist/gateway/daemon.js --config=mach6.json",
+    "start": "node dist/gateway/daemon.js --config=symbiote.json",
     "dev": "tsc && node dist/index.js",
     "init": "tsc && node dist/cli/wizard.js"
   },

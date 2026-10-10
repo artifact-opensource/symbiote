@@ -15,7 +15,7 @@ The user sees one continuous conversation. The iteration budget is the only thin
 
 ## Configuration
 
-In `mach6.json`:
+In `symbiote.json`:
 
 ```json
 {

@@ -3,7 +3,7 @@
 import { spawn } from 'node:child_process';
 import { getProcessManager } from './process.js';
 import type { ToolDefinition } from '../types.js';
-import { isWindows, shellCommand, wrapPtyCommand } from '../../runtime/platform.js';
+import { isWindows, killProcessTree, shellCommand, wrapPtyCommand } from '../../runtime/platform.js';
 
 export const execTool: ToolDefinition = {
   name: 'exec',
@@ -25,19 +25,6 @@ export const execTool: ToolDefinition = {
     const background = input.background as boolean ?? false;
     const pty = input.pty as boolean ?? false;
 
-    // Self-kill guard: prevent AVA from stopping/restarting her own service or rewriting the ava script
-    const SELF_KILL_PATTERNS = [
-      /systemctl\s+(stop|restart|disable)\s+mach6/i,
-      /kill\s+.*mach6|pkill.*mach6/i,
-      />\s*.*\bmach6\b.*$/,
-      /write.*\bmach6\b.*\bbin\b/i,
-    ];
-    for (const pat of SELF_KILL_PATTERNS) {
-      if (pat.test(command)) {
-        return `Error: Cannot restart/kill the gateway service from within the agent. Use the 'symbiote restart' CLI command from a terminal instead. This is a safety guard to prevent self-termination.`;
-      }
-    }
-
     // Background mode: delegate to process manager
     if (background) {
       const mgr = getProcessManager();
@@ -54,6 +41,7 @@ export const execTool: ToolDefinition = {
     return new Promise<string>((resolve) => {
       const chunks: Buffer[] = [];
       const proc = spawn(shell.file, shell.args, {
+        windowsHide: true,
         cwd: workdir,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
@@ -63,7 +51,7 @@ export const execTool: ToolDefinition = {
       });
 
       const timer = setTimeout(() => {
-        proc.kill('SIGKILL');
+        killProcessTree(proc);
         resolve(`Error: Command timed out after ${timeoutMs / 1000}s\n${Buffer.concat(chunks).toString('utf-8')}`);
       }, timeoutMs);
 

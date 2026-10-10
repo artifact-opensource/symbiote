@@ -22,11 +22,11 @@ const EDGE_VOICES: Record<string, string> = {
 };
 
 function getWorkspace(): string {
-  return process.env.MACH6_WORKSPACE ?? process.cwd();
+  return process.env.SYMBIOTE_WORKSPACE ?? process.cwd();
 }
 
 function resolveEdgeTtsCommand(workspace: string): string {
-  const configured = process.env.SYMBIOTE_EDGE_TTS_BIN ?? process.env.MACH6_EDGE_TTS_BIN;
+  const configured = process.env.SYMBIOTE_EDGE_TTS_BIN;
   if (configured) return configured;
 
   const candidates = isWindows()

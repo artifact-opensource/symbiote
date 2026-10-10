@@ -100,12 +100,12 @@ export function validateConfig(config: SymbioteConfig): ValidationError[] {
     });
   }
 
-  if (!isLoopbackHost(config.apiHost) && !process.env.MACH6_API_KEY && !process.env.API_KEY) {
+  if (!isLoopbackHost(config.apiHost) && !process.env.SYMBIOTE_API_KEY && !process.env.API_KEY) {
     issues.push({
       field: 'apiHost',
-      message: 'HTTP API is exposed beyond localhost but MACH6_API_KEY is not configured',
+      message: 'HTTP API is exposed beyond localhost but SYMBIOTE_API_KEY is not configured',
       severity: 'error',
-      suggestion: 'Set MACH6_API_KEY before binding the API to a non-loopback host.',
+      suggestion: 'Set SYMBIOTE_API_KEY before binding the API to a non-loopback host.',
     });
   }
 

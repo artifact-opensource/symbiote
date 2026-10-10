@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 function getWorkspace(): string {
-  return process.env.MACH6_WORKSPACE ?? process.cwd();
+  return process.env.SYMBIOTE_WORKSPACE ?? process.cwd();
 }
 
 const lastIngestByWorkspace = new Map<string, number>();
@@ -24,9 +24,8 @@ function getVDB(): VectorDB {
 function getSessionDirectories(): string[] {
   const workspace = getWorkspace();
   const configured = process.env.SYMBIOTE_SESSIONS_DIR
-    ?? process.env.MACH6_SESSIONS_DIR
     ?? loadConfig().sessionsDir
-    ?? path.join(os.homedir(), '.mach6', 'sessions');
+    ?? path.join(os.homedir(), '.symbiote', 'sessions');
   return [...new Set([
     path.resolve(configured),
     path.join(workspace, '.sessions'),

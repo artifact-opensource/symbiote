@@ -5,8 +5,8 @@ import { ingestWorkspaceSessions } from '../tools/builtin/memory-vdb.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const workspace = process.env.SYMBIOTE_WORKSPACE ?? process.env.MACH6_WORKSPACE ?? config.workspace;
-  process.env.MACH6_WORKSPACE = workspace;
+  const workspace = process.env.SYMBIOTE_WORKSPACE ?? config.workspace;
+  process.env.SYMBIOTE_WORKSPACE = workspace;
   const [action, ...args] = process.argv.slice(2);
   const database = getSharedVectorDB(workspace);
 

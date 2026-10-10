@@ -32,7 +32,7 @@ npx symbiote --version
 The package ships with:
 
 - **`.env.example`** — template for all environment variables (API keys, tokens)
-- **`mach6.example.json`** — template for agent configuration
+- **`symbiote.example.json`** — template for agent configuration
 - **`symbiote-gateway.service`** — systemd unit file for Linux deployments
 - **`symbiote.sh` / `symbiote.ps1`** — start scripts for Linux/macOS and Windows
 
@@ -51,4 +51,4 @@ Environment variables are auto-loaded from `.env` via the built-in dotenv loader
 | macOS (Intel, Apple Silicon) | ✅ Supported |
 | Windows (x64) | ✅ Supported |
 
-Symbiote resolves temp, home, config, and credential paths through platform-aware runtime helpers. Legacy `mach6` paths remain supported for compatibility, while new installs use the current Symbiote runtime assets.
+Symbiote resolves temp, home, config, and credential paths through platform-aware runtime helpers. Legacy `symbiote` paths remain supported for compatibility, while new installs use the current Symbiote runtime assets.

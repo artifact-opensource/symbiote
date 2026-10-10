@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = Number(process.env.MCP_PORT || 3010);
-const KEY_PATH = process.env.MCP_KEY_PATH || '/opt/ava/mach6/.mcp/xmcp_api_key';
+const KEY_PATH = process.env.MCP_KEY_PATH || path.join(__dirname, '..', '.mcp', 'xmcp_api_key');
 let API_KEY = null;
 try { API_KEY = fs.readFileSync(KEY_PATH, 'utf8').trim(); } catch (e) { console.error('mcp: failed to read API key:', e.message); process.exit(1); }
 

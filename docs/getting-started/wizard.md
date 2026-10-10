@@ -10,7 +10,7 @@ Symbiote now ships with a shared setup flow used by both:
 
 The setup flow writes:
 
-- `mach6.json` — runtime configuration
+- `symbiote.json` — runtime configuration
 - `.env` — secrets and host/port settings
 - optional workspace identity files via `scaffoldAgent()`:
   - `SOUL.md`

@@ -104,7 +104,7 @@ interface DiscordChannelConfig {
 }
 
 interface GatewayConfig {
-  /** Path to mach6.json */
+  /** Path to symbiote.json */
   configPath?: string;
   /** Channels to enable */
   channels?: {
@@ -207,7 +207,7 @@ export class SymbioteGateway {
     // Set cwd to workspace so tools resolve relative paths correctly
     if (this.config.workspace) {
       process.chdir(this.config.workspace);
-      process.env.MACH6_WORKSPACE = this.config.workspace;
+      process.env.SYMBIOTE_WORKSPACE = this.config.workspace;
     console.log(`${palette.dim}  [gateway]${palette.reset} Working directory: ${palette.cyan}${this.config.workspace}${palette.reset}`);
     }
 
@@ -459,7 +459,7 @@ export class SymbioteGateway {
   private async initContextStore(): Promise<void> {
     if (!this.vdbInstance) {
       const { VectorDB } = await import("../memory/vdb.js");
-      this.vdbInstance = getSharedVectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
+      this.vdbInstance = getSharedVectorDB(process.env.SYMBIOTE_WORKSPACE ?? process.cwd());
     }
     const memographImport = importMemoGraphSnapshots(
       this.vdbInstance,
@@ -539,7 +539,7 @@ export class SymbioteGateway {
       // Lazy-init VDB
       if (!this.vdbInstance) {
         const { VectorDB } = await import("../memory/vdb.js");
-        this.vdbInstance = getSharedVectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
+        this.vdbInstance = getSharedVectorDB(process.env.SYMBIOTE_WORKSPACE ?? process.cwd());
       }
 
       const sessions = this.sessionManager.list();
@@ -776,10 +776,10 @@ export class SymbioteGateway {
   private async startHttpApi(): Promise<void> {
     const port = this.gatewayConfig.apiPort ?? 3006;
     const host = this.gatewayConfig.apiHost ?? '127.0.0.1';
-    const apiKey = process.env.MACH6_API_KEY || process.env.API_KEY || '';
+    const apiKey = process.env.SYMBIOTE_API_KEY || process.env.API_KEY || '';
 
     if (!apiKey) {
-      console.log(warn('No MACH6_API_KEY — HTTP API disabled'));
+      console.log(warn('No SYMBIOTE_API_KEY — HTTP API disabled'));
       return;
     }
 
@@ -929,6 +929,7 @@ export class SymbioteGateway {
             todoScope: turnTodoScope,
             blinkController: blinkCtrl,
             abortSignal: controller.signal,
+            onCheckpoint: (msgs) => { session.messages = msgs; this.sessionManager.save(session); },
             onEvent: (ev) => {
               if (ev.type === 'usage') {
                 this.sessionManager.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
@@ -1301,7 +1302,7 @@ export class SymbioteGateway {
         // Feed archived messages to VDB for persistent memory
         try {
           const { getSharedVectorDB, ingestSessions } = await import("../memory/vdb.js");
-          const vdb = getSharedVectorDB(process.env.MACH6_WORKSPACE ?? process.cwd());
+          const vdb = getSharedVectorDB(process.env.SYMBIOTE_WORKSPACE ?? process.cwd());
           const archiveDir = path.join(this.config.sessionsDir ?? ".sessions", "archive");
           if (fs.existsSync(archiveDir)) {
             const result = ingestSessions(vdb, archiveDir);
@@ -1368,6 +1369,7 @@ export class SymbioteGateway {
         contextStore: this.contextStore ?? undefined,
         blinkController: blinkCtrl,
         abortSignal: controller.signal,
+        onCheckpoint: (msgs: typeof currentSessionMessages) => { session.messages = msgs; this.sessionManager.save(session); },
         onEvent: (ev: any) => {
           if (ev.type === 'usage') {
             this.sessionManager.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
@@ -1927,7 +1929,7 @@ export async function startGateway(configPath?: string): Promise<SymbioteGateway
       },
       whatsapp: {
         enabled: !!(config as any).whatsapp?.enabled,
-        authDir: expandHome((config as any).whatsapp?.authDir ?? path.join(os.homedir(), '.mach6', 'whatsapp-auth')),
+        authDir: expandHome((config as any).whatsapp?.authDir ?? path.join(os.homedir(), '.symbiote', 'whatsapp-auth')),
         phoneNumber: (config as any).whatsapp?.phoneNumber,
         autoRead: (config as any).whatsapp?.autoRead ?? true,
         policy: (config as any).whatsapp?.policy,

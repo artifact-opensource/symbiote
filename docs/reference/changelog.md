@@ -138,7 +138,7 @@
 ### Features
 - Interactive CLI setup wizard (`symbiote init`)
 - Branded terminal output with gradient headers
-- Published to npm as `symbiote-core`
+- Published to npm as `symbiote`
 
 ### Fixes
 - CVE fix: override `undici >=6.23.0` (GHSA-g9mf-h72j-4rw9)

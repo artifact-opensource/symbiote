@@ -6,7 +6,7 @@
 - Replaced Unix-only shell assumptions in core execution tools with platform-aware shell dispatch
 - Added shared runtime helpers for app home, config discovery, IPC keyring lookup, Python launch, and shell execution
 - Removed hardcoded `/etc`, `/usr/bin/chromium`, `/bin/bash`, `/home/...`, and raw `/tmp/...` assumptions from key runtime paths
-- Preserved legacy `mach6` paths for compatibility while preferring current Symbiote runtime locations
+- Preserved legacy `symbiote` paths for compatibility while preferring current Symbiote runtime locations
 
 ### Installer & Launch Flow Cleanup
 - Hardened launcher/runtime assets for Windows, Linux, and macOS
@@ -71,7 +71,7 @@
 - See: [Metrics](docs/core/metrics.md)
 
 ### Configurable Idle Emoji
-- Idle status indicator emoji now configurable via `idleEmoji` field in `mach6.json`
+- Idle status indicator emoji now configurable via `idleEmoji` field in `symbiote.json`
 - Also configurable via `IDLE_EMOJI` environment variable
 - Defaults to existing behavior when absent
 

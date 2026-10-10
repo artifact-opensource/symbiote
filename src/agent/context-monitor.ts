@@ -117,14 +117,18 @@ export class ContextMonitor {
     const system = messages.filter(m => m.role === 'system');
     const rest = messages.filter(m => m.role !== 'system');
 
-    // Keep last 40% of non-system messages
+    // Keep last 40% of non-system messages, never starting on an orphaned tool result
     const keepCount = Math.max(10, Math.floor(rest.length * 0.4));
-    const old = rest.slice(0, rest.length - keepCount);
-    const recent = rest.slice(rest.length - keepCount);
+    let cut = rest.length - keepCount;
+    while (cut > 0 && rest[cut]?.role === 'tool') cut--;
+    const old = rest.slice(0, cut);
+    const recent = rest.slice(cut);
+    const anchor = this.findTaskAnchor(old);
 
     // Build summary of old messages
     const summaryParts: string[] = ['[Context compacted. Summary of earlier conversation:]'];
     for (const msg of old) {
+      if (msg === anchor) continue;
       const text = typeof msg.content === 'string' ? msg.content : '[structured content]';
       const preview = text.slice(0, 200);
       summaryParts.push(`${msg.role}: ${preview}${text.length > 200 ? '...' : ''}`);
@@ -134,16 +138,25 @@ export class ContextMonitor {
       content: summaryParts.join('\n').slice(0, 2000),
     };
 
-    return [...system, summaryMsg, ...recent];
+    return [...system, ...(anchor ? [anchor] : []), summaryMsg, ...recent];
+  }
+
+  /** The original user request; losing it leaves the agent with no goal after compaction. */
+  private findTaskAnchor(msgs: Message[]): Message | undefined {
+    return msgs.find(m => m.role === 'user' && typeof m.content === 'string'
+      && !m.content.startsWith('[Context compacted') && !m.content.startsWith('[Emergency context flush'));
   }
 
   /** Emergency: save full transcript, keep only last N messages */
   private hardTruncate(messages: Message[], keepLast: number): Message[] {
     const system = messages.filter(m => m.role === 'system');
     const rest = messages.filter(m => m.role !== 'system');
-    const kept = rest.slice(-keepLast);
+    let start = rest.length - Math.min(keepLast, rest.length);
+    while (start > 0 && rest[start]?.role === 'tool') start--;
+    const tail = rest.slice(start);
+    const anchor = this.findTaskAnchor(rest.slice(0, start));
     const notice: Message = { role: 'user', content: '[Emergency context flush. Earlier messages saved to disk. Recent context only.]' };
-    return [...system, notice, ...kept];
+    return [...system, ...(anchor ? [anchor] : []), notice, ...tail];
   }
 
   private buildSummary(messages: Message[]): string {

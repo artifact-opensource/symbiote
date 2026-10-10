@@ -43,14 +43,14 @@ Messages from known sibling bots are handled separately from user messages:
 The HTTP API requires Bearer token authentication:
 
 ```
-Authorization: Bearer <MACH6_API_KEY>
+Authorization: Bearer <SYMBIOTE_API_KEY>
 ```
 
 Requests without a valid token receive `401 Unauthorized`.
 
 ## Secrets Management
 
-- API keys and tokens live in `.env`, never in `mach6.json`
+- API keys and tokens live in `.env`, never in `symbiote.json`
 - Config values support `${ENV_VAR}` interpolation
 - `.env` should be in `.gitignore` (the example file is `.env.example`)
 

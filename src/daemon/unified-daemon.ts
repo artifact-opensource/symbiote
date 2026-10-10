@@ -1,6 +1,5 @@
 import { spawn } from 'child_process';
 import * as path from 'path';
-import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,8 +31,7 @@ interface ServiceConfig {
 function resolveConfigArg(): string {
     const fromArgv = process.argv.find(a => a.startsWith('--config='))?.split('=')[1];
     if (fromArgv) return fromArgv;
-    const candidates = ['symbiote.json', 'mach6.json'].map(f => path.join(PROJECT_ROOT, f));
-    return candidates.find(p => existsSync(p)) ?? candidates[0];
+    return path.join(PROJECT_ROOT, 'symbiote.json');
 }
 
 class UnifiedDaemon {

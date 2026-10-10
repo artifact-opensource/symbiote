@@ -47,11 +47,11 @@ export class IpcClient {
    * 
    * @param keyringPath — Path to the keyring (defaults to IPC_KEYRING_PATH env var)
    * @param myAgentId — This agent's ID (defaults to IPC_AGENT_ID env var)
-   * @param apiKey — The target's API key (for Bearer auth). Defaults to MACH6_API_KEY env.
+   * @param apiKey — The target's API key (for Bearer auth). Defaults to SYMBIOTE_API_KEY env.
    */
   constructor(keyringPath?: string, myAgentId?: string, apiKey?: string) {
     this.identity = new IpcIdentity(keyringPath, myAgentId);
-    this.apiKey = apiKey ?? process.env.MACH6_API_KEY ?? process.env.API_KEY ?? '';
+    this.apiKey = apiKey ?? process.env.SYMBIOTE_API_KEY ?? process.env.API_KEY ?? '';
   }
 
   /**

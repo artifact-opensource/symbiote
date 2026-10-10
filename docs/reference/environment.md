@@ -26,14 +26,14 @@ All environment variables used by Symbiote. Set these in `.env` (auto-loaded at 
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `MACH6_API_KEY` | If using HTTP API | Bearer token for API authentication |
-| `MACH6_PORT` | No | HTTP API port (default: `3006`) |
+| `SYMBIOTE_API_KEY` | If using HTTP API | Bearer token for API authentication |
+| `SYMBIOTE_PORT` | No | HTTP API port (default: `3006`) |
 
 ## Workspace
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `MACH6_WORKSPACE` | No | Override workspace path (default: `cwd()`) |
+| `SYMBIOTE_WORKSPACE` | No | Override workspace path (default: `cwd()`) |
 
 ## Resolution Order
 
@@ -42,7 +42,7 @@ Environment variables can be set in:
 1. **`.env` file** - auto-loaded at startup via built-in dotenv loader (recommended for secrets)
 2. **Shell environment** - `export VAR=value`
 3. **systemd service** - `Environment=VAR=value`
-4. **`mach6.json`** - via `${VAR}` interpolation in string values
+4. **`symbiote.json`** - via `${VAR}` interpolation in string values
 
 `.env` values do not override existing shell environment variables.
 

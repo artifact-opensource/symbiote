@@ -72,7 +72,7 @@ for (const tool of [
 const configArg = process.argv.indexOf('--config');
 const configPath = configArg >= 0 && process.argv[configArg + 1]
   ? process.argv[configArg + 1]
-  : path.join(process.cwd(), 'mach6.json');
+  : path.join(process.cwd(), 'symbiote.json');
 
 try {
   const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -83,8 +83,8 @@ try {
   log(`No config at ${configPath}, using cwd: ${process.cwd()}`);
 }
 
-const workspace = process.env.MACH6_WORKSPACE ?? process.cwd();
-process.env.MACH6_WORKSPACE = workspace;
+const workspace = process.env.SYMBIOTE_WORKSPACE ?? process.cwd();
+process.env.SYMBIOTE_WORKSPACE = workspace;
 const workspaceVdb = getSharedVectorDB(workspace);
 setCombVdbHook(
   (text, source) => {

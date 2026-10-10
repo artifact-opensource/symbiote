@@ -16,8 +16,8 @@ from typing import Optional
 # Playwright imports
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
-CHROMIUM_PATH = os.environ.get('SYMBIOTE_CHROMIUM_PATH') or os.environ.get('MACH6_CHROMIUM_PATH')
-SYMBIOTE_DIR = Path(os.environ.get('SYMBIOTE_HOME') or os.environ.get('MACH6_HOME') or (Path.home() / '.symbiote'))
+CHROMIUM_PATH = os.environ.get('SYMBIOTE_CHROMIUM_PATH') or os.environ.get('SYMBIOTE_CHROMIUM_PATH')
+SYMBIOTE_DIR = Path(os.environ.get('SYMBIOTE_HOME') or os.environ.get('SYMBIOTE_HOME') or (Path.home() / '.symbiote'))
 PROFILES_DIR = SYMBIOTE_DIR / 'profiles'
 SCREENSHOTS_DIR = SYMBIOTE_DIR / 'screenshots'
 DOWNLOADS_DIR = SYMBIOTE_DIR / 'downloads'

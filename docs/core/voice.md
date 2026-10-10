@@ -76,7 +76,7 @@ Voice works out of the box when the required Python dependencies are installed:
 - **STT:** `faster-whisper` in the Python environment
 - **TTS:** Edge TTS (network-based, free) or MeloTTS + OpenVoice (local, sovereign)
 
-No `mach6.json` configuration is required — the middleware auto-detects voice messages and handles them transparently.
+No `symbiote.json` configuration is required — the middleware auto-detects voice messages and handles them transparently.
 
 ## Example Flow
 

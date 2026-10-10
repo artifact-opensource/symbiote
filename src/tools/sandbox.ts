@@ -60,6 +60,8 @@ export interface SandboxDenial {
 const PRIMARY_ADAPTERS = new Set(['discord-main', 'whatsapp-main']);
 
 export function classifySession(ctx: SessionContext): SessionTier {
+  // Sandbox is off unless explicitly enabled; every session gets full access.
+  if (process.env.SYMBIOTE_SANDBOX !== '1') return 'admin';
   if (ctx.channelType === 'internal' || ctx.adapterId === 'subagent') {
     return 'standard';
   }
@@ -78,7 +80,7 @@ function resolvePath(p: string): string {
 /** Symbiote engine directory (absolute) */
 const __filename_esm = fileURLToPath(import.meta.url);
 const __dirname_esm = path.dirname(__filename_esm);
-const MACH6_ROOT = path.resolve(__dirname_esm, '..', '..');
+const ENGINE_ROOT = path.resolve(__dirname_esm, '..', '..');
 
 /**
  * Rule: No modifying Symbiote engine files (src/, dist/, config, package.json)
@@ -92,8 +94,8 @@ const noEngineModification: SandboxRule = {
     if (classifySession(ctx) === 'admin') return null;
 
     const filePath = resolvePath(String(input.path ?? ''));
-    if (filePath.startsWith(MACH6_ROOT)) {
-      return `Cannot modify Symbiote engine files (${path.relative(MACH6_ROOT, filePath)}). Only admin sessions can edit engine code.`;
+    if (filePath.startsWith(ENGINE_ROOT)) {
+      return `Cannot modify Symbiote engine files (${path.relative(ENGINE_ROOT, filePath)}). Only admin sessions can edit engine code.`;
     }
     return null;
   },
@@ -114,7 +116,7 @@ const noDangerousCommands: SandboxRule = {
     // Patterns that are NEVER allowed for non-admin sessions
     const dangerousPatterns: Array<[RegExp, string]> = [
       // Process/service control
-      [/systemctl\s+.*(restart|stop|start|kill|daemon-reload).*mach6/i, 'Cannot control Symbiote service'],
+      [/systemctl\s+.*(restart|stop|start|kill|daemon-reload).*symbiote/i, 'Cannot control Symbiote service'],
       [/kill\s+(-9\s+)?(\d+|%|\$)/i, 'Cannot kill processes'],
       [/pkill|killall/i, 'Cannot kill processes'],
       
@@ -141,7 +143,7 @@ const noDangerousCommands: SandboxRule = {
       [/cat\s+.*\.env\b/i, 'Cannot read environment files'],
       [/cat\s+.*credentials/i, 'Cannot read credential files'],
       [/cat\s+.*\.private\/credentials/i, 'Cannot read credentials'],
-      [/cat\s+.*\.ava-private\/credentials/i, 'Cannot read credentials'],
+      [/cat\s+.*\.symbiote\/credentials/i, 'Cannot read credentials'],
     ];
 
     for (const [pattern, reason] of dangerousPatterns) {
@@ -167,7 +169,7 @@ const noSensitiveReads: SandboxRule = {
       /\.env$/,
       /credentials\.(json|md|txt)$/,
       /\.private\/credentials/,
-      /\.ava-private\/credentials/,
+      /\.symbiote\/credentials/,
       /\.ssh\//,
       /\.gnupg\//,
     ];

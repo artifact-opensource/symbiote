@@ -73,13 +73,13 @@ let config: Config = {
   apiKeys: {},
 };
 
-// Agent identity (from mach6.json)
+// Agent identity (from symbiote.json)
 let agentName = 'Agent';
 let agentEmoji = '🤖';
 
-const configPath = path.resolve(process.cwd(), 'mach6.json');
+const configPath = path.resolve(process.cwd(), 'symbiote.json');
 
-// Load config from mach6.json if exists
+// Load config from symbiote.json if exists
 try {
   const loaded = loadConfig();
   if (loaded.name) agentName = loaded.name;
@@ -190,9 +190,9 @@ async function streamChat(
 
   try {
     // Proxy to real HTTP API (port 3006) which runs through the actual agent pipeline
-    const apiPort = parseInt(process.env.MACH6_API_PORT ?? String((config as any).apiPort ?? process.env.MACH6_PORT ?? 3006), 10);
-    const apiHost = process.env.MACH6_API_HOST ?? String((config as any).apiHost ?? '127.0.0.1');
-    const apiKey = process.env.MACH6_API_KEY ?? process.env.API_KEY ?? '';
+    const apiPort = parseInt(process.env.SYMBIOTE_API_PORT ?? String((config as any).apiPort ?? process.env.SYMBIOTE_PORT ?? 3006), 10);
+    const apiHost = process.env.SYMBIOTE_API_HOST ?? String((config as any).apiHost ?? '127.0.0.1');
+    const apiKey = process.env.SYMBIOTE_API_KEY ?? process.env.API_KEY ?? '';
     const payload = JSON.stringify({ sessionId, message: userMessage, senderId: 'webchat-owner', source: 'webchat' });
 
     const apiRes = await new Promise<http.IncomingMessage>((resolve, reject) => {
@@ -557,6 +557,6 @@ export function startWebServer(port = 3006, host = '127.0.0.1'): http.Server {
 // Run directly
 const __filename = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(__filename)) {
-  const port = parseInt(process.env.MACH6_PORT ?? String((config as any).webPort ?? 3009), 10);
+  const port = parseInt(process.env.SYMBIOTE_PORT ?? String((config as any).webPort ?? 3009), 10);
   startWebServer(port);
 }

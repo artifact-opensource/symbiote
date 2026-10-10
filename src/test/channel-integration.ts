@@ -39,7 +39,7 @@ async function simulateAgentTurn(envelope: BusEnvelope): Promise<{
   systemPromptLength: number;
   responseText: string;
 }> {
-  const config = loadConfig('mach6.json');
+  const config = loadConfig('symbiote.json');
 
   // Tool registry (same as daemon)
   const toolRegistry = new ToolRegistry();

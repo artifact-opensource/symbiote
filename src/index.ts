@@ -81,7 +81,7 @@ async function main() {
   const oneShot = args.find(a => !a.startsWith('--'));
 
   const config = loadConfig(configPath);
-  process.env.MACH6_WORKSPACE ??= config.workspace;
+  process.env.SYMBIOTE_WORKSPACE ??= config.workspace;
 
   // Mutable provider/model for mid-session switching
   let currentProviderName = providerArg ?? config.defaultProvider;

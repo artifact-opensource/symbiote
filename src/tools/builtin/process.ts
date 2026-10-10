@@ -3,7 +3,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { ToolDefinition } from '../types.js';
-import { shellCommand } from '../../runtime/platform.js';
+import { killProcessTree, shellCommand } from '../../runtime/platform.js';
 
 export interface ManagedProcess {
   id: string;
@@ -28,6 +28,7 @@ export class ProcessManager {
 
     const shell = shellCommand(command);
     const proc = spawn(shell.file, shell.args, {
+      windowsHide: true,
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env },
@@ -72,8 +73,12 @@ export class ProcessManager {
     const p = this.processes.get(id);
     if (!p) return false;
     p.killed = true;
-    try { p.proc.kill('SIGTERM'); } catch { /* already dead */ }
-    setTimeout(() => { try { p.proc.kill('SIGKILL'); } catch { /* */ } }, 3000);
+    if (process.platform === 'win32') {
+      killProcessTree(p.proc);
+    } else {
+      try { p.proc.kill('SIGTERM'); } catch { /* already dead */ }
+      setTimeout(() => { try { p.proc.kill('SIGKILL'); } catch { /* */ } }, 3000);
+    }
     return true;
   }
 

@@ -82,10 +82,10 @@ DISCORD_BOT_TOKEN=
 DISCORD_CLIENT_ID=
 
 # HTTP API authentication
-MACH6_API_KEY=
+SYMBIOTE_API_KEY=
 
 # Port (default: 3006)
-MACH6_PORT=3006
+SYMBIOTE_PORT=3006
 ```
 
 > Run `npx symbiote init` for the guided CLI setup, or `npx symbiote init --ui` for the desktop installer UI. See [Setup Flow](wizard.md).

@@ -24,14 +24,14 @@ let failed = 0;
 let total = 0;
 
 function setup() {
-  testDir = path.join('/tmp', `mach6-mem-test-${Date.now()}`);
+  testDir = path.join('/tmp', `symbiote-mem-test-${Date.now()}`);
   fs.mkdirSync(testDir, { recursive: true });
-  process.env.MACH6_WORKSPACE = testDir;
+  process.env.SYMBIOTE_WORKSPACE = testDir;
 }
 
 function teardown() {
   try { fs.rmSync(testDir, { recursive: true, force: true }); } catch { /* */ }
-  delete process.env.MACH6_WORKSPACE;
+  delete process.env.SYMBIOTE_WORKSPACE;
 }
 
 function assert(condition: boolean, message: string): void {
@@ -92,7 +92,7 @@ function testVdbCore() {
     'Ali built the research lab with two heads — philosophical frameworks and bare-metal genesis.',
     'The Context Store bridges attention and memory — truncated messages get absorbed into VDB.',
     'COMB provides lossless session-to-session context through staging and recall.',
-    'Mach6 is the sixth sense — the agent runtime that powers everything.',
+    'Symbiote is the sixth sense — the agent runtime that powers everything.',
     'The Two-Point Theorem states that intelligence requires two sequential observations.',
     'Dead Drop uses HMAC-SHA256 for unsigned frame authentication.',
     'Net2Net growth expands neural networks by duplicating and perturbing neurons.',

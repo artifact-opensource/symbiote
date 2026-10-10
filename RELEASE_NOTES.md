@@ -10,7 +10,7 @@ This release prepares Symbiote for broader production deployment and public pack
 
 - **Core shell tools now use platform-aware shells** instead of assuming `sh -c`
 - **Background process execution is portable** across Windows, Linux, and macOS
-- **IPC keyring lookup no longer assumes `/etc/mach6`** and now respects portable app-home resolution
+- **IPC keyring lookup no longer assumes `/etc/symbiote`** and now respects portable app-home resolution
 - **Copilot token cache paths are unified** through shared runtime path helpers
 - **Voice reply temp files use `os.tmpdir()`** instead of raw Unix temp paths
 
@@ -24,7 +24,7 @@ This release prepares Symbiote for broader production deployment and public pack
 ### Installer, Launchers, and Packaging
 
 - Hardened packaged/runtime asset discovery for installer and browser flows
-- Preserved legacy `mach6` compatibility while preparing current Symbiote release assets
+- Preserved legacy `symbiote` compatibility while preparing current Symbiote release assets
 - Updated install guidance to use **`npm install -g symbiote`**
 - Prepared the repository for **v4.0.0 Apex** packaging and maintainer release publishing
 

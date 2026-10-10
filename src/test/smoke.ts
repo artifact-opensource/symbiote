@@ -31,7 +31,7 @@ async function main() {
 
   // 1. Config
   console.log('── Config ──');
-  const config = loadConfig('mach6.json');
+  const config = loadConfig('symbiote.json');
   assert(!!config.defaultProvider, 'Config loads');
   assert(config.defaultProvider === 'github-copilot', `Provider: ${config.defaultProvider}`);
   assert(config.defaultModel === 'claude-sonnet-4', `Model: ${config.defaultModel}`);
@@ -50,11 +50,11 @@ async function main() {
 
   // 3. Tool Execution (direct)
   console.log('\n── Tool Execution ──');
-  const readResult = await registry.execute('read', { path: 'mach6.json' });
+  const readResult = await registry.execute('read', { path: 'symbiote.json' });
   assert(readResult.includes('github-copilot'), 'read tool executes');
 
-  const execResult = await registry.execute('exec', { command: 'echo MACH6_ALIVE' });
-  assert(execResult.includes('MACH6_ALIVE'), 'exec tool executes');
+  const execResult = await registry.execute('exec', { command: 'echo SYMBIOTE_ALIVE' });
+  assert(execResult.includes('SYMBIOTE_ALIVE'), 'exec tool executes');
 
   const writeResult = await registry.execute('write', { path: path.join(os.tmpdir(), 'symbiote-test.txt'), content: 'smoke test' });
   assert(writeResult.includes('success') || writeResult.includes('wrote') || !writeResult.includes('error'), 'write tool executes');
@@ -65,8 +65,8 @@ async function main() {
   try {
     // Test by making a minimal streaming call
     const testMessages: Message[] = [
-      { role: 'system', content: 'You are a test. Respond with exactly: MACH6_OK' },
-      { role: 'user', content: 'Respond with exactly: MACH6_OK' },
+      { role: 'system', content: 'You are a test. Respond with exactly: SYMBIOTE_OK' },
+      { role: 'user', content: 'Respond with exactly: SYMBIOTE_OK' },
     ];
     const provConfig: ProviderConfig = {
       model: config.defaultModel,
@@ -96,8 +96,8 @@ async function main() {
   console.log('\n── Agent Loop (tool use) ──');
   try {
     const messages: Message[] = [
-      { role: 'system', content: 'You are Symbiote smoke test. Use the read tool to read mach6.json, then respond with the defaultModel value. Be brief.' },
-      { role: 'user', content: 'Read mach6.json and tell me the defaultModel.' },
+      { role: 'system', content: 'You are Symbiote smoke test. Use the read tool to read symbiote.json, then respond with the defaultModel value. Be brief.' },
+      { role: 'user', content: 'Read symbiote.json and tell me the defaultModel.' },
     ];
     const provConfig: ProviderConfig = {
       model: config.defaultModel,

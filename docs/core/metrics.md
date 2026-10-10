@@ -18,7 +18,7 @@ Zero-dependency runtime observability: provider latency histograms, token usage,
 import { getMetrics } from './metrics/collector';
 
 const metrics = getMetrics({
-  metricsDir: '.mach6/metrics',   // Optional. Default: <cwd>/.mach6/metrics
+  metricsDir: '.symbiote/metrics',   // Optional. Default: <cwd>/.symbiote/metrics
   flushIntervalMs: 300_000,       // Optional. Default: 5 minutes
   version: '2.1.0',               // Optional. Default: '2.0.0'
 });
@@ -136,7 +136,7 @@ const snap: MetricsSnapshot = metrics.snapshot(
 Metrics are flushed every **5 minutes** (default) to:
 
 ```
-.mach6/metrics/metrics-YYYY-MM-DD.jsonl
+.symbiote/metrics/metrics-YYYY-MM-DD.jsonl
 ```
 
 Each flush appends one JSON line (one `MetricsSnapshot` object). Files are rotated after **7 days** — older `.jsonl` files are deleted automatically on each flush.

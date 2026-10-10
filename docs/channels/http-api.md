@@ -10,7 +10,7 @@ Send a message and receive the agent's response.
 
 **Headers:**
 ```
-Authorization: Bearer <MACH6_API_KEY>
+Authorization: Bearer <SYMBIOTE_API_KEY>
 Content-Type: application/json
 ```
 
@@ -73,10 +73,10 @@ Relay a message to WhatsApp (bridge mode).
 
 ## Authentication
 
-Set `MACH6_API_KEY` in your `.env` file. All API requests require a valid Bearer token.
+Set `SYMBIOTE_API_KEY` in your `.env` file. All API requests require a valid Bearer token.
 
 ```bash
-MACH6_API_KEY=your-secret-key
+SYMBIOTE_API_KEY=your-secret-key
 ```
 
 ## Web UI

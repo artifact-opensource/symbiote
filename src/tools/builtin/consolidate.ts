@@ -9,7 +9,7 @@ import type { ToolDefinition } from '../types.js';
 import { getSharedVectorDB } from '../../memory/vdb.js';
 
 function getWorkspace(): string {
-  return process.env.MACH6_WORKSPACE ?? process.cwd();
+  return process.env.SYMBIOTE_WORKSPACE ?? process.cwd();
 }
 
 function formatEntries(entries: Array<{ text: string; timestamp: number }>): string[] {

@@ -9,7 +9,7 @@
  *   stop        — Stop a running daemon
  *   restart     — Restart the daemon
  *   status      — Show daemon status + session info
- *   configure   — Edit mach6.json interactively
+ *   configure   — Edit symbiote.json interactively
  *   agent       — Interactive REPL (default if no subcommand)
  *   logs        — Tail daemon logs
  *   install     — Install, build, configure, and optionally launch
@@ -41,7 +41,7 @@ const VERSION = APP_VERSION;
 // ── Helpers ────────────────────────────────────────────────────
 
 function getPidFile(): string {
-  return path.join(process.cwd(), '.mach6.pid');
+  return path.join(process.cwd(), '.symbiote.pid');
 }
 
 function getLogFile(): string {
@@ -126,7 +126,7 @@ async function cmdHelp() {
   console.log(`  ${palette.dim}One-shot:${palette.reset} symbiote agent ${palette.cyan}"your question here"${palette.reset}`);
   console.log();
   console.log(`  ${palette.dim}Options:${palette.reset}`);
-  console.log(`    ${palette.cyan}--config=${palette.reset}${palette.silver}<path>${palette.reset}      Path to mach6.json`);
+  console.log(`    ${palette.cyan}--config=${palette.reset}${palette.silver}<path>${palette.reset}      Path to symbiote.json`);
   console.log(`    ${palette.cyan}--provider=${palette.reset}${palette.silver}<name>${palette.reset}    Override default provider`);
   console.log(`    ${palette.cyan}--model=${palette.reset}${palette.silver}<name>${palette.reset}       Override default model`);
   console.log(`    ${palette.cyan}--session=${palette.reset}${palette.silver}<id>${palette.reset}       Use specific session`);
@@ -201,7 +201,7 @@ async function cmdInstall() {
   execSync('npm run build', { cwd: PROJECT_ROOT, stdio: 'inherit' });
   console.log(ok('Build complete'));
 
-  const configPath = path.join(process.cwd(), 'mach6.json');
+  const configPath = path.join(process.cwd(), 'symbiote.json');
   const envPath = path.join(process.cwd(), '.env');
 
   if (!skipSetup) {
@@ -216,7 +216,7 @@ async function cmdInstall() {
     const { runInteractiveSetup } = await import('./setup.js');
     await runInteractiveSetup(configPath, envPath);
   } else if (!fs.existsSync(configPath)) {
-    console.log(warn('No mach6.json found. Re-run without --skip-setup to create one.'));
+    console.log(warn('No symbiote.json found. Re-run without --skip-setup to create one.'));
     console.log();
     return;
   }
@@ -252,7 +252,7 @@ async function cmdStart() {
 
   const configPath = getConfigPath();
   if (!configPath) {
-    console.log(fail('No mach6.json found. Run mach6 init first.'));
+    console.log(fail('No symbiote.json found. Run symbiote init first.'));
     console.log();
     return;
   }
@@ -397,7 +397,7 @@ async function cmdConfigure() {
 
   const configPath = getConfigPath();
   if (!configPath) {
-    console.log(fail('No mach6.json found. Run mach6 init to create one.'));
+    console.log(fail('No symbiote.json found. Run symbiote init to create one.'));
     console.log();
     return;
   }

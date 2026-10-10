@@ -2,7 +2,7 @@
 """
 GLADIUS → Ollama-compatible API server
 Serves Phoenix Ultimate checkpoint as an OpenAI-compatible chat endpoint.
-This lets Plug (and eventually Mach6) talk to GLADIUS natively.
+This lets Plug (and eventually Symbiote) talk to GLADIUS natively.
 
 Endpoint: POST /v1/chat/completions (OpenAI-compatible)
 Also:     POST /api/generate (Ollama-compatible)

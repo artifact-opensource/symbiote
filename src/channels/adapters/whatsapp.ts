@@ -153,7 +153,7 @@ export class WhatsAppAdapter extends BaseAdapter {
         // Auto-open web UI in browser after successful connection (Windows/Mac only — not headless servers)
         if (process.platform === 'win32' || process.platform === 'darwin') {
           try {
-            const configPath = path.join(process.cwd(), 'mach6.json');
+            const configPath = path.join(process.cwd(), 'symbiote.json');
             const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
             const port = cfg.apiPort ?? 3006;
             const webUrl = `http://localhost:${port}`;

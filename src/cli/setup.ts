@@ -206,11 +206,11 @@ export function buildEnvFile(input: SetupInput, existingEnv: Record<string, stri
     `DISCORD_BOT_TOKEN=${input.discordEnabled ? (input.discordToken ?? existingEnv.DISCORD_BOT_TOKEN ?? '') : ''}`,
     `DISCORD_CLIENT_ID=${input.discordEnabled ? (input.discordBotId ?? existingEnv.DISCORD_CLIENT_ID ?? '') : ''}`,
     '',
-    `MACH6_API_KEY=${existingEnv.MACH6_API_KEY || crypto.randomBytes(32).toString('hex')}`,
-    `MACH6_API_PORT=${input.apiPort}`,
-    `MACH6_API_HOST=${input.apiHost}`,
-    `MACH6_PORT=${input.webPort}`,
-    `MACH6_WEB_HOST=${input.webHost}`,
+    `SYMBIOTE_API_KEY=${existingEnv.SYMBIOTE_API_KEY || crypto.randomBytes(32).toString('hex')}`,
+    `SYMBIOTE_API_PORT=${input.apiPort}`,
+    `SYMBIOTE_API_HOST=${input.apiHost}`,
+    `SYMBIOTE_PORT=${input.webPort}`,
+    `SYMBIOTE_WEB_HOST=${input.webHost}`,
     '',
   ];
 

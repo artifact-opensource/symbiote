@@ -8,7 +8,7 @@ Built-in web interface for interacting with your Symbiote agent directly from a 
 http://localhost:3009
 ```
 
-The port is configurable via `webPort` in `mach6.json` (default: `3009`).
+The port is configurable via `webPort` in `symbiote.json` (default: `3009`).
 
 ## Features
 
@@ -94,7 +94,7 @@ data: {"tokensIn": 150, "tokensOut": 89, "latencyMs": 1230}
 }
 ```
 
-Agent identity is pulled from `mach6.json`:
+Agent identity is pulled from `symbiote.json`:
 
 ```jsonc
 {

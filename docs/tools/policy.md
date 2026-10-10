@@ -22,7 +22,7 @@ interface SessionPolicy {
 | `simple` | 10 | Quick questions, lookups |
 | `complex` | 50 | Multi-step tasks, code generation |
 
-If not specified, the global `maxIterations` from `mach6.json` applies.
+If not specified, the global `maxIterations` from `symbiote.json` applies.
 
 ## Resource Budgets
 
@@ -38,7 +38,7 @@ interface ResourceBudget {
 }
 ```
 
-Configure in `mach6.json`:
+Configure in `symbiote.json`:
 
 ```json
 {

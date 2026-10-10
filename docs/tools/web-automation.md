@@ -125,7 +125,7 @@ User: "Check our GitHub repos and tell me which has the most recent commit"
 Agent: web_browse("https://github.com/Artifact-Virtual")
        -> Gets list of repositories with last update times
        
-Agent: "Found 4 repos. mach6 was updated 2 hours ago, 
+Agent: "Found 4 repos. symbiote was updated 2 hours ago, 
         singularity 4 hours ago, cthulu 1 hour ago. 
         Cthulu has the most recent commit."
 

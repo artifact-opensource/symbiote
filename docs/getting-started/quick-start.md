@@ -26,7 +26,7 @@ Output:
 ## 2. Start the Daemon
 
 ```bash
-node dist/gateway/daemon.js --config=mach6.json
+node dist/gateway/daemon.js --config=symbiote.json
 ```
 
 You'll see the [boot sequence](../core/boot-sequence.md):
@@ -53,7 +53,7 @@ You'll see the [boot sequence](../core/boot-sequence.md):
 ## Manual Setup (Without Wizard)
 
 ```bash
-cp mach6.example.json symbiote.json
+cp symbiote.example.json symbiote.json
 cp .env.example .env
 ```
 
@@ -78,7 +78,7 @@ GROQ_API_KEY=gsk_your_key_here
 ```
 
 ```bash
-node dist/index.js --config=mach6.json
+node dist/index.js --config=symbiote.json
 ```
 
 This gives you a CLI agent with file tools, shell access, and web fetch — no Discord or WhatsApp needed.
@@ -88,5 +88,5 @@ This gives you a CLI agent with file tools, shell access, and web fetch — no D
 Same commands. Symbiote is fully cross-platform:
 
 ```powershell
-node dist\gateway\daemon.js --config=mach6.json
+node dist\gateway\daemon.js --config=symbiote.json
 ```

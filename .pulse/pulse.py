@@ -48,7 +48,7 @@ def _run_vdb(workspace: str, action: str, *args: str, timeout: int = 30) -> str:
 
     env = os.environ.copy()
     env["SYMBIOTE_WORKSPACE"] = str(workspace_path)
-    env["MACH6_WORKSPACE"] = str(workspace_path)
+    env["SYMBIOTE_WORKSPACE"] = str(workspace_path)
     result = _sp.run(
         [env.get("NODE", "node"), str(script), action, *args],
         capture_output=True,
@@ -226,7 +226,7 @@ class PulseConfig:
 
     # Symbiote HTTP API for work turns
     symbiote_url: str = field(default_factory=lambda: os.environ.get("SYMBIOTE_API_URL", "http://127.0.0.1:3006/api/v1/chat"))
-    api_key: str = field(default_factory=lambda: os.environ.get("MACH6_API_KEY", os.environ.get("API_KEY", "")))
+    api_key: str = field(default_factory=lambda: os.environ.get("SYMBIOTE_API_KEY", os.environ.get("API_KEY", "")))
 
     # Timing
     idle_delay_sec: int = 600        # 10 min after last conversation → first triage
@@ -637,8 +637,8 @@ def execute_work(config: PulseConfig, task: str, log: logging.Logger) -> Optiona
         comb_flush(config.workspace, log, reason=f"work timeout: {task[:60]}")
         return None
     except httpx.ConnectError:
-        log.error("Work API connection refused (Mach6 down?). Flushing COMB.")
-        comb_flush(config.workspace, log, reason="work connection refused (Mach6 down)")
+        log.error("Work API connection refused (Symbiote down?). Flushing COMB.")
+        comb_flush(config.workspace, log, reason="work connection refused (Symbiote down)")
         return None
     except Exception as e:
         log.error(f"Work execution failed: {e}")
@@ -651,16 +651,16 @@ def execute_work(config: PulseConfig, task: str, log: logging.Logger) -> Optiona
 def get_last_activity(config: PulseConfig) -> float:
     """Get timestamp of last human activity (message to the agent).
     
-    Checks Mach6 session files for most recent human message.
+    Checks Symbiote session files for most recent human message.
     Falls back to the activity file PULSE maintains.
     """
     latest = 0.0
 
     # Check session directory for recent activity
-    configured_sessions = os.environ.get("SYMBIOTE_SESSIONS_DIR") or os.environ.get("MACH6_SESSIONS_DIR")
+    configured_sessions = os.environ.get("SYMBIOTE_SESSIONS_DIR") or os.environ.get("SYMBIOTE_SESSIONS_DIR")
     sessions_dirs = [Path(configured_sessions)] if configured_sessions else [
         Path(config.workspace) / ".sessions",
-        Path.home() / ".mach6" / "sessions",
+        Path.home() / ".symbiote" / "sessions",
     ]
     for sessions_dir in sessions_dirs:
         if not sessions_dir.exists():
@@ -789,7 +789,7 @@ class Pulse:
             env_path = Path(self.config.workspace) / ".env"
             if env_path.exists():
                 for line in env_path.read_text().splitlines():
-                    if line.startswith("MACH6_API_KEY="):
+                    if line.startswith("SYMBIOTE_API_KEY="):
                         self.config.api_key = line.split("=", 1)[1].strip().strip('"')
                         break
 

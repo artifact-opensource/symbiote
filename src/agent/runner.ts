@@ -40,6 +40,17 @@ export interface RunnerConfig {
   onEvent?: (event: StreamEvent) => void;
   onToolStart?: (name: string, input: Record<string, unknown>) => void;
   onToolEnd?: (name: string, result: string) => void;
+  /** Called after each iteration's tool results so callers can persist work even if a later LLM call throws. */
+  onCheckpoint?: (messages: Message[]) => void;
+}
+
+const MAX_STREAM_RETRIES = 3;
+const MAX_EMPTY_NUDGES = 2;
+
+function isTransientStreamError(err: unknown): boolean {
+  const e = err as { name?: string; message?: string; cause?: { code?: string } } | undefined;
+  const text = `${e?.name ?? ''} ${e?.message ?? ''} ${e?.cause?.code ?? ''}`;
+  return /terminated|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR|fetch failed|socket|premature|TimeoutError|network/i.test(text);
 }
 
 export type RunnerProgressEvent =
@@ -102,6 +113,7 @@ export async function runAgent(
   let textAccum = '';
   let completionReviewPending = false;
   let completionReviewUsed = false;
+  let emptyNudges = 0;
   const todoManager = new TodoManager({ scope: config.todoScope ?? `run-${randomUUID()}`, workspace: process.cwd() });
 
   const ensureTodoPlan = () => {
@@ -261,33 +273,17 @@ export async function runAgent(
       ...(config.abortSignal ? { signal: config.abortSignal } : {}),
     };
 
-    let stream;
-    try {
-      stream = config.provider.stream(truncated, tools, effectiveProviderConfig);
-    } catch (err) {
-      // If stream creation fails (e.g., abort during setup), return partial
-      if (config.abortSignal?.aborted) {
-        console.log(`[runner] Aborted during stream setup at iteration ${iterations}. Returning partial result.`);
-        return {
-          text: '',
-          messages: currentMessages,
-          toolCalls: allToolCalls,
-          iterations,
-          maxIterationsHit: false,
-          aborted: true,
-          temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined,
-        };
-      }
-      markTodoBlocked(err instanceof Error ? err.message : String(err));
-      throw err;
-    }
-
-    // Collect response
+    // Collect response (transient mid-stream failures are retried so one dropped connection cannot kill a long run)
     const pendingToolCalls: ToolCall[] = [];
     const toolInputBuffers = new Map<string, string>(); // id → accumulated JSON string
     let currentToolId = '';
 
+    for (let attempt = 0; ; attempt++) {
+    pendingToolCalls.length = 0;
+    toolInputBuffers.clear();
+    textAccum = '';
     try {
+      const stream = config.provider.stream(truncated, tools, effectiveProviderConfig);
       for await (const event of stream) {
         config.onEvent?.(event);
 
@@ -330,6 +326,7 @@ export async function runAgent(
           pendingToolCalls.push({ id: event.id, name: event.name, input: {}, extra: event.extra });
         }
       }
+      break;
     } catch (err) {
       // Stream interrupted (abort, network error, etc.)
       if (config.abortSignal?.aborted) {
@@ -344,8 +341,15 @@ export async function runAgent(
           temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined,
         };
       }
+      if (attempt < MAX_STREAM_RETRIES && isTransientStreamError(err)) {
+        const waitMs = 1000 * 2 ** attempt;
+        console.warn(`[runner] Stream failed at iteration ${iterations} (${err instanceof Error ? err.message : err}); retry ${attempt + 1}/${MAX_STREAM_RETRIES} in ${waitMs}ms`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
       markTodoBlocked(err instanceof Error ? err.message : String(err));
       throw err;
+    }
     }
 
     const streamElapsed = Date.now() - streamStartTime;
@@ -377,6 +381,14 @@ export async function runAgent(
         continue;
       }
 
+      // An empty reply after tool work means the model stalled, not finished
+      if (!textAccum.trim() && allToolCalls.length > 0 && emptyNudges < MAX_EMPTY_NUDGES) {
+        emptyNudges++;
+        console.warn(`[runner] Empty reply at iteration ${iterations} after ${allToolCalls.length} tool calls — nudging (${emptyNudges}/${MAX_EMPTY_NUDGES})`);
+        currentMessages.push({ role: 'user', content: 'Your last reply was empty. If the task is finished, state the result briefly; otherwise continue with the next tool call.' });
+        continue;
+      }
+
       for (const task of todoManager.list()) {
         if (task.status === 'in_progress' || task.status === 'pending') {
           todoManager.updateTask(task.id, { status: 'completed' });
@@ -392,6 +404,7 @@ export async function runAgent(
       tool_calls: pendingToolCalls,
     };
     currentMessages.push(assistantMsg);
+    textAccum = '';
 
     // Execute tool calls concurrently and append results
     const MAX_RESULT_SIZE = 50 * 1024; // 50KB
@@ -436,6 +449,7 @@ export async function runAgent(
     // Track recent tool names for ATM classification in next iteration
     recentToolNames = pendingToolCalls.map(tc => tc.name);
     completionReviewPending = false;
+    try { config.onCheckpoint?.(currentMessages); } catch { /* persistence must not break the loop */ }
 
     // Check abort after tool execution before next LLM call
     if (config.abortSignal?.aborted) {

@@ -21,14 +21,11 @@ import { pythonCommand } from '../runtime/platform.js';
 const execFileAsync = promisify(execFile);
 
 // Python environments
-const WORKSPACE = process.env.MACH6_WORKSPACE ?? process.cwd();
-const VOICE_PYTHON = process.env.SYMBIOTE_VOICE_PYTHON
-  ?? process.env.MACH6_VOICE_PYTHON;
+const WORKSPACE = process.env.SYMBIOTE_WORKSPACE ?? process.cwd();
+const VOICE_PYTHON = process.env.SYMBIOTE_VOICE_PYTHON;
 const VOICE_DIR = process.env.SYMBIOTE_VOICE_DIR
-  ?? process.env.MACH6_VOICE_DIR
   ?? path.join(WORKSPACE, 'voice');
 const SPEAK_SCRIPT = process.env.SYMBIOTE_SPEAK_SCRIPT
-  ?? process.env.MACH6_SPEAK_SCRIPT
   ?? path.join(VOICE_DIR, 'speak.py');
 
 function pythonExec(scriptPath: string, executable?: string): { file: string; args: string[] } {

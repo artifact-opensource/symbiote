@@ -94,7 +94,7 @@ Pre-routes messages to optimal providers based on task type detection (simple_qa
 ## 🚀 Upgrade
 
 ```bash
-npm install -g symbiote-core@4.0.0
+npm install -g symbiote@4.0.0
 ```
 
 Or pull the repo and run `./symbiote.sh`.

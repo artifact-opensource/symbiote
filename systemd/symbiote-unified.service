@@ -1,0 +1,15 @@
+[Unit]
+Description=Symbiote Unified Daemon
+After=network.target
+
+[Service]
+Type=simple
+# Install as a user unit: ~/.config/systemd/user/, with the project at ~/symbiote
+WorkingDirectory=%h/symbiote
+ExecStart=/usr/bin/env node dist/daemon/unified-daemon.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target

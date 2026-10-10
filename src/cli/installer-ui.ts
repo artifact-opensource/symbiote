@@ -29,7 +29,7 @@ function json(res: http.ServerResponse, data: unknown, status = 200): void {
 }
 
 function toSetupInput(payload: Record<string, unknown>): SetupInput {
-  const existing = fs.existsSync(path.resolve('mach6.json')) ? loadConfig(path.resolve('mach6.json')) : undefined;
+  const existing = fs.existsSync(path.resolve('symbiote.json')) ? loadConfig(path.resolve('symbiote.json')) : undefined;
   const defaults = defaultSetupInput(existing);
   const bool = (value: unknown, fallback = false) => value === true || value === 'true' || (value === undefined ? fallback : false);
   const num = (value: unknown, fallback: number) => {
@@ -97,7 +97,7 @@ function clientErrorMessage(err: unknown): string {
 }
 
 export async function startInstallerUi(port = 3010): Promise<http.Server> {
-  const existing = fs.existsSync(path.resolve('mach6.json')) ? loadConfig(path.resolve('mach6.json')) : undefined;
+  const existing = fs.existsSync(path.resolve('symbiote.json')) ? loadConfig(path.resolve('symbiote.json')) : undefined;
   const defaults = defaultSetupInput(existing);
   const htmlPath = installerHtmlCandidates.find(candidate => fs.existsSync(candidate));
   if (!htmlPath) {

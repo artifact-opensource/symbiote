@@ -5,7 +5,7 @@
 #
 # Usage:
 #   .\symbiote.ps1 start
-#   .\symbiote.ps1 status --config=mach6.json
+#   .\symbiote.ps1 status --config=symbiote.json
 #   .\symbiote.ps1                (interactive REPL)
 
 $ErrorActionPreference = 'Stop'
