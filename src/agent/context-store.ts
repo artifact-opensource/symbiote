@@ -249,6 +249,7 @@ export class ContextStore {
       if (text.startsWith('[Context compacted') || text.startsWith('[Emergency context flush')) continue;
       if (text.includes('BLINK APPROACHING') || text.includes('BLINK COMPLETE')) continue;
       if (text.includes('SYSTEM WARNING:') && text.includes('Wrap up NOW')) continue;
+      if (text.includes('Internal completion review:')) continue;
 
       // Deduplicate — hash the content
       const contentKey = `${msg.role}:${text.slice(0, 200)}`;

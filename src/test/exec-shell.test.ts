@@ -20,3 +20,23 @@ test('sandbox grants full access by default', () => {
   });
   assert.equal(tier, 'admin');
 });
+
+test('POSIX-style commands work whichever shell the host defaults to', async () => {
+  const chained = String(await execTool.execute({ command: 'echo one && echo two' }));
+  assert.match(chained, /one/);
+  assert.match(chained, /two/);
+  const piped = String(await execTool.execute({ command: 'echo alpha beta | head -n 1' }));
+  assert.match(piped, /alpha beta/);
+});
+
+test('PowerShell syntax still works on Windows and a shell can be forced', async () => {
+  if (process.platform !== 'win32') return;
+  assert.match(String(await execTool.execute({ command: 'Write-Output ps-ok' })), /ps-ok/);
+  assert.match(String(await execTool.execute({ command: 'Write-Output forced', shell: 'powershell' })), /forced/);
+});
+
+test('failed commands carry a hint that exec itself is healthy', async () => {
+  if (process.platform !== 'win32') return;
+  const out = String(await execTool.execute({ command: 'Get-DefinitelyNotACommand', shell: 'powershell' }));
+  assert.match(out, /exec is working/);
+});

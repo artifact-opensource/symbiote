@@ -1,49 +1,64 @@
 # Configuration
 
-Symbiote uses `symbiote.json` for agent settings and `.env` for secrets. Legacy config filenames remain discoverable for migration compatibility.
+Symbiote uses `symbiote.json` for agent settings and `.env` for secrets. Run `symbiote upgrade` to bring an older file to the current format. Editors that support JSON Schema get completion and validation from the bundled `symbiote.schema.json`.
 
 ## symbiote.json
 
+The setup flow writes every section below. Values shown are the defaults.
+
 ```jsonc
 {
-  // LLM Settings
+  "$schema": "./symbiote.schema.json",
+  "configVersion": 2,
+
+  "name": "Symbiote",
+  "emoji": "🤖",
+
+  // Model
   "defaultProvider": "openrouter",
   "defaultModel": "openrouter/free",
+  "fallbackProviders": [],
+  "temperature": 0.7,
   "maxTokens": 8192,
   "maxIterations": 50,
-  "temperature": 0.3,
-  "timeouts": { "llmRequestMs": 900000 },
+  "adaptiveTemperature": { "adaptive": false, "default": 0.5, "logChanges": false },
 
-  // Workspace — agent's working directory for file operations
-  // Use forward slashes on all platforms (Windows: "C:/Users/you/workspace")
-  "workspace": "/home/you/workspace",
+  // Paths are relative to this file
+  "workspace": ".",
   "sessionsDir": ".sessions",
+  "ownerIds": [],
 
-  // Provider configuration
+  // Network
+  "apiHost": "127.0.0.1",
+  "apiPort": 3006,
+  "webHost": "127.0.0.1",
+  "webPort": 3009,
+  "allowedOrigins": ["http://127.0.0.1:3009", "http://localhost:3009"],
+
+  // Runtime
+  "toolProgress": true,
+  "tools": { "enabled": true },
+  "timeouts": { "llmRequestMs": 900000 },
+  "heartbeat": { "activeIntervalMin": 30, "idleIntervalMin": 120, "sleepingIntervalMin": 360, "quietHoursStart": 23, "quietHoursEnd": 8 },
+
+  // Secrets are ${VAR} references resolved from .env
   "providers": {
-    "openrouter": { "baseUrl": "https://openrouter.ai/api/v1" },
-    "groq": { "baseUrl": "https://api.groq.com/openai" },
-    "anthropic": {},
-    "openai": {},
-    "gemini": {},
-    "xai": {},
-    "ollama": { "baseUrl": "http://127.0.0.1:11434" },
+    "openrouter": { "baseUrl": "https://openrouter.ai/api/v1", "apiKey": "${OPENROUTER_API_KEY}", "timeoutMs": 600000 },
+    "anthropic": { "apiKey": "${ANTHROPIC_API_KEY}" },
+    "openai": { "apiKey": "${OPENAI_API_KEY}" },
+    "gemini": { "apiKey": "${GEMINI_API_KEY}" },
+    "groq": { "baseUrl": "https://api.groq.com/openai", "apiKey": "${GROQ_API_KEY}" },
+    "xai": { "apiKey": "${XAI_API_KEY}" },
+    "nvidia": { "apiKey": "${NVIDIA_API_KEY}" },
     "github-copilot": {},
+    "ollama": { "baseUrl": "http://127.0.0.1:11434" },
     "gladius": { "baseUrl": "http://127.0.0.1:8741" }
   },
 
-  // Owner IDs — users with full access (bypasses policies)
-  "ownerIds": [
-    "your-discord-user-id",
-    "your-phone@s.whatsapp.net"
-  ],
+  "discord": { "enabled": false, "token": "${DISCORD_BOT_TOKEN}", "botId": "${DISCORD_CLIENT_ID}", "policy": { "dmPolicy": "allowlist", "groupPolicy": "mention-only", "requireMention": true, "allowedSenders": [], "allowedGroups": [], "ownerIds": [] } },
+  "whatsapp": { "enabled": false, "authDir": "~/.symbiote/whatsapp-auth", "autoRead": true, "markOnline": true, "policy": { "dmPolicy": "allowlist", "groupPolicy": "mention-only", "allowedSenders": [], "allowedGroups": [], "ownerIds": [] } },
 
-  // Channel configuration (see Channels section for details)
-  "discord": { "enabled": true, "..." : "..." },
-  "whatsapp": { "enabled": true, "..." : "..." },
-
-  // HTTP API port
-  "apiPort": 3006
+  "orchestrator": { "enabled": false }
 }
 ```
 

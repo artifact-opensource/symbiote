@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/artifact-opensource/symbiote/symbiote.schema.json",
+  "title": "Symbiote configuration",
+  "description": "symbiote.json. String values may reference environment variables as ${VAR}; keep secrets in .env.",
+  "type": "object",
+  "required": ["defaultProvider", "defaultModel"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "configVersion": { "type": "integer", "minimum": 1, "description": "Config format version. Run `symbiote upgrade` to migrate." },
+    "name": { "type": "string", "description": "Agent display name." },
+    "emoji": { "type": "string", "description": "Agent emoji used in channels." },
+
+    "defaultProvider": { "type": "string", "description": "Provider id used for new turns.", "examples": ["openrouter", "anthropic", "openai", "gemini", "groq", "xai", "nvidia", "github-copilot", "ollama", "gladius"] },
+    "defaultModel": { "type": "string", "description": "Model id passed to the default provider." },
+    "fallbackProviders": { "type": "array", "items": { "type": "string" }, "description": "Providers tried in order when the primary fails." },
+    "temperature": { "type": "number", "minimum": 0, "maximum": 2 },
+    "maxTokens": { "type": "integer", "minimum": 1, "description": "Max output tokens per LLM call." },
+    "maxIterations": { "type": "integer", "minimum": 1, "description": "Tool-loop iterations per pass before BLINK continues the turn." },
+    "adaptiveTemperature": {
+      "type": "object",
+      "description": "Adaptive Temperature Modulation: per-task temperature profiles.",
+      "properties": {
+        "adaptive": { "type": "boolean" },
+        "default": { "type": "number", "minimum": 0, "maximum": 2 },
+        "logChanges": { "type": "boolean" },
+        "profile": { "type": "object", "additionalProperties": { "type": "number", "minimum": 0, "maximum": 2 } }
+      }
+    },
+
+    "workspace": { "type": "string", "description": "Workspace directory, relative to this file." },
+    "sessionsDir": { "type": "string", "description": "Session storage directory, relative to this file." },
+    "ownerIds": { "type": "array", "items": { "type": "string" }, "description": "Channel user ids with owner privileges." },
+
+    "apiHost": { "type": "string", "default": "127.0.0.1" },
+    "apiPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "webHost": { "type": "string", "default": "127.0.0.1" },
+    "webPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "allowedOrigins": { "type": "array", "items": { "type": "string" }, "description": "CORS origins. Wildcards are rejected when the API is not bound to loopback." },
+
+    "toolProgress": { "type": "boolean", "description": "Show live tool progress in chat channels." },
+    "tools": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+    "timeouts": { "type": "object", "properties": { "llmRequestMs": { "type": "integer", "minimum": 1000 } }, "additionalProperties": { "type": "integer", "minimum": 1000 } },
+    "heartbeat": {
+      "type": "object",
+      "properties": {
+        "activeIntervalMin": { "type": "integer", "minimum": 1 },
+        "idleIntervalMin": { "type": "integer", "minimum": 1 },
+        "sleepingIntervalMin": { "type": "integer", "minimum": 1 },
+        "quietHoursStart": { "type": "integer", "minimum": 0, "maximum": 23 },
+        "quietHoursEnd": { "type": "integer", "minimum": 0, "maximum": 23 }
+      }
+    },
+
+    "providers": {
+      "type": "object",
+      "description": "Per-provider settings.",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "apiKey": { "type": "string", "description": "Use ${PROVIDER_API_KEY} and store the value in .env." },
+          "baseUrl": { "type": "string", "format": "uri" },
+          "model": { "type": "string" },
+          "timeoutMs": { "type": "integer", "minimum": 1000 },
+          "contextWindow": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+
+    "discord": { "$ref": "#/definitions/channel" },
+    "whatsapp": {
+      "allOf": [{ "$ref": "#/definitions/channel" }],
+      "properties": {
+        "authDir": { "type": "string", "description": "Credential directory. Keep outside the repository." },
+        "phoneNumber": { "type": "string", "description": "Digits only, with country code." },
+        "autoRead": { "type": "boolean" },
+        "markOnline": { "type": "boolean" }
+      }
+    },
+
+    "orchestrator": { "type": "object", "properties": { "enabled": { "type": "boolean" } }, "additionalProperties": true },
+    "budgets": { "type": "object", "additionalProperties": { "type": "object", "properties": { "dailyLimit": { "type": "number", "minimum": 1 }, "perRun": { "type": "number" } } } },
+    "channels": { "type": "object", "additionalProperties": { "type": "object" } }
+  },
+  "additionalProperties": true,
+  "definitions": {
+    "channel": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "token": { "type": "string" },
+        "botId": { "type": "string" },
+        "policy": {
+          "type": "object",
+          "properties": {
+            "dmPolicy": { "enum": ["allowlist", "open", "closed"] },
+            "groupPolicy": { "enum": ["mention-only", "allowlist", "open", "closed"] },
+            "requireMention": { "type": "boolean" },
+            "allowedSenders": { "type": "array", "items": { "type": "string" } },
+            "allowedGroups": { "type": "array", "items": { "type": "string" } },
+            "ownerIds": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    }
+  }
+}

@@ -3,7 +3,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { ToolDefinition } from '../types.js';
-import { killProcessTree, shellCommand } from '../../runtime/platform.js';
+import { killProcessTree, shellCommand, type ShellKind } from '../../runtime/platform.js';
 
 export interface ManagedProcess {
   id: string;
@@ -22,11 +22,11 @@ export interface ManagedProcess {
 export class ProcessManager {
   private processes = new Map<string, ManagedProcess>();
 
-  start(command: string, workdir?: string, sessionId?: string): ManagedProcess {
+  start(command: string, workdir?: string, sessionId?: string, kind: ShellKind = 'auto'): ManagedProcess {
     const id = randomUUID().slice(0, 8);
     const cwd = workdir ?? process.cwd();
 
-    const shell = shellCommand(command);
+    const shell = shellCommand(command, false, kind);
     const proc = spawn(shell.file, shell.args, {
       windowsHide: true,
       cwd,

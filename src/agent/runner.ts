@@ -227,8 +227,9 @@ export async function runAgent(
     if (config.abortSignal?.aborted) {
       const reason = config.abortSignal.reason ?? 'aborted';
       console.log(`[runner] Aborted at iteration ${iterations}: ${reason}. Returning partial result for state preservation.`);
+      const lastUserMsg = [...currentMessages].reverse().find(m => m.role === 'user');
       return {
-        text: '',
+        text: lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : '') : '',
         messages: currentMessages,
         toolCalls: allToolCalls,
         iterations,
@@ -404,7 +405,23 @@ export async function runAgent(
       // Only worth a review when the turn actually did tool-backed work that
       // could be incomplete — skip it for plain conversational replies
       // (greetings, Q&A) and never run it more than once per turn.
-      const needsReview = !completionReviewPending && !completionReviewUsed && allToolCalls.length > 0;
+      // Persist completionReviewUsed in contextStore to survive restarts
+      let completionReviewUsedPersisted = completionReviewUsed;
+      if (config.contextStore && config.sessionId) {
+        const reviewKey = `completion-review-used:${config.sessionId}`;
+        // Check if we've already done a review for this session
+        // We store this as a simple absorbed message marker
+        try {
+          // Query vdb for our review marker
+          const results = config.contextStore['vdb']?.search(reviewKey, 1);
+          if (results && results.length > 0) {
+            completionReviewUsedPersisted = true;
+          }
+        } catch (e) {
+          // Ignore, fall back to local flag
+        }
+      }
+      const needsReview = !completionReviewPending && !completionReviewUsedPersisted && allToolCalls.length > 0;
       if (needsReview) {
         const candidate = textAccum.trim();
         if (candidate) currentMessages.push({ role: 'assistant', content: candidate });
@@ -415,6 +432,19 @@ export async function runAgent(
         textAccum = '';
         completionReviewPending = true;
         completionReviewUsed = true;
+        // Persist the review flag so it survives restarts
+        if (config.contextStore && config.sessionId) {
+          const reviewKey = `completion-review-used:${config.sessionId}`;
+          const doc = {
+            id: '',
+            text: reviewKey,
+            source: 'session-meta',
+            role: 'system',
+            timestamp: Date.now(),
+            sessionId: config.sessionId,
+          };
+          try { config.contextStore['vdb']?.index(doc); } catch (e) { /* ignore */ }
+        }
         continue;
       }
 
@@ -502,8 +532,9 @@ export async function runAgent(
     if (config.abortSignal?.aborted) {
       const reason = config.abortSignal.reason ?? 'aborted';
       console.log(`[runner] Aborted after tool execution at iteration ${iterations}: ${reason}. Returning partial result.`);
+      const lastUserMsg = [...currentMessages].reverse().find(m => m.role === 'user');
       return {
-        text: '',
+        text: lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : '') : '',
         messages: currentMessages,
         toolCalls: allToolCalls,
         iterations,

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { getSarsiPrompt } from '../sarsi/index.js';
 import { listSkillSummaries } from '../memory/skills.js';
 import os from 'node:os';
+import { describeShell } from '../runtime/platform.js';
 
 export interface SystemPromptParams {
   workspace: string;
@@ -88,6 +89,7 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
     `- Timezone: ${tz}`,
     `- Host: ${os.hostname()}`,
     `- OS: ${os.platform()} ${os.arch()}`,
+    `- Shell: ${describeShell()}`,
     `- Workspace: ${params.workspace}`,
     `- Channel: ${params.channel ?? 'unknown'}`,
     `- Chat type: ${params.chatType ?? 'unknown'}`,
@@ -122,6 +124,8 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
       `You have access to: ${params.tools.join(', ')}`,
       '',
       'Call tools when needed. For file operations, use read/write. For shell commands, use exec.',
+      'You run with full admin access to this machine: any file, process, device and network resource. exec is never sandboxed or blocked.',
+      'If a command fails with "not recognized" or a parser error, that is a syntax mismatch for the current shell, not a broken tool. Fix the syntax or pass exec shell="bash"|"powershell"; do not report exec as non-functional.',
       'Be resourceful — look things up before asking.',
     ].join('\n'));
   }

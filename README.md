@@ -44,7 +44,7 @@ node dist/index.js start
 node dist/index.js status
 ```
 
-The setup flow creates `symbiote.json` and `.env`. Keep API keys and channel tokens in `.env`; do not commit them.
+The setup flow creates `symbiote.json` (with a JSON Schema for editor support) and `.env`. Keep API keys and channel tokens in `.env`; config files reference them as `${VAR}`. Upgrading from an older version? Run `node dist/index.js upgrade`.
 
 ## Configuration
 
@@ -101,18 +101,23 @@ node dist/cli/vdb-maintenance.js stage "Remember this for the next session"
 
 The gateway can connect configured Discord and WhatsApp adapters and expose an HTTP API. Channel access policies and owner IDs are configured in `symbiote.json`.
 
-Built-in tools cover file reading/writing/editing, shell and background process management, web fetching/browsing, native browser CUA (viewport screenshot, coordinate pointer, keyboard, and scroll), image analysis, messaging, sub-agents, speech, persistent memory, and session continuity. CUA controls the Playwright browser, not the host OS desktop. The CLI and gateway display the actual number of tools registered for that process; the set can differ when tools or channels are disabled.
+Built-in tools cover unrestricted file reading, writing, editing and filesystem management (`fs`), hardware inspection (`hardware`), shell and background process management, web fetching/browsing, native browser CUA (viewport screenshot, coordinate pointer, keyboard, and scroll), image analysis, messaging, sub-agents, speech, persistent memory, and session continuity. The agent runs with full admin access to the machine; set `SYMBIOTE_SANDBOX=1` to restore per-session restrictions. On Windows, `exec` runs PowerShell and routes POSIX-style commands (`ls -la`, `grep`, `&&`) to Git Bash when it is installed; pass `shell` to force one. CUA controls the Playwright browser, not the host OS desktop. The CLI and gateway display the actual number of tools registered for that process; the set can differ when tools or channels are disabled.
 
 Agent tool calls run with bounded concurrency. Long tasks can continue across iteration budgets, and completion is reviewed before the runner accepts a final answer. Discord input queued during an active turn is processed in order.
 
 ## CLI
 
 ```bash
-node dist/index.js                 # interactive REPL
-node dist/index.js "Summarize this" # one-shot prompt
-node dist/index.js help
-node dist/index.js status
+symbiote                    # interactive agent (REPL)
+symbiote agent "Summarize"  # one-shot prompt
+symbiote start | stop | restart | status | logs [-f]
+symbiote init [--ui]        # guided setup (terminal or browser)
+symbiote configure          # edit common settings
+symbiote upgrade            # migrate symbiote.json to the current format
+symbiote help
 ```
+
+Output is quiet by default. Set `SYMBIOTE_LOG=debug` to show internal subsystem logs.
 
 REPL commands include `/help`, `/tools`, `/history`, `/model`, `/provider`, `/spawn`, `/status`, `/sessions`, `/clear`, and `/quit`. During an active turn, plain text or `/queue <text>` queues the next message; `/steer <text>` cancels the current request and resumes with new guidance; `/interrupt` stops the turn and saves partial state. The prompt shows cumulative provider-reported token usage for the active session, not current context size.
 

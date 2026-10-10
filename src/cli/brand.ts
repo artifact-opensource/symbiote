@@ -5,6 +5,8 @@
  * Built by Artifact Virtual.
  */
 
+import { RELEASE_CODENAME } from '../meta/version.js';
+
 // ── ANSI 256-Color + True Color Helpers ─────────────────────────
 
 // True color: \x1b[38;2;r;g;bm (foreground)
@@ -94,27 +96,64 @@ export function multiGradient(text: string, stops: [number, number, number][]): 
 
 // ── ASCII Art ───────────────────────────────────────────────────
 
-/**
- * Compact connected-node mark for startup and help surfaces.
- */
+/** Brand gradient: indigo → violet → cyan. */
+export const BRAND_STOPS: [number, number, number][] = [[99, 102, 241], [168, 85, 247], [34, 211, 238]];
+
+const WORDMARK = [
+  '╔═╗╦ ╦╔╦╗╔╗ ╦╔═╗╔╦╗╔═╗',
+  '╚═╗╚╦╝║║║╠╩╗║║ ║ ║ ║╣ ',
+  '╚═╝ ╩ ╩ ╩╚═╝╩╚═╝ ╩ ╚═╝',
+];
+
+/** Per-character gradient shifted by row so the wordmark shimmers diagonally. */
+function shimmer(line: string, row: number, rows: number, width: number): string {
+  const chars = [...line];
+  return chars.map((ch, i) => {
+    if (ch === ' ') return ch;
+    const t = Math.min(1, (i + row * 3) / (width + (rows - 1) * 3));
+    const seg = t < 0.5 ? 0 : 1;
+    const local = seg === 0 ? t * 2 : (t - 0.5) * 2;
+    const a = BRAND_STOPS[seg];
+    const b = BRAND_STOPS[seg + 1];
+    return `${rgb(Math.round(a[0] + (b[0] - a[0]) * local), Math.round(a[1] + (b[1] - a[1]) * local), Math.round(a[2] + (b[2] - a[2]) * local))}${ch}`;
+  }).join('') + palette.reset;
+}
+
+/** Gradient wordmark for startup and help surfaces. */
 export function banner(): string {
-  const mark = gradient('◇─◈─◇', [82, 91, 164], [145, 153, 224]);
-  const name = gradient('SYMBIOTE', [82, 91, 164], [145, 153, 224]);
-  return `  ${mark}  ${palette.bold}${name}${palette.reset}`;
+  const width = Math.max(...WORDMARK.map(l => [...l].length));
+  return WORDMARK.map((line, row) => `  ${palette.bold}${shimmer(line, row, WORDMARK.length, width)}`).join('\n');
 }
 
 /**
  * Compact one-line logo for prompts and headers.
  */
 export function logo(): string {
-  return `${palette.bold}${gradient('◇ Symbiote', [82, 91, 164], [145, 153, 224])}${palette.reset}`;
+  return `${palette.bold}${multiGradient('◈ Symbiote', BRAND_STOPS)}${palette.reset}`;
+}
+
+/** Gradient section title with a hairline rule: "◈ STATUS ─────". */
+export function heading(title: string): string {
+  const text = title.toUpperCase();
+  const rule = palette.dark + '─'.repeat(Math.max(4, 44 - text.length)) + palette.reset;
+  return `  ${palette.violet}◈${palette.reset} ${palette.bold}${multiGradient(text, BRAND_STOPS)}${palette.reset} ${rule}`;
+}
+
+/** Dim hint line. */
+export function hint(text: string): string {
+  return `  ${palette.dim}${text}${palette.reset}`;
+}
+
+/** Inline command reference, e.g. `symbiote start`. */
+export function cmd(text: string): string {
+  return `${palette.cyan}${text}${palette.reset}`;
 }
 
 export function createActivityIndicator() {
   const enabled = process.stdout.isTTY === true && process.env.TERM !== 'dumb';
-  const frames = ['◇', '◈', '◆', '◈'];
+  const frames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
   let frame = 0;
-  let label = 'Thinking';
+  let label = 'thinking';
   let timer: ReturnType<typeof setInterval> | undefined;
 
   const render = () => {
@@ -161,7 +200,7 @@ export function box(lines: string[], opts?: {
   const innerWidth = opts?.width ?? Math.max(...contentWidths, titleWidth) + padding * 2;
 
   const top = opts?.title
-    ? `${borderColor}╭─ ${palette.reset}${opts.title}${borderColor} ${'─'.repeat(Math.max(0, innerWidth - stripAnsi(opts.title).length - 3))}╮${palette.reset}`
+    ? `${borderColor}╭─ ${palette.reset}${opts.title}${borderColor} ${'─'.repeat(Math.max(0, innerWidth - stripAnsi(opts.title).length - 1))}╮${palette.reset}`
     : `${borderColor}╭${'─'.repeat(innerWidth + 2)}╮${palette.reset}`;
   const bottom = `${borderColor}╰${'─'.repeat(innerWidth + 2)}╯${palette.reset}`;
 
@@ -177,9 +216,7 @@ export function box(lines: string[], opts?: {
 // ── Section Headers ─────────────────────────────────────────────
 
 export function sectionHeader(title: string): string {
-  const gradTitle = gradient(title, [138, 43, 226], [0, 229, 255]);
-  const line = palette.dim + '─'.repeat(Math.max(0, 52 - title.length)) + palette.reset;
-  return `\n  ${palette.bold}${gradTitle}${palette.reset} ${line}\n`;
+  return `\n${heading(title)}\n`;
 }
 
 export function subHeader(text: string): string {
@@ -215,7 +252,7 @@ export function progressBar(current: number, total: number, width = 30): string 
   const filled = Math.round(width * ratio);
   const empty = width - filled;
 
-  const bar = gradient('█'.repeat(filled), [138, 43, 226], [0, 229, 255])
+  const bar = gradient('█'.repeat(filled), BRAND_STOPS[0], BRAND_STOPS[2])
     + palette.dark + '░'.repeat(empty) + palette.reset;
 
   return `  ${bar} ${palette.silver}${current}/${total}${palette.reset}`;
@@ -223,9 +260,12 @@ export function progressBar(current: number, total: number, width = 30): string 
 
 // ── Key-Value Display ───────────────────────────────────────────
 
+export function kv(key: string, value: string, keyWidth = 14): string {
+  return `${palette.silver}${key.padEnd(keyWidth)}${palette.reset} ${value}`;
+}
+
 export function kvLine(key: string, value: string, keyWidth = 14): string {
-  const paddedKey = key.padEnd(keyWidth);
-  return `  ${palette.silver}${paddedKey}${palette.reset} ${value}`;
+  return `  ${kv(key, value, keyWidth)}`;
 }
 
 // ── Dividers ────────────────────────────────────────────────────
@@ -235,23 +275,22 @@ export function divider(width = 56): string {
 }
 
 export function thickDivider(width = 56): string {
-  return `  ${gradient('━'.repeat(width), [75, 0, 130], [0, 188, 212])}`;
+  return `  ${gradient('━'.repeat(width), BRAND_STOPS[0], BRAND_STOPS[2])}`;
 }
 
 // ── Tagline ─────────────────────────────────────────────────────
 
 export function tagline(): string {
-  return subHeader('A local-first agent runtime');
+  return subHeader('local-first agent runtime');
 }
 
 // ── Version Banner (for boot/startup) ───────────────────────────
 
 export function versionBanner(version: string): string {
-  const ver = `v${version}`;
   return [
     '',
     banner(),
-    `  ${palette.silver}A local-first agent runtime${palette.reset}  ${palette.dim}·${palette.reset}  ${palette.gold}${ver}${palette.reset}`,
+    `  ${palette.silver}local-first agent runtime${palette.reset} ${palette.dark}·${palette.reset} ${multiGradient(`v${version}`, BRAND_STOPS)} ${palette.dark}·${palette.reset} ${palette.dim}${RELEASE_CODENAME.toLowerCase()}${palette.reset}`,
     '',
   ].join('\n');
 }

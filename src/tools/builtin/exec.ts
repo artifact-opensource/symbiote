@@ -3,11 +3,13 @@
 import { spawn } from 'node:child_process';
 import { getProcessManager } from './process.js';
 import type { ToolDefinition } from '../types.js';
-import { isWindows, killProcessTree, shellCommand, wrapPtyCommand } from '../../runtime/platform.js';
+import { describeShell, hintForFailure, isWindows, killProcessTree, shellCommand, wrapPtyCommand, type ShellKind } from '../../runtime/platform.js';
+
+const SHELLS: ShellKind[] = ['auto', 'powershell', 'bash', 'cmd'];
 
 export const execTool: ToolDefinition = {
   name: 'exec',
-  description: 'Execute a shell command and return its output (stdout + stderr). Set background=true to run in background (returns process ID for polling).',
+  description: `Execute a shell command and return its output (stdout + stderr). Set background=true to run in background (returns process ID for polling). ${describeShell()}`,
   parameters: {
     type: 'object',
     properties: {
@@ -16,6 +18,8 @@ export const execTool: ToolDefinition = {
       timeout: { type: 'number', description: 'Timeout in seconds (default 600, ignored if background)' },
       background: { type: 'boolean', description: 'Run in background (returns process ID)' },
       pty: { type: 'boolean', description: 'Wrap in pseudo-TTY via script command' },
+      shell: { type: 'string', enum: SHELLS, description: 'Shell to use (default auto: picks by command syntax)' },
+      env: { type: 'object', description: 'Extra environment variables for this command' },
     },
     required: ['command'],
   },
@@ -24,11 +28,14 @@ export const execTool: ToolDefinition = {
     const workdir = (input.workdir as string) ?? process.cwd();
     const background = input.background as boolean ?? false;
     const pty = input.pty as boolean ?? false;
+    const requested = String(input.shell ?? 'auto') as ShellKind;
+    const kind: ShellKind = SHELLS.includes(requested) ? requested : 'auto';
+    const extraEnv = (input.env && typeof input.env === 'object' ? input.env : {}) as Record<string, string>;
 
     // Background mode: delegate to process manager
     if (background) {
       const mgr = getProcessManager();
-      const p = mgr.start(command, workdir);
+      const p = mgr.start(command, workdir, undefined, kind);
       return JSON.stringify({ processId: p.id, pid: p.pid, status: 'running' });
     }
 
@@ -36,7 +43,7 @@ export const execTool: ToolDefinition = {
 
     // PTY wrapping: use `script` to allocate a pseudo-terminal
     const actualCommand = pty ? wrapPtyCommand(command) : command;
-    const shell = shellCommand(actualCommand);
+    const shell = shellCommand(actualCommand, false, kind);
 
     return new Promise<string>((resolve) => {
       const chunks: Buffer[] = [];
@@ -46,6 +53,7 @@ export const execTool: ToolDefinition = {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
           ...process.env,
+          ...extraEnv,
           TERM: pty && !isWindows() ? 'xterm-256color' : (process.env.TERM ?? 'dumb'),
         },
       });
@@ -62,7 +70,11 @@ export const execTool: ToolDefinition = {
         clearTimeout(timer);
         let output = Buffer.concat(chunks).toString('utf-8');
         if (output.length > 100_000) output = output.slice(0, 100_000) + '\n... (truncated)';
-        if (code !== 0) output += `\nExit code: ${code}`;
+        if (code !== 0) {
+          output += `\nExit code: ${code}`;
+          const hint = hintForFailure(command, output);
+          if (hint) output += `\n${hint}`;
+        }
         resolve(output);
       });
 

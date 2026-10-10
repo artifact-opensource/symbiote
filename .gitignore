@@ -2,7 +2,8 @@
 node_modules/
 dist/
 build/
-/web/
+/web/*
+!/web/installer.html
 coverage/
 test-results/
 playwright-report/

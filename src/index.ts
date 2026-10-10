@@ -2,6 +2,7 @@
 // Symbiote — CLI Entry Point
 // AI agent framework · Artifact Virtual
 import 'dotenv/config';
+import './cli/log-filter.js';
 
 // Route CLI subcommands (init, start, stop, status, configure, install, logs, etc.)
 // Falls through to REPL if no recognized subcommand.
@@ -52,7 +53,7 @@ import type { Message } from './providers/types.js';
 import type { Session } from './sessions/types.js';
 import {
   palette, gradient, multiGradient, banner, logo, tagline,
-  sectionHeader, ok, warn, info, kvLine, divider, thickDivider,
+  sectionHeader, heading, ok, warn, info, kvLine, divider, thickDivider,
   versionBanner, box, createActivityIndicator,
 } from './cli/brand.js';
 import { APP_VERSION } from './meta/version.js';
@@ -75,6 +76,7 @@ const providers = new Map<string, Provider>([
 // ─── Main ───
 async function main() {
   const args = process.argv.slice(2);
+  if (args[0]?.toLowerCase() === 'agent') args.shift();
   const configPath = args.find(a => a.startsWith('--config='))?.split('=')[1];
   const sessionId = args.find(a => a.startsWith('--session='))?.split('=')[1] ?? 'default';
   const providerArg = args.find(a => a.startsWith('--provider='))?.split('=')[1];
@@ -167,12 +169,15 @@ async function main() {
   // ── Branded CLI Header ──────────────────────────────────────
 
   console.log(versionBanner(APP_VERSION));
-
-  const providerDisplay = `${palette.cyan}${currentProvider!.name}${palette.reset}${palette.dim}/${palette.reset}${palette.white}${currentModel}${palette.reset}`;
-   console.log(`  ${palette.violet}●${palette.reset} ${providerDisplay}`);
-   console.log(`  ${palette.dim}${registry.list().length} tools${palette.reset}  ${palette.dim}·${palette.reset} ${palette.silver}session ${sessionId}${palette.reset}  ${palette.dim}· /help${palette.reset}`);
+  console.log(`  ${palette.cyan}${currentProvider!.name}${palette.reset}${palette.dim} / ${palette.reset}${palette.white}${currentModel}${palette.reset}  ${palette.dark}·${palette.reset}  ${palette.dim}${registry.list().length} tools · session ${sessionId} · /help${palette.reset}`);
   console.log();
-   console.log(divider(42));
+
+  const toolStarts: Array<{ name: string; at: number; detail: string }> = [];
+  const describeCall = (input: Record<string, unknown>): string => {
+    const raw = input.command ?? input.path ?? input.url ?? input.query ?? input.action ?? input.task ?? '';
+    const text = String(raw).replace(/\s+/g, ' ').trim();
+    return text.length > 56 ? `${text.slice(0, 55)}…` : text;
+  };
 
   const runWithCallbacks = async (msgs: Message[], provConfig: ProviderConfig, abortSignal?: AbortSignal) => {
     const activity = createActivityIndicator();
@@ -207,27 +212,30 @@ async function main() {
         contextStore,
         abortSignal,
         onProgress() {},
+        onCheckpoint(messages) { session.messages = messages; sessionMgr.save(session); },
         onEvent(ev) {
           if (ev.type === 'usage') {
             sessionMgr.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
           }
         },
-        onToolStart(name) {
-          activity.stop();
+        onToolStart(name, input) {
           sessionMgr.trackToolCall(session, name);
-           console.log(`  ${palette.violet}◈ ${name}${palette.reset}`);
-          activity.start(`Running ${name}`);
+          toolStarts.push({ name, at: Date.now(), detail: describeCall(input) });
+          activity.start(name);
         },
         onToolEnd(name, result) {
+          const index = toolStarts.findIndex(t => t.name === name);
+          const started = index >= 0 ? toolStarts.splice(index, 1)[0] : { name, at: Date.now(), detail: '' };
+          const failed = /^Error\b|"is_error":\s*true/.test(result);
+          const ms = Date.now() - started.at;
+          const timing = ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
           activity.stop();
-           const failed = result.includes('"is_error":true');
-           const status = failed ? `${palette.red}failed${palette.reset}` : `${palette.green}done${palette.reset}`;
-           console.log(`  ${palette.dim}${name}${palette.reset} ${status}`);
+          console.log(`  ${failed ? `${palette.red}✗` : `${palette.green}✓`}${palette.reset} ${palette.white}${name}${palette.reset}${started.detail ? ` ${palette.dim}${started.detail}${palette.reset}` : ''} ${palette.dark}${timing}${palette.reset}`);
           activity.start();
         },
       });
       activity.stop();
-      if (result.text) process.stdout.write(`${palette.green}>${palette.reset} ${result.text}`);
+      if (result.text) process.stdout.write(`\n${palette.violet}◈${palette.reset} ${result.text}`);
       return result;
     } catch (err) {
       activity.stop();
@@ -255,8 +263,7 @@ async function main() {
 
     if (trimmed === '/help') {
       console.log();
-      const helpTitle = gradient('COMMANDS', [138, 43, 226], [0, 229, 255]);
-      console.log(`  ${palette.bold}${helpTitle}${palette.reset}`);
+      console.log(heading('COMMANDS'));
       console.log();
       const commands = [
         ['/tools',           'List available tools'],
@@ -282,17 +289,23 @@ async function main() {
 
     if (trimmed === '/tools') {
       console.log();
-      const toolTitle = gradient('TOOLS', [255, 193, 37], [255, 160, 0]);
-      console.log(`  ${palette.bold}${toolTitle}${palette.reset} ${palette.dim}(${registry.list().length})${palette.reset}`);
+      console.log(heading('TOOLS'));
       console.log();
       for (const t of registry.list()) {
-        console.log(`  ${palette.cyan}${t.name.padEnd(20)}${palette.reset}${palette.dim}${t.description}${palette.reset}`);
+        let shortDesc = t.description.substring(0, 80);
+        if (t.description.length > 80) {
+          shortDesc = shortDesc.slice(0, 77) + '...';
+        }
+        console.log(`  ${palette.cyan}${t.name.padEnd(20)}${palette.reset}${palette.dim}${shortDesc}${palette.reset}`);
       }
       console.log();
       return true;
     }
 
     if (trimmed.startsWith('/history')) {
+      console.log();
+      console.log(heading('HISTORY'));
+      console.log();
       const n = parseInt(trimmed.split(' ')[1] ?? '10', 10);
       const msgs = session.messages.filter(m => m.role !== 'system').slice(-n);
       console.log();
@@ -351,8 +364,7 @@ async function main() {
     if (trimmed === '/status') {
       const m = session.metadata;
       console.log();
-      const statusTitle = gradient('SESSION STATUS', [138, 43, 226], [0, 229, 255]);
-      console.log(`  ${palette.bold}${statusTitle}${palette.reset}`);
+      console.log(heading('SESSION STATUS'));
       console.log();
       console.log(kvLine('Session', `${palette.violet}${session.id}${palette.reset}${m.label ? ` (${m.label})` : ''}`));
       console.log(kvLine('Provider', `${palette.cyan}${m.provider ?? currentProviderName}${palette.reset}${palette.dim}/${palette.reset}${palette.white}${m.model ?? currentModel}${palette.reset}`));
@@ -368,8 +380,7 @@ async function main() {
     if (trimmed === '/sessions') {
       const sessions = sessionMgr.list();
       console.log();
-      const sessTitle = gradient('SESSIONS', [255, 193, 37], [255, 160, 0]);
-      console.log(`  ${palette.bold}${sessTitle}${palette.reset} ${palette.dim}(${sessions.length})${palette.reset}`);
+      console.log(heading('SESSIONS'));
       console.log();
       for (const s of sessions) {
         const label = s.label ? ` ${palette.dim}(${s.label})${palette.reset}` : '';

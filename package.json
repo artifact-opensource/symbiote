@@ -13,6 +13,7 @@
     "README.md",
     "LICENSE",
     "symbiote.example.json",
+    "symbiote.schema.json",
     ".env.example",
     "symbiote.sh",
     "symbiote.ps1",

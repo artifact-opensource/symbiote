@@ -1,54 +1,105 @@
 {
-  "defaultProvider": "groq",
-  "defaultModel": "llama-3.3-70b-versatile",
+  "$schema": "./symbiote.schema.json",
+  "configVersion": 2,
+  "name": "Symbiote",
+  "emoji": "🤖",
+  "defaultProvider": "openrouter",
+  "defaultModel": "openrouter/free",
+  "fallbackProviders": [],
+  "temperature": 0.7,
   "maxTokens": 8192,
-  "maxIterations": 25,
-  "temperature": 0.3,
+  "maxIterations": 50,
+  "adaptiveTemperature": {
+    "adaptive": false,
+    "default": 0.5,
+    "logChanges": false
+  },
   "workspace": ".",
   "sessionsDir": ".sessions",
+  "ownerIds": [],
+  "apiHost": "127.0.0.1",
+  "apiPort": 3006,
+  "webHost": "127.0.0.1",
+  "webPort": 3009,
+  "allowedOrigins": [
+    "http://127.0.0.1:3009",
+    "http://localhost:3009"
+  ],
+  "toolProgress": true,
+  "tools": {
+    "enabled": true
+  },
+  "timeouts": {
+    "llmRequestMs": 900000
+  },
+  "heartbeat": {
+    "activeIntervalMin": 30,
+    "idleIntervalMin": 120,
+    "sleepingIntervalMin": 360,
+    "quietHoursStart": 23,
+    "quietHoursEnd": 8
+  },
   "providers": {
-    "groq": {
-      "baseUrl": "https://api.groq.com/openai"
+    "openrouter": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKey": "${OPENROUTER_API_KEY}",
+      "timeoutMs": 600000
     },
-    "anthropic": {},
-    "openai": {},
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY}"
+    },
+    "openai": {
+      "apiKey": "${OPENAI_API_KEY}"
+    },
+    "gemini": {
+      "apiKey": "${GEMINI_API_KEY}"
+    },
+    "groq": {
+      "baseUrl": "https://api.groq.com/openai",
+      "apiKey": "${GROQ_API_KEY}"
+    },
+    "xai": {
+      "apiKey": "${XAI_API_KEY}"
+    },
+    "nvidia": {
+      "apiKey": "${NVIDIA_API_KEY}"
+    },
+    "github-copilot": {},
     "ollama": {
       "baseUrl": "http://127.0.0.1:11434"
     },
-    "xai": {},
-    "github-copilot": {},
     "gladius": {
       "baseUrl": "http://127.0.0.1:8741"
-    },
-    "nvidia": {
-      "baseUrl": "https://integrate.api.nvidia.com",
-      "model": "meta/llama-4-maverick-17b-128e-instruct"
     }
   },
-  "ownerIds": [],
   "discord": {
     "enabled": false,
     "token": "${DISCORD_BOT_TOKEN}",
     "botId": "${DISCORD_CLIENT_ID}",
-    "siblingBotIds": [],
     "policy": {
       "dmPolicy": "allowlist",
       "groupPolicy": "mention-only",
       "requireMention": true,
       "allowedSenders": [],
-      "allowedGroups": []
+      "allowedGroups": [],
+      "ownerIds": []
     }
   },
   "whatsapp": {
     "enabled": false,
     "authDir": "~/.symbiote/whatsapp-auth",
     "autoRead": true,
+    "markOnline": true,
     "policy": {
       "dmPolicy": "allowlist",
       "groupPolicy": "mention-only",
+      "requireMention": true,
       "allowedSenders": [],
-      "allowedGroups": []
+      "allowedGroups": [],
+      "ownerIds": []
     }
   },
-  "apiPort": 3006
+  "orchestrator": {
+    "enabled": false
+  }
 }
