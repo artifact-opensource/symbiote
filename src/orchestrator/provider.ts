@@ -1,6 +1,6 @@
 // Symbiote — Orchestrator Provider Wrapper
 // Exposes DualLLMOrchestrator as a standard Provider
-// Ported from Sirius B (Victus) — adapted for Symbiote's provider ecosystem
+// Orchestrator provider — adapted for Symbiote's provider ecosystem
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from '../providers/types.js';
 import { DualLLMOrchestrator, OrchestratorConfig } from './dual-llm.js';

@@ -6,9 +6,27 @@ Symbiote registers built-in tools according to enabled capabilities and channel 
 
 | Tool | Description |
 |------|-------------|
-| `read` | Read file contents with optional offset/limit for large files |
-| `write` | Create or overwrite files. Parent directories are created automatically |
+| `read` | Read any file on disk: text with offset/limit, directory listings, binary hex dumps, base64/hex bytes. Files over 10 MB are streamed |
+| `write` | Create, overwrite or append (`append`) to files; binary via `encoding: "base64"`. Parent directories are created automatically |
 | `edit` | Surgical find-and-replace editing. Matches exact text and replaces it |
+| `fs` | Filesystem management: list, stat, mkdir, move, copy, delete, chmod, symlink, and search by name or content |
+| `hardware` | Inspect CPU, memory, disks, GPU, network, USB, audio, camera, Bluetooth, displays, serial ports, battery, sensors and processes |
+
+All paths accept `~` and are not restricted to the workspace.
+
+### fs
+
+```json
+{ "action": "search", "path": "~/projects", "name": "\\.ts$", "content": "TODO" }
+```
+
+### hardware
+
+```json
+{ "kind": "gpu" }
+```
+
+Works on Windows (PowerShell/CIM), Linux and macOS. Use `exec` to change device state.
 
 ### read
 
@@ -48,7 +66,7 @@ Creates parent directories if they don't exist.
 { "command": "npm test", "timeout": 30, "workdir": "/home/user/project" }
 ```
 
-Returns stdout + stderr combined. Supports `background` mode for long-running processes and `pty` for pseudo-TTY wrapping.
+Returns stdout + stderr combined. Default timeout is 600 seconds. Commands run in PowerShell on Windows (`pwsh`, then `powershell`, then `cmd`) and `sh` elsewhere; set `SYMBIOTE_SHELL` to override. Supports `background` mode for long-running processes and `pty` for pseudo-TTY wrapping.
 
 ## Process Management
 

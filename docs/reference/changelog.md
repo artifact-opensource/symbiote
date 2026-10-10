@@ -1,5 +1,9 @@
 # Changelog
 
+## v5.2.0 — Admin Tools, Hardened Agent Loop (2026-10-10)
+
+See the repository [RELEASE_NOTES.md](../../RELEASE_NOTES.md) for the full list. Highlights: `fs` and `hardware` tools, unrestricted `read`/`write`, Windows-native shell execution, rebuilt prompt-injection guard, stream retry and tool timeouts, Curator tool-bug detection, Memograph integration.
+
 ## v3.0.0 — Meta-Cognitive Layer, 14 Providers, Self-Improvement (3.06-09-18)
 
 ### Features

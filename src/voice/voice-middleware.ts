@@ -127,7 +127,7 @@ export async function processVoiceInbound(envelope: BusEnvelope): Promise<Transc
 
 /**
  * Generate a voice reply OGG file from text.
- * Uses MeloTTS + OpenVoice (AVA's sovereign voice).
+ * Uses MeloTTS + OpenVoice.
  * 
  * Returns the path to the generated OGG file, or null on failure.
  */

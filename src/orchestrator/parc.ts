@@ -91,6 +91,7 @@ export async function assessRouting(
     response: string;
     userMessage: string;
     hadErrors: boolean;
+    toolResults?: Array<{ tool: string; success: boolean; error?: string }>;
   },
   channel: string,
 ): Promise<ParcAssessmentResult> {
@@ -162,6 +163,7 @@ export async function assessRouting(
     delivered: outcome.delivered,
     channel,
     routingWasOptimal,
+    toolResults: outcome.toolResults,
   });
 
   // 4. Feed outcome to Meta^n for recursive evaluation

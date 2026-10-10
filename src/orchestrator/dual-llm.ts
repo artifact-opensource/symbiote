@@ -1,6 +1,6 @@
 // Symbiote Dual-LLM Orchestrator
 // Cloud planner + local specialist execution with DAG parallelism
-// Ported from Sirius B (Victus) — adapted for Symbiote's provider ecosystem
+// Dual-LLM orchestrator — adapted for Symbiote's provider ecosystem
 
 import type { Message, ToolDef, StreamEvent, Provider, ProviderConfig, ToolCall } from '../providers/types.js';
 import { ToolRegistry } from '../tools/registry.js';
@@ -8,7 +8,7 @@ import { ToolRegistry } from '../tools/registry.js';
 export interface DAGNode {
   id: string;
   task: string;
-  model: string; // Any model key from localModels config (generalized from Sirius B's fixed set)
+  model: string; // Any model key from localModels config
   tools?: string[]; // List of tool names this node can use
   dependencies: string[];
   context?: Record<string, unknown>;

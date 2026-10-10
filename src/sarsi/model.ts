@@ -182,6 +182,10 @@ export class SarsiStore {
       try {
         const raw = readFileSync(this.filePath, 'utf-8');
         this.model = this.validate(raw);
+        if (/^ava$/i.test(this.model.identity.name)) {
+          this.model.identity = { ...this.model.identity, ...createDefaultSarsiModel().identity };
+          this.persist();
+        }
         console.log(`[SARSI] Loaded model v${this.model.version} — ${this.model.providerRules.length} provider rules, ${this.model.ruleHistory.length} history entries`);
         return this.model;
       } catch (err) {

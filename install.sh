@@ -38,7 +38,7 @@ BRANCH="main"
 
 echo ""
 echo -e "${MAGENTA}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║${NC}  ${BOLD}Symbiote v4.0${NC} — Desktop Installer           ${MAGENTA}║${NC}"
+echo -e "${MAGENTA}║${NC}  ${BOLD}Symbiote v5.2${NC} — Desktop Installer           ${MAGENTA}║${NC}"
 echo -e "${MAGENTA}║${NC}  ${CYAN}Apex${NC} · cross-platform setup              ${MAGENTA}║${NC}"
 echo -e "${MAGENTA}╚══════════════════════════════════════════════╝${NC}"
 echo ""

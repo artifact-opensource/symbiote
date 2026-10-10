@@ -1729,7 +1729,7 @@ export class SymbioteGateway {
    * This gives the next session lossless context of what was happening when the
    * process went down — conversations, directives, mid-task state.
    * 
-   * Global: every Symbiote instance (AVA, Aria, future) gets this automatically.
+   * Global: every Symbiote instance gets this automatically.
    */
   private async flushCombOnShutdown(tailMessages = 4): Promise<void> {
     try {

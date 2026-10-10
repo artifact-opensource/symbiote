@@ -34,6 +34,18 @@ All environment variables used by Symbiote. Set these in `.env` (auto-loaded at 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `SYMBIOTE_WORKSPACE` | No | Override workspace path (default: `cwd()`) |
+| `SYMBIOTE_HOME` | No | Override the app home directory (default: `~/.symbiote`) |
+
+## Runtime and Security
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SYMBIOTE_SANDBOX` | No | Set to `1` to enable owner/non-owner tool restrictions (default: off, every session has full access) |
+| `SYMBIOTE_INJECTION_GUARD` | No | `standard` (default), `strict` or `off` |
+| `SYMBIOTE_TOOL_TIMEOUT_MS` | No | Per-tool-call timeout (default: 900000) |
+| `SYMBIOTE_STREAM_IDLE_MS` | No | Silent-stream timeout before retry (default: 180000) |
+| `SYMBIOTE_SHELL` | No | Shell used by `exec` and background processes |
+| `SYMBIOTE_PYTHON` | No | Python interpreter used for sidecars |
 
 ## Resolution Order
 

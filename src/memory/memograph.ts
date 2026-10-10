@@ -41,12 +41,18 @@ function contentText(value: unknown): string {
     .join('\n');
 }
 
+/** Python's json.dumps escapes every char outside printable ASCII as \\uXXXX (ensure_ascii=True), as UTF-16 units. */
+function pyJsonString(value: string): string {
+  return JSON.stringify(value).replace(/[^\x20-\x7e]/g, ch => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
+}
+
 /** Deterministic JSON serialization matching Python's json.dumps(sort_keys=True, separators=(",", ":")). */
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
+  if (typeof value === 'string') return pyJsonString(value);
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   const keys = Object.keys(value as Record<string, unknown>).sort();
-  return `{${keys.map(k => `${JSON.stringify(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`).join(',')}}`;
+  return `{${keys.map(k => `${pyJsonString(k)}:${canonicalJson((value as Record<string, unknown>)[k])}`).join(',')}}`;
 }
 
 /**

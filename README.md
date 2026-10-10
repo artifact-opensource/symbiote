@@ -4,7 +4,7 @@
 
 **Persistent AI agent runtime for your workspace.**
 
-v4.0.0 · Node.js 20+ · TypeScript · MIT
+v5.2.0 · Node.js 20+ · TypeScript · MIT
 
 [Quick start](#quick-start) · [Configuration](#configuration) · [Memory](#memory) · [CLI](#cli)
 

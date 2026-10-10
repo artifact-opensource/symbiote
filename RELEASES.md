@@ -1,12 +1,13 @@
 # Symbiote Releases
 
-## Latest: v4.0.0 Apex (September 3, 2026)
-Windows-first production hardening release with cross-platform shell/path fixes, installer and launcher cleanup, packaged distribution prep, refreshed release assets, and a rebuilt static landing experience.
+## Latest: v5.2.0 Apex (October 10, 2026)
+Admin-grade tooling (`fs`, `hardware`, unrestricted `read`/`write`), Windows-native shell execution, a rebuilt prompt-injection guard, a resilient agent loop with stream retry and tool timeouts, Curator tool-bug detection and Memograph integration. Details: [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
 ## All Releases
 
 | Version | Date | Highlights |
 |---------|------|-----------|
+| **v5.2.0 Apex** | Oct 10, 2026 | Admin tools, Windows shell, injection guard rebuild, loop reliability, Curator bug detection, Memograph |
 | **v4.0.0 Apex** | Sep 3, 2026 | Windows-first runtime fixes, installer cleanup, packaging prep, docs + landing overhaul |
 | **v3.0.0 Apex** | Aug 23, 2026 | Production hardening, desktop installer UI, CLI install overhaul, release alignment |
 | **v2.1.0** | Mar 12, 2026 | Circuit breaker failover, hot resume, metrics, health endpoint |

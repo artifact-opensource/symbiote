@@ -1,5 +1,5 @@
 // Symbiote — OpenRouter Provider (OpenAI-compatible)
-// Ported from Sirius B (Victus) — adapted for Symbiote
+// OpenRouter provider for Symbiote
 
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
 import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';

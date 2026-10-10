@@ -19,7 +19,7 @@
  * Non-IPC requests (no x-ipc-agent-id header) pass through unaffected.
  * 
  * @module ipc-identity
- * @author AVA — Artifact Virtual
+ * @author Artifact Virtual
  * @created 2026-03-11
  */
 

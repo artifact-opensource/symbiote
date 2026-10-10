@@ -1,10 +1,10 @@
-// Symbiote — Memory System Tests
+// Symbiote â€” Memory System Tests
 //
 // Tests the unified VDB-backed memory system:
-//   1. VDB core — index, search, dedup, persistence, recent
-//   2. COMB → VDB integration — staging flows into VDB, recall reads from VDB
-//   3. Context Store — retrieval, absorption, boot ingest
-//   4. Edge cases — empty queries, huge docs, concurrent access
+//   1. VDB core â€” index, search, dedup, persistence, recent
+//   2. COMB â†’ VDB integration â€” staging flows into VDB, recall reads from VDB
+//   3. Context Store â€” retrieval, absorption, boot ingest
+//   4. Edge cases â€” empty queries, huge docs, concurrent access
 //
 // Run: node dist/test/memory-system.test.js
 
@@ -16,7 +16,7 @@ import { ContextStore } from '../agent/context-store.js';
 import { setCombVdbHook, combStageTool, combRecallTool, flushMessages } from '../tools/builtin/comb.js';
 import type { Message } from '../providers/types.js';
 
-// ── Test Infrastructure ──────────────────────────────────────────────────
+// â”€â”€ Test Infrastructure â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 let testDir: string;
 let passed = 0;
@@ -38,10 +38,10 @@ function assert(condition: boolean, message: string): void {
   total++;
   if (condition) {
     passed++;
-    console.log(`  ✅ ${message}`);
+    console.log(`  âœ… ${message}`);
   } else {
     failed++;
-    console.error(`  ❌ ${message}`);
+    console.error(`  âŒ ${message}`);
   }
 }
 
@@ -49,18 +49,18 @@ function assertEqual(actual: any, expected: any, message: string): void {
   total++;
   if (actual === expected) {
     passed++;
-    console.log(`  ✅ ${message}`);
+    console.log(`  âœ… ${message}`);
   } else {
     failed++;
-    console.error(`  ❌ ${message} — expected ${expected}, got ${actual}`);
+    console.error(`  âŒ ${message} â€” expected ${expected}, got ${actual}`);
   }
 }
 
 function section(name: string): void {
-  console.log(`\n━━━ ${name} ━━━`);
+  console.log(`\nâ”â”â” ${name} â”â”â”`);
 }
 
-// ── 1. VDB Core Tests ───────────────────────────────────────────────────
+// â”€â”€ 1. VDB Core Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function testVdbCore() {
   section('VDB Core');
@@ -89,10 +89,10 @@ function testVdbCore() {
   // Batch index
   const docs = [
     'Cthulu is an autonomous trading system with 32 tentacles scanning the market.',
-    'Ali built the research lab with two heads — philosophical frameworks and bare-metal genesis.',
-    'The Context Store bridges attention and memory — truncated messages get absorbed into VDB.',
+    'Ali built the research lab with two heads â€” philosophical frameworks and bare-metal genesis.',
+    'The Context Store bridges attention and memory â€” truncated messages get absorbed into VDB.',
     'COMB provides lossless session-to-session context through staging and recall.',
-    'Symbiote is the sixth sense — the agent runtime that powers everything.',
+    'Symbiote is the sixth sense â€” the agent runtime that powers everything.',
     'The Two-Point Theorem states that intelligence requires two sequential observations.',
     'Dead Drop uses HMAC-SHA256 for unsigned frame authentication.',
     'Net2Net growth expands neural networks by duplicating and perturbing neurons.',
@@ -108,17 +108,17 @@ function testVdbCore() {
   }
   assertEqual(batchCount, docs.length, `Batch: ${docs.length} unique docs indexed`);
 
-  // Search — exact keyword match
+  // Search â€” exact keyword match
   const r1 = db.search('GLADIUS architecture', 3);
   assert(r1.length > 0, 'Search: "GLADIUS architecture" returns results');
   assert(r1[0].text.includes('GLADIUS'), 'Search: top result contains GLADIUS');
 
-  // Search — semantic proximity
+  // Search â€” semantic proximity
   const r2 = db.search('trading bot market scanning', 3);
   assert(r2.length > 0, 'Search: "trading bot market" returns results');
   assert(r2[0].text.includes('trading') || r2[0].text.includes('Cthulu'), 'Search: top result is about trading');
 
-  // Search — no results for gibberish
+  // Search â€” no results for gibberish
   const r3 = db.search('xyzzy plugh quartzite', 3);
   assert(r3.length === 0 || r3[0].score < 0.1, 'Search: gibberish returns no/low results');
 
@@ -130,7 +130,7 @@ function testVdbCore() {
   const r5 = db.search('', 5);
   assertEqual(r5.length, 0, 'Search: empty query returns nothing');
 
-  // Recent — chronological retrieval
+  // Recent â€” chronological retrieval
   const now = Date.now();
   db.index({ id: '', text: 'Recent entry one about dragons', source: 'recent-test', role: 'context', timestamp: now - 3000 });
   db.index({ id: '', text: 'Recent entry two about phoenixes', source: 'recent-test', role: 'context', timestamp: now - 2000 });
@@ -147,7 +147,7 @@ function testVdbCore() {
   const recentEmpty = db.recent('nonexistent-source', 5);
   assertEqual(recentEmpty.length, 0, 'Recent: empty for unknown source');
 
-  // Persistence — evict and reload
+  // Persistence â€” evict and reload
   db.evict();
   const r6 = db.search('GLADIUS', 3);
   assert(r6.length > 0, 'Persistence: results survive evict+reload');
@@ -160,15 +160,15 @@ function testVdbCore() {
   const stats2 = db.stats();
   assertEqual(stats2.documentCount, 14, 'Compact: document count preserved');
 
-  // Idle check — shouldn't evict when recent
+  // Idle check â€” shouldn't evict when recent
   const evicted = db.checkIdle();
   assertEqual(evicted, false, 'Idle check: not evicted when recently accessed');
 }
 
-// ── 2. COMB → VDB Integration ───────────────────────────────────────────
+// â”€â”€ 2. COMB â†’ VDB Integration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function testCombVdbIntegration() {
-  section('COMB → VDB Integration');
+  section('COMB â†’ VDB Integration');
 
   const db = new VectorDB(testDir, 60000);
 
@@ -184,19 +184,19 @@ async function testCombVdbIntegration() {
   );
 
   // Stage through COMB tool
-  await combStageTool.execute({ content: 'Working on GLADIUS hatchling training — step 4000, loss 5.76' });
+  await combStageTool.execute({ content: 'Working on GLADIUS hatchling training â€” step 4000, loss 5.76' });
   await combStageTool.execute({ content: 'Cthulu K9 has 3 open positions: EURUSD SHORT, OIL LONG, BTC LONG' });
   await combStageTool.execute({ content: 'Vault was corrupted on March 11, rebuilt with 23 credentials' });
 
   // Search VDB for COMB-staged content
   const r1 = db.search('GLADIUS training loss', 3);
-  assert(r1.length > 0, 'COMB→VDB: staged content searchable in VDB');
-  assert(r1[0].text.includes('hatchling') || r1[0].text.includes('GLADIUS'), 'COMB→VDB: correct result for GLADIUS query');
+  assert(r1.length > 0, 'COMBâ†’VDB: staged content searchable in VDB');
+  assert(r1[0].text.includes('hatchling') || r1[0].text.includes('GLADIUS'), 'COMBâ†’VDB: correct result for GLADIUS query');
 
   const r2 = db.search('vault corrupted credentials', 3);
-  assert(r2.length > 0, 'COMB→VDB: vault content searchable');
+  assert(r2.length > 0, 'COMBâ†’VDB: vault content searchable');
 
-  // COMB recall — should pull from VDB recent
+  // COMB recall â€” should pull from VDB recent
   const recallResult = await combRecallTool.execute({});
   assert(typeof recallResult === 'string', 'COMB recall: returns string');
   assert(recallResult.includes('COMB RECALL'), 'COMB recall: has header');
@@ -214,13 +214,13 @@ async function testCombVdbIntegration() {
 
   // Verify flush content in VDB
   const r3 = db.search('Cthulu positions P&L', 3);
-  assert(r3.length > 0, 'COMB flush→VDB: flushed messages searchable');
+  assert(r3.length > 0, 'COMB flushâ†’VDB: flushed messages searchable');
 
   // Clean up hook
   setCombVdbHook(() => {});
 }
 
-// ── 3. Context Store Tests ──────────────────────────────────────────────
+// â”€â”€ 3. Context Store Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function testContextStore() {
   section('Context Store');
@@ -232,7 +232,7 @@ function testContextStore() {
     { id: '', text: 'The SHARD contract is deployed at 0x0000000000000000000000000000000000000001 on Base.', source: 'identity', role: 'context', timestamp: Date.now() - 3600000 },
     { id: '', text: 'Ali birthday is March 12. He turned 38 in 2026.', source: 'memory', role: 'context', timestamp: Date.now() - 7200000 },
     { id: '', text: 'The vault key is at ~/.vault-key with permissions 600.', source: 'tools', role: 'context', timestamp: Date.now() - 1800000 },
-    { id: '', text: 'Progressive expansion grows GLADIUS: Seed→Hatchling→Drake→Wyrm→Dragon.', source: 'workflow', role: 'context', timestamp: Date.now() - 900000 },
+    { id: '', text: 'Progressive expansion grows GLADIUS: Seedâ†’Hatchlingâ†’Drakeâ†’Wyrmâ†’Dragon.', source: 'workflow', role: 'context', timestamp: Date.now() - 900000 },
   ]);
 
   const cs = new ContextStore(db, {
@@ -252,7 +252,7 @@ function testContextStore() {
 
   // Retrieval
   const messages: Message[] = [
-    { role: 'system', content: 'You are AVA.' },
+    { role: 'system', content: 'You are Symbiote.' },
     { role: 'user', content: 'Where is the SHARD contract deployed?' },
   ];
   const retrieval = cs.retrieve(messages);
@@ -262,9 +262,9 @@ function testContextStore() {
     assert(typeof retrieval.content === 'string' && (retrieval.content.includes('SHARD') || retrieval.content.includes('0xE897')), 'Retrieval: includes SHARD info');
   }
 
-  // Retrieval — unrelated query doesn't crash
+  // Retrieval â€” unrelated query doesn't crash
   const messages2: Message[] = [
-    { role: 'system', content: 'You are AVA.' },
+    { role: 'system', content: 'You are Symbiote.' },
     { role: 'user', content: 'What is the weather today?' },
   ];
   cs.retrieve(messages2); // just verify no crash
@@ -283,8 +283,8 @@ function testContextStore() {
   assertEqual(absorbed, 2, 'Absorption: absorbed 2 messages (skipped tool, system, short)');
 
   const r1 = db.search('Cthulu K9 tentacles confluence', 3);
-  assert(r1.length > 0, 'Absorption→Search: absorbed content is searchable');
-  assert(r1.some(r => r.source === 'absorbed'), 'Absorption→Search: source tagged as "absorbed"');
+  assert(r1.length > 0, 'Absorptionâ†’Search: absorbed content is searchable');
+  assert(r1.some(r => r.source === 'absorbed'), 'Absorptionâ†’Search: source tagged as "absorbed"');
 
   // truncateAndAbsorb
   const fullMessages: Message[] = [
@@ -309,7 +309,7 @@ function testContextStore() {
   assert(stats.documentCount > 0, `Context Store stats: ${stats.documentCount} docs`);
 }
 
-// ── 4. Session Ingestion Tests ──────────────────────────────────────────
+// â”€â”€ 4. Session Ingestion Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function testSessionIngestion() {
   section('Session Ingestion');
@@ -323,7 +323,7 @@ function testSessionIngestion() {
     sessionId: 'whatsapp-test-123',
     createdAt: Date.now() - 3600000,
     messages: [
-      { role: 'system', content: 'You are AVA.' },
+      { role: 'system', content: 'You are Symbiote.' },
       { role: 'user', content: 'Can you check the Cthulu bridge health?' },
       { role: 'assistant', content: 'Checking the Cthulu bridge now. The webhook on port 9002 is responding, and the bridge reports 142 active connections.' },
       { role: 'user', content: 'Good. And the GLADIUS training status?' },
@@ -336,7 +336,7 @@ function testSessionIngestion() {
   fs.writeFileSync(path.join(sessionsDir, 'whatsapp-test-123.json'), JSON.stringify(fakeSession));
 
   const docs = extractFromSession(path.join(sessionsDir, 'whatsapp-test-123.json'), 'whatsapp');
-  assert(docs.length >= 3, `Session extract: ${docs.length} docs (expected ≥3)`);
+  assert(docs.length >= 3, `Session extract: ${docs.length} docs (expected â‰¥3)`);
   assert(docs.every(d => d.source === 'whatsapp'), 'Session extract: source tagged correctly');
   assert(docs.every(d => d.sessionId === 'whatsapp-test-123'), 'Session extract: sessionId set');
 
@@ -345,13 +345,13 @@ function testSessionIngestion() {
   assert(result.indexed > 0, `Session ingest: indexed ${result.indexed} new`);
 
   const r1 = db.search('Cthulu bridge health webhook', 3);
-  assert(r1.length > 0, 'Session→VDB: ingested content searchable');
+  assert(r1.length > 0, 'Sessionâ†’VDB: ingested content searchable');
 
   const result2 = ingestSessions(db, sessionsDir);
   assertEqual(result2.indexed, 0, 'Session ingest: no duplicates on re-ingest');
 }
 
-// ── 5. Edge Cases & Stress Tests ────────────────────────────────────────
+// â”€â”€ 5. Edge Cases & Stress Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function testEdgeCases() {
   section('Edge Cases');
@@ -373,7 +373,7 @@ function testEdgeCases() {
 
   // Unicode
   const unicode = db.index({
-    id: '', text: 'بسم الله الرحمن الرحیم — GLADIUS training initiated at 2:45 AM PKT',
+    id: '', text: 'Ø¨Ø³Ù… Ø§Ù„Ù„Ù‡ Ø§Ù„Ø±Ø­Ù…Ù† Ø§Ù„Ø±Ø­ÛŒÙ… â€” GLADIUS training initiated at 2:45 AM PKT',
     source: 'test', role: 'context', timestamp: Date.now(),
   });
   assert(unicode === true, 'Unicode: indexed successfully');
@@ -401,13 +401,13 @@ function testEdgeCases() {
   const reloadSearch = db.search('burst document', 3);
   assert(reloadSearch.length > 0, 'Reload after burst: data persists');
 
-  // COMB with no hook wired — should not crash
+  // COMB with no hook wired â€” should not crash
   setCombVdbHook(() => {});
   const emptyRecall = combRecallTool.execute({});
   assert(emptyRecall !== undefined, 'COMB recall without recentFn: does not crash');
 }
 
-// ── 6. COMB as Pure VDB Wrapper ─────────────────────────────────────────
+// â”€â”€ 6. COMB as Pure VDB Wrapper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function testCombPureVdb() {
   section('COMB as Pure VDB Wrapper (No Files)');
@@ -424,8 +424,8 @@ async function testCombPureVdb() {
     (source: string, k: number) => db.recent(source, k),
   );
 
-  // Stage, recall — no .comb directory should be created
-  await combStageTool.execute({ content: 'Alpha release memory test — pure VDB path' });
+  // Stage, recall â€” no .comb directory should be created
+  await combStageTool.execute({ content: 'Alpha release memory test â€” pure VDB path' });
 
   const combDir = path.join(testDir, '.comb');
   assert(!fs.existsSync(combDir), 'Pure VDB: no .comb directory created');
@@ -454,11 +454,11 @@ async function testCombPureVdb() {
   setCombVdbHook(() => {});
 }
 
-// ── Run All Tests ────────────────────────────────────────────────────────
+// â”€â”€ Run All Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-console.log('\n╔══════════════════════════════════════════╗');
-console.log('║  SYMBIOTE MEMORY SYSTEM — TEST SUITE     ║');
-console.log('╚══════════════════════════════════════════╝\n');
+console.log('\nâ•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—');
+console.log('â•‘  SYMBIOTE MEMORY SYSTEM â€” TEST SUITE     â•‘');
+console.log('â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•\n');
 
 setup();
 
@@ -473,12 +473,12 @@ try {
   teardown();
 }
 
-console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+console.log('\nâ”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”');
 console.log(`  Total: ${total}  Passed: ${passed}  Failed: ${failed}`);
 if (failed > 0) {
-  console.log('  ❌ FAILURES DETECTED');
+  console.log('  âŒ FAILURES DETECTED');
   process.exit(1);
 } else {
-  console.log('  ✅ ALL TESTS PASSED');
+  console.log('  âœ… ALL TESTS PASSED');
 }
-console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+console.log('â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”\n');

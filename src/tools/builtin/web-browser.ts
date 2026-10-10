@@ -254,7 +254,7 @@ export const webSessionTool: ToolDefinition = {
   parameters: {
     type: 'object',
     properties: {
-      profile: { type: 'string', description: 'Profile name (e.g. "ali", "ava", "default")' },
+      profile: { type: 'string', description: 'Profile name (e.g. "work", "default")' },
     },
     required: ['profile'],
   },

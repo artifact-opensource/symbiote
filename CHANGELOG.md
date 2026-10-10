@@ -1,5 +1,30 @@
 # Changelog
 
+## v5.2.0 (2026-10-10) — Apex
+
+Full notes: [RELEASE_NOTES.md](RELEASE_NOTES.md)
+
+### Added
+- Curator tool-bug detection (v5.1): per-tool failure windows, minor/major classification, retry/timeout/fallback proposals
+- Memograph integration with shard-hash verification; `reseal` repair tool
+- `fs` and `hardware` admin tools; `read` handles directories, binary and very large files; `write` supports append and base64
+- Native browser CUA driver, channel-specific formatting, live CLI interrupts
+- Skill ingestion and `persona_digest`
+
+### Changed
+- Tool sandbox off by default (`SYMBIOTE_SANDBOX=1` re-enables it); `exec` default timeout 600 s
+- Prompt-injection guard rebuilt with trust levels, weighted patterns and obfuscation-aware normalisation (`SYMBIOTE_INJECTION_GUARD`)
+- Naming unified on `symbiote`; environment variables are `SYMBIOTE_*`
+
+### Fixed
+- Shell execution on Windows (PowerShell-first), tree-kill for timeouts
+- Stream drops retried; hung tools and silent streams time out; progress saved each iteration
+- Context compaction preserves the original task and tool-call pairing
+- Repeated text in context, empty-reply stalls, cut-off tool arguments, lost output tails
+- Tool-success reporting, daemon lock and duplicate-start issues, Discord drops, OpenRouter registration
+
+---
+
 ## v4.0.0 (2026-09-03) — Apex
 
 ### Windows-First Runtime Portability

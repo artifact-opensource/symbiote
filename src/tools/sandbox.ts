@@ -29,7 +29,7 @@ export type SessionTier = 'admin' | 'standard' | 'restricted';
 
 export interface SessionContext {
   sessionId: string;
-  adapterId: string;       // e.g. 'discord-main', 'whatsapp-main', 'discord-ava'
+  adapterId: string;       // e.g. 'discord-main', 'whatsapp-main'
   channelType: string;      // 'discord' | 'whatsapp'
   chatType: 'direct' | 'group';
   senderId: string;

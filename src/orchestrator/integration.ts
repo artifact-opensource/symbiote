@@ -78,22 +78,37 @@ export function auditGate(
  * Runs asynchronously — does NOT block the response.
  * Feeds outcome to SARSI metrics, Curator, and Meta^n.
  */
+const TOOL_FAILURE = /^Error\b|"is_error":\s*true|"error":|Exit code: [1-9]/;
+
+export function summarizeToolResults(toolCalls: AgentRunResult['toolCalls']): Array<{ tool: string; success: boolean; error?: string }> {
+  return toolCalls.map(tc => {
+    const output = String(tc.result);
+    const failed = TOOL_FAILURE.test(output);
+    return { tool: tc.name, success: !failed, ...(failed ? { error: output.replace(/\s+/g, ' ').slice(0, 200) } : {}) };
+  });
+}
+
 export function postDeliver(
   decision: ParcRoutingDecision,
   channelContext: ChannelContext,
   result: AgentRunResult,
   userSatisfied: boolean,
 ): void {
+  const toolResults = summarizeToolResults(result.toolCalls);
+  const failed = toolResults.filter(t => !t.success).length;
+  // A recovered mid-run failure is not a failed interaction; a mostly-failing one is.
+  const hadErrors = result.hadErrors ?? (failed > 0 && failed * 2 >= toolResults.length);
   const outcome = {
     tokensUsed: result.tokensUsed ?? 0,
     latencyMs: result.latencyMs ?? 0,
-    toolSuccess: !result.hadErrors,
+    toolSuccess: !hadErrors,
     userSatisfied,
     toolCallCount: result.toolCalls.length,
     delivered: true,
     response: result.text,
     userMessage: channelContext.userMessage,
-    hadErrors: result.hadErrors ?? false,
+    hadErrors,
+    toolResults,
   };
 
   // Fire and forget — all async, non-blocking

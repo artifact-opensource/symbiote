@@ -1,5 +1,5 @@
 // Symbiote — MCP Client Bridge
-// Connects to AVA Gateway (or any MCP server) via stdio, discovers tools,
+// Connects to a Symbiote gateway (or any MCP server) via stdio, discovers tools,
 // and registers them as native Symbiote tools.
 //
 // Usage:
