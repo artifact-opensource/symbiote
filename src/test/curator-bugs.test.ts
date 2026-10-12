@@ -23,9 +23,9 @@ test('curator escalates a repeatedly failing tool to a major bug', async () => {
   const curator = new Curator();
   let last: Awaited<ReturnType<Curator['reviewInteraction']>> = [];
   for (let i = 0; i < 3; i++) {
-    last = await curator.reviewInteraction(record([{ tool: 'flaky_tool', success: false, error: 'ETIMEDOUT' }]));
+    last = await curator.reviewInteraction(record([{ tool: 'read', success: false, error: 'ETIMEDOUT' }]));
   }
-  assert.ok(last.some(p => p.severity === 'major' && /flaky_tool/.test(p.reason)));
+  assert.ok(last.some(p => p.severity === 'major' && /read/.test(p.reason)));
 });
 
 test('curator stays quiet when every tool succeeds', async () => {
