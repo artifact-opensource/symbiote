@@ -21,7 +21,7 @@ const EMOJI: Record<string, string> = {
 };
 
 const EDIT_THROTTLE_MS = 1500;
-const TEXT_BUDGET = 3800;
+const TEXT_BUDGET = 1900;
 const PREVIEW_CAP = 60;
 
 export interface ProgressDeps {
@@ -51,9 +51,16 @@ function previewOf(name: string, args: Record<string, unknown> | undefined): str
         if (k === undefined) return '';
         v = s(args[k]);
     }
-    const one = String(v).split('\n')[0].trim();
+    const one = redactSensitiveValues(String(v).split('\n')[0].trim());
     if (!one) return '';
     return one.length > PREVIEW_CAP ? one.slice(0, PREVIEW_CAP - 3) + '...' : one;
+}
+
+function redactSensitiveValues(value: string): string {
+    return value
+        .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]')
+        .replace(/\b(authorization|proxy-authorization|x-api-key|api-key|cookie|set-cookie)\b(["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;&]+)/gi, '$1$2[REDACTED]')
+        .replace(/\b(--?(?:token|api[-_]?key|password|passwd|secret)|(?:access|refresh)_token|client_secret)\b(\s*=\s*|\s+)(?:"[^"]*"|'[^']*'|[^\s,;&]+)/gi, '$1$2[REDACTED]');
 }
 
 export class ToolProgressBubble {

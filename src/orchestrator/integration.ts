@@ -7,11 +7,13 @@
 //   3. After runner returns: auditGate() → MEA checks if response is adequate
 //   4. After delivery: assessAndLearn() → PARC assessment + Curator review + Meta^n feedback
 
+import { randomUUID } from 'node:crypto';
 import { planRouting, assessRouting, ParcRoutingDecision } from './parc.js';
 import { auditInteraction, MeaAuditResult, getMeaStats } from '../agent/mea.js';
 import { reviewAsync } from '../curator/index.js';
 import { feedOutcome, runMetaCycleNow } from '../meta/index.js';
 import { recordOutcome, getSarsiModel } from '../sarsi/index.js';
+import { getOpsMemory } from '../memory/ops-memory.js';
 
 export interface AgentRunResult {
   text: string;
@@ -98,6 +100,7 @@ export function postDeliver(
   const failed = toolResults.filter(t => !t.success).length;
   // A recovered mid-run failure is not a failed interaction; a mostly-failing one is.
   const hadErrors = result.hadErrors ?? (failed > 0 && failed * 2 >= toolResults.length);
+  const opsInteractionId = randomUUID();
   const outcome = {
     tokensUsed: result.tokensUsed ?? 0,
     latencyMs: result.latencyMs ?? 0,
@@ -113,6 +116,14 @@ export function postDeliver(
 
   // Fire and forget — all async, non-blocking
   setImmediate(async () => {
+    try {
+      const opsMemory = getOpsMemory();
+      const recorded = opsMemory?.recordToolOutcomes(opsInteractionId, result.toolCalls) ?? 0;
+      if (recorded > 0) console.log(`[ops-memory] Recorded ${recorded} completed operational tool outcomes`);
+    } catch (err) {
+      console.error('[ops-memory] Failed to persist completed tool outcomes:', err);
+    }
+
     try {
       // PARC assessment (feeds SARSI metrics + Curator + Meta^n)
       await assessRouting(decision, outcome, channelContext.channel);

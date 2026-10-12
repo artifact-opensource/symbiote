@@ -23,6 +23,7 @@
 //  Attention is small and focused. Memory is large and searchable."
 
 import type { Message } from '../providers/types.js';
+import { getOpsMemory } from '../memory/ops-memory.js';
 import type { VectorDB, VDBDocument, SearchResult } from '../memory/vdb.js';
 
 // ── Config ───────────────────────────────────────────────────────────────
@@ -104,7 +105,21 @@ export class ContextStore {
     }
 
     const query = queryParts.join(' ');
-    if (query.length < 20) return null;
+    const latestUserMessage = nonSystem.filter(message => message.role === 'user').slice(-1)[0];
+    const userQuery = latestUserMessage
+      ? typeof latestUserMessage.content === 'string'
+        ? latestUserMessage.content
+        : (latestUserMessage.content as Array<{ text?: string }>).map(block => block.text ?? '').join(' ')
+      : '';
+    let opsContext: string | null = null;
+    if (userQuery) {
+      try {
+        opsContext = getOpsMemory()?.formatRelevant(userQuery) ?? null;
+      } catch (error) {
+        console.error(`[context-store] Ops Memory retrieval failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (query.length < 20) return opsContext ? { role: 'user', content: opsContext } : null;
 
     // Search VDB and fail closed for malformed Memograph permissions.
     let results: SearchResult[];
@@ -112,7 +127,7 @@ export class ContextStore {
       results = this.vdb.search(query, this.config.retrievalK * 3);
     } catch (error) {
       console.error(`[context-store] VDB search failed: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
+      return opsContext ? { role: 'user', content: opsContext } : null;
     }
 
     // Filter by threshold and dedup against current context
@@ -144,7 +159,7 @@ export class ContextStore {
       if (relevant.length >= this.config.retrievalK) break;
     }
 
-    if (relevant.length === 0) return null;
+    if (relevant.length === 0) return opsContext ? { role: 'user', content: opsContext } : null;
 
     // Format as a retrieval block
     const parts: string[] = [
@@ -161,6 +176,7 @@ export class ContextStore {
         : r.source === 'absorbed' ? 'earlier this conversation' : r.source;
       parts.push(`[${source}, ${age}, relevance=${(r.score * 100).toFixed(0)}%] ${r.text}`);
     }
+    if (opsContext) parts.push(opsContext);
 
     return {
       role: 'user',

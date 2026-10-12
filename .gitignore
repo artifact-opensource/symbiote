@@ -89,3 +89,16 @@ venv/
 Thumbs.db
 desktop.ini
 tmp_review_section.txt
+launchers/start_subagent.bat
+.gitignore
+.gitignore
+.gitignore
+.gitignore
+skills/subagents/autonomous-monitor/SKILL.md
+launchers/start_subagent.sh
+skills/subagents/master-developer/SKILL.md
+skills/subagents/research-agent/SKILL.md
+scripts/rollback-ops-memory.ps1
+launcher/start_dev.bat
+launcher/start_research.bat
+nul

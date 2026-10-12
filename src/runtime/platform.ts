@@ -108,6 +108,12 @@ const POSIX_SHIMS = String.raw`$ProgressPreference='SilentlyContinue'; [Console]
 /** Explain a failed command in terms the agent can act on, so a syntax slip is not mistaken for a broken tool. */
 export function hintForFailure(command: string, output: string): string {
   if (!isWindows()) return '';
+  if (/\b(?:bash|sh):.*\bcd:\s*C:[^:\r\n]*:\s*No such file or directory/i.test(output)) {
+    return '[hint: exec is working; Git Bash interpreted the Windows backslashes in the cd path as escapes. Omit cd and pass workdir, use a Git Bash path such as /c/workspace/symbiote, or force shell:"powershell".]';
+  }
+  if (/\b(?:bash|sh):.*\bcd:.*:\s*No such file or directory/i.test(output)) {
+    return '[hint: exec is working; that directory does not exist in Git Bash on this Windows host. The command already starts in the configured working directory; omit cd or pass workdir. For an explicit Git Bash path, use /c/... rather than assuming /workspace or /tmp.]';
+  }
   if (/is not recognized as the name of a cmdlet|is not recognized as an internal or external command|A parameter cannot be found that matches parameter name/i.test(output)) {
     return findBash()
       ? '[hint: exec is working; that command used syntax this shell does not support. Retry with shell:"bash" for POSIX syntax, or use PowerShell equivalents.]'
@@ -146,12 +152,12 @@ export function shellCommand(command: string, login = false, kind: ShellKind = '
 
 /** One-line description of the execution environment, for the agent's system prompt. */
 export function describeShell(): string {
-  if (!isWindows()) return `exec runs commands with ${process.env.SHELL ?? 'sh'}.`;
+  if (!isWindows()) return `exec runs commands with ${process.env.SHELL ?? 'sh'} from ${process.cwd()} unless workdir is specified.`;
   const bash = findBash();
   const ps = /pwsh/i.test(windowsShell()) ? 'PowerShell 7' : 'Windows PowerShell';
   return bash
-    ? `Windows. exec runs ${ps} by default; POSIX-style commands (ls -la, grep, &&, $(...)) auto-run in Git Bash. Force one with exec's shell param (powershell | bash | cmd).`
-    : `Windows. exec runs ${ps} with POSIX shims for head, tail, grep, wc, which, touch, ls -la, rm -rf, cp -r, mkdir -p. Use PowerShell syntax (not && chains); shell param accepts powershell | cmd.`;
+    ? `Windows. exec runs ${ps} by default from ${process.cwd()} unless workdir is specified; POSIX-style commands (ls -la, grep, &&, $(...)) auto-run in Git Bash. Do not cd to guessed Linux paths; use workdir or Git Bash paths such as /c/... . Force a shell with exec's shell param (powershell | bash | cmd).`
+    : `Windows. exec runs ${ps} from ${process.cwd()} unless workdir is specified, with POSIX shims for head, tail, grep, wc, which, touch, ls -la, rm -rf, cp -r, mkdir -p. Do not cd to guessed Linux paths. Use PowerShell syntax (not && chains); shell param accepts powershell | cmd.`;
 }
 
 /** Kill a child and its whole process tree. */

@@ -70,11 +70,13 @@ export const execTool: ToolDefinition = {
         clearTimeout(timer);
         let output = Buffer.concat(chunks).toString('utf-8');
         if (output.length > 100_000) output = output.slice(0, 100_000) + '\n... (truncated)';
-        if (code !== 0) {
+        if (code === 0 && output.trim().length === 0) {
+          output = 'Command completed successfully (exit code 0; no output).';
+        } else if (code !== 0) {
           output += `\nExit code: ${code}`;
-          const hint = hintForFailure(command, output);
-          if (hint) output += `\n${hint}`;
         }
+        const hint = hintForFailure(command, output);
+        if (hint && !output.includes(hint)) output += `\n${hint}`;
         resolve(output);
       });
 

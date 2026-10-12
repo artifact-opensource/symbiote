@@ -3,10 +3,16 @@ import assert from 'node:assert/strict';
 import { execTool } from '../tools/builtin/exec.js';
 import { ProcessManager } from '../tools/builtin/process.js';
 import { classifySession } from '../tools/sandbox.js';
+import { hintForFailure } from '../runtime/platform.js';
 
 test('exec runs a shell command on this host', async () => {
   const out = await execTool.execute({ command: 'echo symbiote-ok' });
   assert.match(String(out), /symbiote-ok/);
+});
+
+test('exec reports successful commands that intentionally produce no output', async () => {
+  const out = await execTool.execute({ command: 'node -e "process.exit(0)"' });
+  assert.equal(out, 'Command completed successfully (exit code 0; no output).');
 });
 
 test('exec does not block commands that mention the project name', async () => {
@@ -40,6 +46,24 @@ test('failed commands carry a hint that exec itself is healthy', async () => {
   if (process.platform !== 'win32') return;
   const out = String(await execTool.execute({ command: 'Get-DefinitelyNotACommand', shell: 'powershell' }));
   assert.match(out, /exec is working/);
+});
+
+test('Git Bash Windows-path errors explain how to use exec correctly', () => {
+  if (process.platform !== 'win32') return;
+  const out = hintForFailure(
+    'cd C:\\workspace\\symbiote; npm test',
+    '/usr/bin/bash: line 1: cd: C:workspacesymbiote: No such file or directory',
+  );
+  assert.match(out, /exec is working/);
+  assert.match(out, /Omit cd and pass workdir/);
+  assert.match(out, /\/c\/workspace\/symbiote/);
+
+  const guessedPosixPath = hintForFailure(
+    'cd /workspace/symbiote',
+    '/usr/bin/bash: line 1: cd: /workspace/symbiote: No such file or directory',
+  );
+  assert.match(guessedPosixPath, /configured working directory/);
+  assert.match(guessedPosixPath, /\/workspace or \/tmp/);
 });
 
 test('background process spawn failures are reported as completed failures', async () => {
