@@ -51,8 +51,11 @@ export class ProcessManager {
 
     proc.stdout?.on('data', (d: Buffer) => managed.output.push(d.toString('utf-8')));
     proc.stderr?.on('data', (d: Buffer) => managed.output.push(d.toString('utf-8')));
-    proc.on('close', (code) => { managed.exitCode = code; });
-    proc.on('error', (err) => { managed.output.push(`Error: ${err.message}`); });
+    proc.on('close', (code) => { managed.exitCode = code ?? managed.exitCode ?? -1; });
+    proc.on('error', (err) => {
+      managed.output.push(`Error: ${err.message}`);
+      managed.exitCode = -1;
+    });
 
     this.processes.set(id, managed);
     return managed;

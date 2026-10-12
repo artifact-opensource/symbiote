@@ -116,26 +116,6 @@ export interface RunResult {
   temperatureHistory?: Array<{ iteration: number; category: TaskCategory; temperature: number }>;
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  map: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(items.length, Math.max(1, Math.floor(limit)));
-
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (true) {
-      const index = nextIndex++;
-      if (index >= items.length) return;
-      results[index] = await map(items[index], index);
-    }
-  }));
-
-  return results;
-}
-
 /**
  * Run the agent loop: send messages to LLM, process tool calls, repeat until done.
  * 
@@ -164,7 +144,8 @@ export async function runAgent(
   let completionReviewUsed = false;
   let emptyNudges = 0;
   const callCounts = new Map<string, number>();
-  const todoManager = new TodoManager({ scope: config.todoScope ?? `run-${randomUUID()}`, workspace: process.cwd() });
+  const todoScope = config.todoScope ?? `run-${randomUUID()}`;
+  const todoManager = new TodoManager({ scope: todoScope, workspace: process.cwd() });
 
   const ensureTodoPlan = () => {
     const userSummary = [...currentMessages].reverse().find(msg => msg.role === 'user');
@@ -473,47 +454,53 @@ export async function runAgent(
     currentMessages.push(assistantMsg);
     textAccum = '';
 
-    // Execute tool calls concurrently and append results
-    const toolResults = await mapWithConcurrency(pendingToolCalls, 5, async (tc) => {
+    // Run calls in emission order so tools cannot race on shared state.
+    const toolResults = [];
+    for (const tc of pendingToolCalls) {
       try {
         if (invalidInputs.has(tc.id)) {
           const errMsg = JSON.stringify({ error: `Arguments for ${tc.name} were not valid JSON (the response was probably cut off). Retry with smaller or simpler arguments.`, is_error: true });
           try { config.onToolEnd?.(tc.name, errMsg); } catch { /* progress reporting is non-critical */ }
-          return { tc, result: errMsg, isError: true };
+          toolResults.push({ tc, input: tc.input ?? {}, result: errMsg, isError: true });
+          continue;
         }
-        try { config.onToolStart?.(tc.name, tc.input); } catch { /* progress reporting is non-critical */ }
+        const toolInput = tc.name === 'todo' && !(typeof tc.input.scope === 'string' && tc.input.scope.trim())
+          ? { ...tc.input, scope: todoScope }
+          : tc.input;
+        try { config.onToolStart?.(tc.name, toolInput); } catch { /* progress reporting is non-critical */ }
         try {
-          let result = clipResult(await withTimeout(config.toolRegistry.execute(tc.name, tc.input), toolTimeoutMs(), config.abortSignal, `Tool ${tc.name}`));
+          let result = clipResult(await withTimeout(config.toolRegistry.execute(tc.name, toolInput), toolTimeoutMs(), config.abortSignal, `Tool ${tc.name}`));
           // Sanitize tool result before it enters the LLM context
           const sanitized = sanitizeToolResult(tc.name, result);
           if (sanitized.injectionDetected) {
             logInjectionAttempt(tc.name, sanitized.patterns, result);
           }
           result = sanitized.text || '(no output)';
+          const isError = looksFailed(result);
           try { config.onToolEnd?.(tc.name, result); } catch { /* progress reporting is non-critical */ }
-          return { tc, result, isError: false };
+          toolResults.push({ tc, input: toolInput, result, isError });
         } catch (err) {
           const errMsg = JSON.stringify({ error: err instanceof Error ? err.message : String(err), is_error: true });
           try { config.onToolEnd?.(tc.name, errMsg); } catch { /* progress reporting is non-critical */ }
-          return { tc, result: errMsg, isError: true };
+          toolResults.push({ tc, input: toolInput, result: errMsg, isError: true });
         }
       } catch (err) {
         const errMsg = JSON.stringify({ error: err instanceof Error ? err.message : String(err), is_error: true });
-        return { tc, result: errMsg, isError: true };
+        toolResults.push({ tc, input: tc.input ?? {}, result: errMsg, isError: true });
       }
-    });
+    }
 
     for (const entry of toolResults) {
-      const { tc, isError } = entry;
+      const { tc, input, isError } = entry;
       let result = entry.result;
       // Break repeat-failure loops: the same call failing again will not succeed on its own
-      const key = `${tc.name}:${JSON.stringify(tc.input)}`;
+      const key = `${tc.name}:${JSON.stringify(input)}`;
       const seen = (callCounts.get(key) ?? 0) + 1;
       callCounts.set(key, seen);
       if (seen >= REPEAT_CALL_THRESHOLD && (isError || looksFailed(result))) {
         result += `\n\n[runner: this exact ${tc.name} call has now failed ${seen} times. Change the approach or arguments instead of repeating it, or report the blocker.]`;
       }
-      allToolCalls.push({ name: tc.name, input: tc.input, result });
+      allToolCalls.push({ name: tc.name, input, result });
 
       currentMessages.push({
         role: 'tool',
