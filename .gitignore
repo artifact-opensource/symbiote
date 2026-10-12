@@ -87,3 +87,4 @@ venv/
 .DS_Store
 Thumbs.db
 desktop.ini
+tmp_review_section.txt

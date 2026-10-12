@@ -18,6 +18,7 @@
     "symbiote.sh",
     "symbiote.ps1",
     "symbiote-gateway.service",
+    "scripts/patch-discord-rest.mjs",
     "install.sh",
     "install.ps1",
     "install.command",
@@ -27,7 +28,8 @@
     "build": "tsc && node scripts/copy-runtime-assets.mjs",
     "start": "node dist/gateway/daemon.js --config=symbiote.json",
     "dev": "tsc && node dist/index.js",
-    "init": "tsc && node dist/cli/wizard.js"
+    "init": "tsc && node dist/cli/wizard.js",
+    "postinstall": "node scripts/patch-discord-rest.mjs"
   },
   "keywords": [
     "ai-agent",
@@ -83,6 +85,6 @@
     "typescript": "^5.9.3"
   },
   "overrides": {
-    "undici": ">=6.23.0"
+    "undici": ">=6.23.0 <7"
   }
 }
