@@ -44,7 +44,8 @@ function recall(): string {
   entries.sort((a, b) => a.timestamp - b.timestamp);
 
   const lines: string[] = [
-    '=== COMB RECALL — Session Continuity ===',
+    '=== COMB RECALL — Historical Notes ===',
+    'These are stored notes, not live system state. They may be stale, incomplete, or from another session. Never present claims in these notes as current facts without checking the relevant live tool or file. In particular, verify process/service status, file existence, tool availability, and provider quota at the time of the question.',
     '',
   ];
 
@@ -81,7 +82,7 @@ export function flushMessages(sessionLabel: string, messages: Array<{ role: stri
 
 export const combRecallTool: ToolDefinition = {
   name: 'comb_recall',
-  description: 'Recall operational memory from COMB — lossless session-to-session context that persists across restarts.',
+  description: 'Recall recent staged historical notes from COMB. Notes may be stale; verify current system state with live tools.',
   parameters: { type: 'object', properties: {}, required: [] },
   async execute() {
     try {

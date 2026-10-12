@@ -7,6 +7,58 @@ import { fetchWithRetry } from './retry.js';
 
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 
+interface OpenRouterErrorBody {
+  error?: {
+    message?: string;
+    metadata?: {
+      headers?: Record<string, string>;
+      remedy_hint?: string;
+    };
+  };
+}
+
+function getHeaderValue(headers: Record<string, string> | undefined, name: string): string | undefined {
+  if (!headers) return undefined;
+  return Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1];
+}
+
+function formatResetTime(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const numeric = Number(value);
+  const timestamp = Number.isFinite(numeric)
+    ? (numeric > 1_000_000_000_000 ? numeric : numeric * 1000)
+    : Date.parse(value);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return `${new Date(timestamp).toISOString()} UTC`;
+}
+
+function formatOpenRouterError(status: number, body: string): string {
+  let parsed: OpenRouterErrorBody;
+  try {
+    parsed = JSON.parse(body) as OpenRouterErrorBody;
+  } catch {
+    return `OpenRouter API error ${status}: ${body}`;
+  }
+
+  const apiError = parsed.error;
+  const message = apiError?.message ?? body;
+  const headers = apiError?.metadata?.headers;
+  const details: string[] = [];
+  const limit = getHeaderValue(headers, 'x-ratelimit-limit');
+  const remaining = getHeaderValue(headers, 'x-ratelimit-remaining');
+  const reset = formatResetTime(getHeaderValue(headers, 'x-ratelimit-reset'));
+  if (limit !== undefined) details.push(`limit ${limit}`);
+  if (remaining !== undefined) details.push(`${remaining} remaining`);
+  if (reset) details.push(`resets at ${reset}`);
+
+  const remedy = apiError?.metadata?.remedy_hint;
+  return [
+    `OpenRouter API error ${status}: ${message}`,
+    details.length > 0 ? `Rate-limit details: ${details.join('; ')}.` : '',
+    remedy ? `Provider guidance: ${remedy}` : '',
+  ].filter(Boolean).join(' ');
+}
+
 function convertMessages(messages: Message[]): unknown[] {
   const out: unknown[] = [];
   let pendingToolCallIds = new Set<string>();
@@ -100,7 +152,7 @@ async function* streamOpenRouter(
     if (res.status === 401) {
       throw new Error(`OpenRouter authentication failed (401). This request included a Bearer authorization header; verify the key is active for OpenRouter and the running process uses the current configuration. Provider response: ${text}`);
     }
-    throw new Error(`OpenRouter API error ${res.status}: ${text}`);
+    throw new Error(formatOpenRouterError(res.status, text));
   }
 
   const reader = res.body?.getReader();

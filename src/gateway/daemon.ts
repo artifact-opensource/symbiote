@@ -1645,13 +1645,10 @@ export class SymbioteGateway {
       } else {
         console.error(`  ${palette.red}✗ [turn]${palette.reset} ${palette.violet}${sessionId}${palette.reset}: ${err}`);
         if (err instanceof Error && err.stack) console.error(err.stack);
-        // Send error message — give a clear, short message for the daily-quota
-        // case instead of dumping the raw provider JSON error.
+        // The provider adapter formats structured response metadata into a
+        // readable error; keep gateway handling provider-agnostic.
         const rawMsg = err instanceof Error ? err.message : String(err);
-        const isDailyQuota = /free-models-per-day/i.test(rawMsg);
-        const userMsg = isDailyQuota
-          ? '⚠️ OpenRouter free-tier daily limit reached (50 requests/day). Resets at midnight UTC, or add credits at openrouter.ai to raise the cap.'
-          : `⚠️ Error: ${rawMsg}`;
+        const userMsg = `⚠️ Error: ${rawMsg}`;
         try {
           await this.channelRegistry.send(
             envelope.source.adapterId,

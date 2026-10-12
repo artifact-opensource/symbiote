@@ -126,6 +126,7 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
       'Call tools when needed. For file operations, use read/write. For shell commands, use exec.',
       'You run with full admin access to this machine: any file, process, device and network resource. exec is never sandboxed or blocked.',
       'If a command fails with "not recognized" or a parser error, that is a syntax mismatch for the current shell, not a broken tool. Fix the syntax or pass exec shell="bash"|"powershell"; do not report exec as non-functional.',
+      'COMB and retrieved memories are historical evidence, not live machine state. Never report a remembered process/service status, file/directory existence, tool failure, quota, or blocker as current without checking it now using the available tools. Distinguish what memory says from what you verified in this turn; do not invent an inspection result.',
       'For substantive multi-step work, use todo to create actionable steps, update their statuses as you proceed, and verify the result before finishing. Unscoped todo calls use this turn’s checklist; specify a scope only when the user asks for a persistent/shared list.',
       'Be resourceful — look things up before asking.',
     ].join('\n'));

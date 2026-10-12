@@ -2,9 +2,9 @@
 import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 
 const RETRY_DELAYS = [2000, 5000, 10000];
-// 429s are survivable if we wait long enough — OpenRouter/most providers reset
-// within a minute. Use a longer, dedicated backoff ladder for rate limits.
+// Bound rate-limit retries so a long server reset cannot stall an interaction.
 const RATE_LIMIT_DELAYS = [2000, 5000, 10000, 20000, 40000];
+const MAX_RATE_LIMIT_RETRY_MS = RATE_LIMIT_DELAYS.reduce((sum, delay) => sum + delay, 0);
 
 export function createRequestSignal(timeoutMs: number, parentSignal?: AbortSignal): AbortSignal {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
@@ -40,12 +40,48 @@ function parseRetryAfter(res: Response): number | undefined {
   return undefined;
 }
 
+function parseResetTime(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    const timestampMs = numeric > 1_000_000_000_000 ? numeric : numeric * 1000;
+    return timestampMs;
+  }
+  const dateMs = Date.parse(value);
+  return Number.isNaN(dateMs) ? undefined : dateMs;
+}
+
+async function getRateLimitInfo(res: Response): Promise<{ remaining?: number; resetAt?: number }> {
+  const info: { remaining?: number; resetAt?: number } = {};
+  const readHeaders = (headers: Headers): void => {
+    const remaining = headers.get('x-ratelimit-remaining') ?? headers.get('ratelimit-remaining');
+    if (remaining !== null && Number.isFinite(Number(remaining))) info.remaining = Number(remaining);
+    info.resetAt ??= parseResetTime(headers.get('x-ratelimit-reset') ?? headers.get('ratelimit-reset'));
+  };
+  readHeaders(res.headers);
+
+  try {
+    const body = await res.clone().json() as {
+      error?: { metadata?: { headers?: Record<string, string> } };
+    };
+    const metadataHeaders = body.error?.metadata?.headers;
+    if (metadataHeaders) {
+      const normalizedHeaders = new Headers(metadataHeaders);
+      readHeaders(normalizedHeaders);
+    }
+  } catch {
+    // Rate-limit metadata is optional; use the HTTP headers when the body is not JSON.
+  }
+  return info;
+}
+
 export async function fetchWithRetry(
   url: string,
   init: RequestInit,
   retryTimeoutMs = DEFAULT_LLM_REQUEST_TIMEOUT_MS,
 ): Promise<Response> {
   let lastError: Error | undefined;
+  let rateLimitWaitedMs = 0;
   for (let attempt = 0; attempt <= RATE_LIMIT_DELAYS.length; attempt++) {
     if (init.signal?.aborted) {
       throw init.signal.reason instanceof Error ? init.signal.reason : new Error('Request aborted');
@@ -60,22 +96,27 @@ export async function fetchWithRetry(
       // Copilot owns its token-refresh loop; API-key providers should fail fast.
       if (res.status === 401) return res;
 
-      // Retry on 429 (rate limit) — honor Retry-After header when present,
-      // otherwise fall back to an extended backoff ladder. Daily-quota
-      // exhaustion (vs. a transient per-minute limit) can't recover within
-      // our retry window, so fail fast instead of burning ~77s per message.
+      // Retry a 429 only when the provider's reset fits within our bounded retry
+      // window. This uses generic rate-limit metadata instead of assuming a
+      // particular provider's quota type, limit, or reset schedule.
       if (res.status === 429) {
-        const body = await res.clone().text().catch(() => '');
-        const isDailyQuota = /free-models-per-day|per-day|daily/i.test(body);
-        if (isDailyQuota) {
-          console.warn('[retry] 429 daily quota exhausted — failing fast (retrying won\'t help until reset)');
+        const rateLimitInfo = await getRateLimitInfo(res);
+        const retryAfterMs = parseRetryAfter(res);
+        const resetDelayMs = rateLimitInfo.remaining === 0 && rateLimitInfo.resetAt !== undefined
+          ? Math.max(0, rateLimitInfo.resetAt - Date.now())
+          : undefined;
+        const providerDelayMs = retryAfterMs ?? (resetDelayMs && resetDelayMs > 0 ? resetDelayMs : undefined);
+        const delayMs = providerDelayMs ?? RATE_LIMIT_DELAYS[attempt];
+        const remainingRetryWindowMs = MAX_RATE_LIMIT_RETRY_MS - rateLimitWaitedMs;
+
+        if (delayMs !== undefined && delayMs > remainingRetryWindowMs) {
+          console.warn(`[retry] 429 reset is beyond the retry window (${Math.ceil(delayMs / 1000)}s); returning response`);
           return res;
         }
         if (attempt < RATE_LIMIT_DELAYS.length) {
-          const retryAfterMs = parseRetryAfter(res);
-          const delayMs = retryAfterMs ?? RATE_LIMIT_DELAYS[attempt];
           console.warn(`[retry] 429 rate limited (attempt ${attempt + 1}/${RATE_LIMIT_DELAYS.length + 1}) — retrying in ${(delayMs / 1000).toFixed(1)}s...`);
           await new Promise(r => setTimeout(r, delayMs));
+          rateLimitWaitedMs += delayMs;
           continue;
         }
         return res;
