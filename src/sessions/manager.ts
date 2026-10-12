@@ -15,59 +15,87 @@ const DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
  * assistant message has a matching tool_call. This prevents Anthropic API 400 errors.
  */
 function sanitizeToolPairs(messages: Message[]): Message[] {
-  // Build set of all tool_call IDs from assistant messages
-  const allToolCallIds = new Set<string>();
+  const precedingToolCallIds = new Set<string>();
+  const filtered: Message[] = [];
   for (const msg of messages) {
-    if (msg.role === 'assistant' && msg.tool_calls) {
-      for (const tc of msg.tool_calls) allToolCallIds.add(tc.id);
-    }
-    // Also check Anthropic-native content blocks
-    if (msg.role === 'assistant' && typeof msg.content !== 'string') {
-      for (const b of msg.content) {
-        if (b.type === 'tool_use' && b.id) allToolCallIds.add(b.id);
+    if (msg.role === 'assistant') {
+      precedingToolCallIds.clear();
+      for (const tc of msg.tool_calls ?? []) precedingToolCallIds.add(tc.id);
+      if (typeof msg.content !== 'string') {
+        for (const block of msg.content) {
+          if (block.type === 'tool_use' && block.id) precedingToolCallIds.add(block.id);
+        }
       }
+    } else if (msg.role !== 'tool' && (typeof msg.content === 'string' || !msg.content.some(block => block.type === 'tool_result'))) {
+      precedingToolCallIds.clear();
     }
-  }
 
-  // Build set of all tool_result references
-  const allResultRefs = new Set<string>();
-  for (const msg of messages) {
-    if (msg.role === 'tool' && msg.tool_call_id) allResultRefs.add(msg.tool_call_id);
-    if (typeof msg.content !== 'string') {
-      for (const b of msg.content) {
-        if (b.type === 'tool_result' && b.tool_use_id) allResultRefs.add(b.tool_use_id);
-      }
-    }
-  }
-
-  const filtered = messages.filter(msg => {
-    // Drop orphaned tool results (no matching tool_call)
     if (msg.role === 'tool' && msg.tool_call_id) {
-      if (!allToolCallIds.has(msg.tool_call_id)) {
+      if (!precedingToolCallIds.has(msg.tool_call_id)) {
         console.log(`[sessions] Dropping orphaned tool result: ${msg.tool_call_id}`);
-        return false;
+        continue;
       }
+      precedingToolCallIds.delete(msg.tool_call_id);
     }
-    // Drop Anthropic-native orphaned tool_result blocks
+
     if (typeof msg.content !== 'string' && msg.content.some(b => b.type === 'tool_result')) {
-      const hasOrphan = msg.content.some(b => b.type === 'tool_result' && b.tool_use_id && !allToolCallIds.has(b.tool_use_id));
+      const hasOrphan = msg.content.some(b => b.type === 'tool_result' && b.tool_use_id && !precedingToolCallIds.has(b.tool_use_id));
       if (hasOrphan) {
-        // Filter out just the orphaned blocks, keep any non-orphaned content
         const validBlocks = msg.content.filter(b => {
-          if (b.type === 'tool_result' && b.tool_use_id && !allToolCallIds.has(b.tool_use_id)) {
+          if (b.type === 'tool_result' && b.tool_use_id && !precedingToolCallIds.has(b.tool_use_id)) {
             console.log(`[sessions] Dropping orphaned tool_result block: ${b.tool_use_id}`);
             return false;
           }
           return true;
         });
-        if (validBlocks.length === 0) return false;
+        if (validBlocks.length === 0) continue;
         msg.content = validBlocks;
       }
     }
-    return true;
-  });
 
+    if (typeof msg.content !== 'string') {
+      for (const block of msg.content) {
+        if (block.type === 'tool_result' && block.tool_use_id) precedingToolCallIds.delete(block.tool_use_id);
+      }
+    }
+    filtered.push(msg);
+    if (msg.role === 'user' || msg.role === 'system') precedingToolCallIds.clear();
+  }
   return filtered;
+}
+
+function toolCallIds(message: Message): string[] {
+  const ids = (message.tool_calls ?? []).map(call => call.id);
+  if (typeof message.content !== 'string') {
+    for (const block of message.content) {
+      if (block.type === 'tool_use' && block.id) ids.push(block.id);
+    }
+  }
+  return ids;
+}
+
+function toolResultIds(message: Message): string[] {
+  const ids = message.role === 'tool' && message.tool_call_id ? [message.tool_call_id] : [];
+  if (typeof message.content !== 'string') {
+    for (const block of message.content) {
+      if (block.type === 'tool_result' && block.tool_use_id) ids.push(block.tool_use_id);
+    }
+  }
+  return ids;
+}
+
+function safeArchiveBoundary(messages: Message[], requestedBoundary: number): number {
+  let boundary = Math.max(0, Math.min(messages.length, requestedBoundary));
+  for (let index = 0; index < boundary; index++) {
+    const callIds = toolCallIds(messages[index]);
+    if (callIds.length === 0) continue;
+    const callIdSet = new Set(callIds);
+    const hasResultAfterBoundary = messages.slice(boundary).some(message =>
+      toolResultIds(message).some(id => callIdSet.has(id)),
+    );
+    if (hasResultAfterBoundary) boundary = index;
+  }
+  return boundary;
 }
 
 export class SessionManager {
@@ -115,8 +143,10 @@ export class SessionManager {
       if (!data.metadata || typeof data.metadata !== 'object' || !('messageCount' in data.metadata)) {
         data.metadata = { ...this.defaultMetadata(), ...(data.metadata as Record<string, unknown> ?? {}) } as SessionMetadata;
       }
-      // Sanitize tool pairs — remove orphaned tool results/calls
+      // Sanitize tool pairs — persist cleanup so stale results are not dropped on every load.
+      const originalMessages = JSON.stringify(data.messages);
       data.messages = sanitizeToolPairs(data.messages);
+      if (JSON.stringify(data.messages) !== originalMessages) this.save(data);
       return data;
     } catch {
       return null;
@@ -218,8 +248,10 @@ export class SessionManager {
     if (convMsgs.length <= keepMessages) return 0;
 
     // Archive the old messages
-    const toArchive = convMsgs.slice(0, convMsgs.length - keepMessages);
-    const toKeep = convMsgs.slice(convMsgs.length - keepMessages);
+    const requestedBoundary = convMsgs.length - keepMessages;
+    const boundary = safeArchiveBoundary(convMsgs, requestedBoundary);
+    const toArchive = convMsgs.slice(0, boundary);
+    const toKeep = convMsgs.slice(boundary);
 
     const archiveFile = path.join(this.archiveDir(), `${id.replace(/[^a-zA-Z0-9_\-:.]/g, '_')}-${Date.now()}.json`);
     const archiveData = {
