@@ -18,6 +18,8 @@ import {
   ChannelRule,
   RuleChange,
 } from '../sarsi/model.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 export interface InteractionRecord {
   /** Unique ID for this interaction */
@@ -36,7 +38,7 @@ export interface InteractionRecord {
   latencyMs: number;
   /** Whether tool calls succeeded */
   toolSuccess: boolean;
-  /** Whether the user seemed satisfied (e.g., no immediate follow-up correction) */
+  /** Completion heuristic (no abort/truncation); direct user satisfaction feedback is unavailable. */
   userSatisfied: boolean;
   /** Number of tool calls made */
   toolCallCount: number;
@@ -46,6 +48,8 @@ export interface InteractionRecord {
   channel: string;
   /** Whether routing was optimal (heuristic: low latency + high tokens efficiency + user satisfied) */
   routingWasOptimal: boolean;
+  /** SARSI rule actually selected for this interaction, when available. */
+  routingRuleId?: string;
   /** Per-tool results — enables fine-grained bug detection */
   toolResults?: Array<{ tool: string; success: boolean; error?: string }>;
 }
@@ -72,6 +76,15 @@ interface ToolFailureState {
   lastError?: string;
 }
 
+interface CuratorState {
+  version: 1;
+  pendingProposals: RuleProposal[];
+  reviewCount: number;
+  lastReviewTime: string | null;
+  toolFailures: Array<[string, ToolFailureState]>;
+  majorBugCooldown: Array<[string, number]>;
+}
+
 export class Curator {
   private pendingProposals: RuleProposal[] = [];
   private reviewCount = 0;
@@ -82,6 +95,12 @@ export class Curator {
   private majorBugCooldown: Map<string, number> = new Map();
   private readonly majorBugCooldownMs = 10 * 60 * 1000; // 10 min
   private readonly failureWindow = 20; // track last N interactions per tool
+  private readonly statePath?: string;
+
+  constructor(statePath?: string) {
+    this.statePath = statePath;
+    if (statePath) this.restore();
+  }
 
   /**
    * Review a completed interaction and generate rule proposals.
@@ -91,7 +110,6 @@ export class Curator {
     this.reviewCount++;
     this.lastReviewTime = new Date().toISOString();
     const proposals: RuleProposal[] = [];
-    const sarsi = getSarsi();
     const model = getSarsiModel();
 
     // ── Bug detection: update per-tool failure tracking ──
@@ -107,7 +125,6 @@ export class Curator {
 
     if (providerRule) {
       if (!record.routingWasOptimal) {
-        sarsi.adjustConfidence(providerRule.id, -0.05);
         proposals.push({
           id: `prop-${Date.now()}-1`,
           ruleType: 'provider',
@@ -124,8 +141,6 @@ export class Curator {
           priority: 0.7,
           severity: 'minor',
         });
-      } else if (record.userSatisfied && record.latencyMs < 3000) {
-        sarsi.adjustConfidence(providerRule.id, +0.02);
       }
     }
 
@@ -210,7 +225,22 @@ export class Curator {
       });
     }
 
-    this.pendingProposals.push(...proposals);
+    for (const proposal of proposals) {
+      const existingIndex = this.pendingProposals.findIndex(existing =>
+        existing.ruleType === proposal.ruleType && existing.ruleId === proposal.ruleId,
+      );
+      if (existingIndex < 0) {
+        this.pendingProposals.push(proposal);
+      } else {
+        const existing = this.pendingProposals[existingIndex];
+        this.pendingProposals[existingIndex] = {
+          ...proposal,
+          confidence: Math.max(existing.confidence, proposal.confidence),
+          priority: Math.max(existing.priority, proposal.priority),
+        };
+      }
+    }
+    this.persist();
     return proposals;
   }
 
@@ -256,30 +286,23 @@ export class Curator {
 
       // Find the matching tool rule (by preferredTool or fallbackTool name)
       const rule = model.toolRules.find(r => r.preferredTool === tool || r.fallbackTool === tool);
+      // Curator can only tune tool behavior that the runner actually consumes.
+      // Do not manufacture rules for tools with no runtime policy integration.
+      if (!rule) continue;
 
       if (isMajor) {
         this.majorBugCooldown.set(tool, now);
-        const newRetries = rule ? Math.min(10, rule.maxRetries + 2) : 3;
-        const newTimeout = rule ? Math.min(120000, rule.timeoutMs * 2) : 30000;
+        const newTimeout = Math.min(120000, rule.timeoutMs * 2);
         const fallback = rule?.fallbackTool && rule.fallbackTool !== tool ? rule.fallbackTool : undefined;
 
         proposals.push({
           id: `prop-${Date.now()}-major-${tool}`,
           ruleType: 'tool',
           ruleId: rule?.id ?? `auto-${tool}`,
-          change: rule ? 'modify' : 'add',
-          before: rule ? { ...rule } : undefined,
-          after: rule
-            ? { ...rule, maxRetries: newRetries, timeoutMs: newTimeout, rationale: `Major bug: ${state.failures}/${state.total} failures in window. Last error: ${state.lastError ?? 'unknown'}` }
-            : {
-                id: `auto-${tool}`,
-                operation: tool,
-                preferredTool: tool,
-                maxRetries: newRetries,
-                timeoutMs: newTimeout,
-                conditions: ['auto-created by Curator'],
-              },
-          reason: `MAJOR BUG: tool '${tool}' failed ${state.failures}/${state.total} times (rate ${(failureRate * 100).toFixed(0)}%). Last error: ${state.lastError ?? 'unknown'}. ${fallback ? `Fallback available: ${fallback}.` : ''} Raising retries to ${newRetries} and timeout to ${newTimeout}ms.`,
+          change: 'modify',
+          before: { ...rule },
+          after: { ...rule, timeoutMs: newTimeout, rationale: `Major bug: ${state.failures}/${state.total} failures in window. Last error: ${state.lastError ?? 'unknown'}` },
+          reason: `MAJOR BUG: tool '${tool}' failed ${state.failures}/${state.total} times (rate ${(failureRate * 100).toFixed(0)}%). Last error: ${state.lastError ?? 'unknown'}. ${fallback ? `Fallback available: ${fallback}.` : ''} Raising the enforced timeout to ${newTimeout}ms.`,
           confidence: 0.75,
           priority: 0.85,
           severity: 'major',
@@ -287,26 +310,16 @@ export class Curator {
       } else {
         // Minor bug — only propose if we haven't already flagged this tool recently
         if (inCooldown && now - inCooldown < this.majorBugCooldownMs) continue;
-        const newRetries = rule ? Math.min(10, rule.maxRetries + 1) : 2;
-        const newTimeout = rule ? Math.min(120000, Math.round(rule.timeoutMs * 1.5)) : 20000;
+        const newTimeout = Math.min(120000, Math.round(rule.timeoutMs * 1.5));
 
         proposals.push({
           id: `prop-${Date.now()}-minor-${tool}`,
           ruleType: 'tool',
           ruleId: rule?.id ?? `auto-${tool}`,
-          change: rule ? 'modify' : 'add',
-          before: rule ? { ...rule } : undefined,
-          after: rule
-            ? { ...rule, maxRetries: newRetries, timeoutMs: newTimeout, rationale: `Minor bug: ${state.failures}/${state.total} failures in window. Last error: ${state.lastError ?? 'unknown'}` }
-            : {
-                id: `auto-${tool}`,
-                operation: tool,
-                preferredTool: tool,
-                maxRetries: newRetries,
-                timeoutMs: newTimeout,
-                conditions: ['auto-created by Curator'],
-              },
-          reason: `MINOR BUG: tool '${tool}' failed ${state.failures}/${state.total} times. Last error: ${state.lastError ?? 'unknown'}. Bumping retries to ${newRetries} and timeout to ${newTimeout}ms.`,
+          change: 'modify',
+          before: { ...rule },
+          after: { ...rule, timeoutMs: newTimeout, rationale: `Minor bug: ${state.failures}/${state.total} failures in window. Last error: ${state.lastError ?? 'unknown'}` },
+          reason: `MINOR BUG: tool '${tool}' failed ${state.failures}/${state.total} times. Last error: ${state.lastError ?? 'unknown'}. Raising the enforced timeout to ${newTimeout}ms.`,
           confidence: 0.5,
           priority: 0.4,
           severity: 'minor',
@@ -322,15 +335,32 @@ export class Curator {
    * This is what Meta^n calls — it takes the proposals and commits them.
    * Only applies proposals with confidence >= threshold.
    */
-  applyProposals(threshold: number = 0.5): RuleChange[] {
+  applyProposals(threshold: number = 0.5, canApply: (proposal: RuleProposal) => boolean = () => true): RuleChange[] {
     const sarsi = getSarsi();
     const model = getSarsiModel();
     const applied: RuleChange[] = [];
     const remaining: RuleProposal[] = [];
 
     for (const proposal of this.pendingProposals) {
-      if (proposal.confidence < threshold) {
+      if (proposal.confidence < threshold || !canApply(proposal)) {
         remaining.push(proposal);
+        continue;
+      }
+      const rules = proposal.ruleType === 'provider' ? model.providerRules
+        : proposal.ruleType === 'tool' ? model.toolRules
+          : model.channelRules;
+      const existingRule = rules.find(rule => rule.id === proposal.ruleId);
+      if ((proposal.change === 'modify' || proposal.change === 'remove') && !existingRule) {
+        console.warn(`[Curator] Dropping proposal ${proposal.id}: rule ${proposal.ruleId} no longer exists`);
+        continue;
+      }
+      if (proposal.change === 'add' && existingRule) {
+        console.warn(`[Curator] Dropping proposal ${proposal.id}: rule ${proposal.ruleId} already exists`);
+        continue;
+      }
+      if (proposal.change === 'modify' && proposal.before !== undefined
+        && JSON.stringify(existingRule) !== JSON.stringify(proposal.before)) {
+        console.warn(`[Curator] Dropping stale proposal ${proposal.id} for ${proposal.ruleId}`);
         continue;
       }
 
@@ -355,7 +385,8 @@ export class Curator {
     }
 
     this.pendingProposals = remaining;
-    console.log(`[Curator] Applied ${applied.length} proposals (${remaining.length} below threshold ${threshold})`);
+    console.log(`[Curator] Applied ${applied.length} proposals; ${remaining.length} remain pending`);
+    this.persist();
     return applied;
   }
 
@@ -367,6 +398,7 @@ export class Curator {
   /** Clear proposals (after Meta^n has processed them) */
   clearProposals(): void {
     this.pendingProposals = [];
+    this.persist();
   }
 
   /** Get curator stats */
@@ -424,6 +456,41 @@ export class Curator {
       }
     }
   }
+
+  private restore(): void {
+    if (!this.statePath || !fs.existsSync(this.statePath)) return;
+    try {
+      const state = JSON.parse(fs.readFileSync(this.statePath, 'utf8')) as CuratorState;
+      if (state.version !== 1 || !Array.isArray(state.pendingProposals)
+        || !Array.isArray(state.toolFailures) || !Array.isArray(state.majorBugCooldown)) {
+        throw new Error('unsupported or malformed curator state');
+      }
+      this.pendingProposals = state.pendingProposals;
+      this.reviewCount = state.reviewCount;
+      this.lastReviewTime = state.lastReviewTime;
+      this.toolFailures = new Map(state.toolFailures);
+      this.majorBugCooldown = new Map(state.majorBugCooldown);
+    } catch (error) {
+      throw new Error(`Failed to restore Curator state from ${this.statePath}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    }
+  }
+
+  private persist(): void {
+    if (!this.statePath) return;
+    const state: CuratorState = {
+      version: 1,
+      pendingProposals: this.pendingProposals,
+      reviewCount: this.reviewCount,
+      lastReviewTime: this.lastReviewTime,
+      toolFailures: [...this.toolFailures],
+      majorBugCooldown: [...this.majorBugCooldown],
+    };
+    const directory = path.dirname(this.statePath);
+    fs.mkdirSync(directory, { recursive: true });
+    const temporaryPath = `${this.statePath}.tmp`;
+    fs.writeFileSync(temporaryPath, JSON.stringify(state, null, 2), 'utf8');
+    fs.renameSync(temporaryPath, this.statePath);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -433,7 +500,7 @@ export class Curator {
 let curatorInstance: Curator | null = null;
 
 export function getCurator(): Curator {
-  if (!curatorInstance) curatorInstance = new Curator();
+  if (!curatorInstance) curatorInstance = new Curator(path.join(process.cwd(), '.symbiote', 'curator-state.json'));
   return curatorInstance;
 }
 

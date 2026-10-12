@@ -61,17 +61,21 @@ Five interlocking meta-cognitive subsystems that upgrade the Symbiote runtime fr
 - Generates rule proposals based on provider performance, token efficiency, latency, tool success
 - **Active-update bias** — prefers updating stale rules over preserving them
 - Threshold-based proposal application (only applies proposals with confidence ≥ 0.5)
+- Tool proposals are limited to existing tool rules and adjust enforced timeouts only; retry counts are not changed automatically
 
 ### 3. Meta^n (`src/meta/`) — Recursive Self-Improvement
-- **meta.ts** (258 lines) — MetaN class with evaluation cycle
+- **meta.ts** — MetaN class with persisted, sample-based evaluation windows
 - **index.ts** — Public API
 
 **Key features:**
-- Takes Curator's proposed rule updates and evaluates them
-- Compares before/after metrics (routing accuracy, tool success, latency, token cost)
-- Three decisions: **commit** (improvement > +0.02), **rollback** (degradation < -0.03), **hold** (marginal)
+- Applies provider/tool proposals only when at least 8 matching pre-change outcomes exist
+- Evaluates after at least 8 candidate outcomes, with a hard bound of 20 relevant task/tool opportunities; unrelated interactions do not count, and a provider rule that is never selected is rolled back
+- Commits only a statistically supported improvement, rolls back a supported regression, and reverts changes without demonstrated benefit at the sample bound
+- Persists matched outcome history and active evaluation windows across restarts
 - Background loop runs every 5 minutes + on-demand every 10 interactions
-- Recursive: uses the system's own routing to evaluate whether routing improved
+- Uses the actual selected routing-rule ID and per-tool results to attribute observations to a change
+- SARSI tool-rule timeouts are enforced by the runner unless `SYMBIOTE_TOOL_TIMEOUT_MS` explicitly overrides them
+- Uses turn-completion heuristics rather than direct user satisfaction feedback; the score is operational evidence, not proof of subjective quality
 
 ### 4. MEA (`src/agent/mea.ts`) — Monitor → Execute → Audit
 - **mea.ts** (173 lines) — Lightweight audit gate + stats tracker
@@ -160,7 +164,9 @@ src/orchestrator/
 
 - SARSI model: `.symbiote/sarsi-model.json` (atomic writes + `.bak` backup)
 - Rule history: Last 500 changes retained in the model
-- Meta^n evaluations: Last 200 retained in memory
+- Curator proposals and per-tool failure windows: `.symbiote/curator-state.json`
+- Meta^n evaluations, iteration count, and active evaluation windows: `.symbiote/meta-state.json`
+- Curator and Meta^n state use atomic snapshot replacement; malformed state is surfaced rather than silently reset
 
 ## Safety
 

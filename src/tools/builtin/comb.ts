@@ -8,11 +8,11 @@ import type { ToolDefinition } from '../types.js';
 // ── VDB Hook ─────────────────────────────────────────────────────────────
 
 // VDB index + recent query hooks — set by daemon to avoid circular imports
-let _vdbIndex: ((text: string, source: string) => void) | null = null;
+let _vdbIndex: ((text: string, source: string) => boolean | void) | null = null;
 let _vdbRecent: ((source: string, k: number) => Array<{ text: string; timestamp: number }>) | null = null;
 
 export function setCombVdbHook(
-  indexFn: (text: string, source: string) => void,
+  indexFn: (text: string, source: string) => boolean | void,
   recentFn?: (source: string, k: number) => Array<{ text: string; timestamp: number }>,
 ): void {
   _vdbIndex = indexFn;
@@ -21,13 +21,11 @@ export function setCombVdbHook(
 
 // ── Stage (index into VDB) ───────────────────────────────────────────────
 
-function stage(text: string, source = 'comb'): void {
+function stage(text: string, source = 'comb'): boolean {
   if (!_vdbIndex) {
-    // Pre-daemon-init: queue for later? No — just skip silently.
-    // Daemon wires hook before any agent runs.
-    return;
+    throw new Error('Memory backend is not initialized; nothing was staged.');
   }
-  _vdbIndex(text, source);
+  return _vdbIndex(text, source) !== false;
 }
 
 // ── Recall (query VDB for recent comb entries) ───────────────────────────
@@ -107,8 +105,11 @@ export const combStageTool: ToolDefinition = {
   async execute(input) {
     const content = String(input.content ?? '');
     try {
-      stage(content, 'comb');
-      return `Staged ${content.length} chars into memory.`;
+      if (!content.trim()) throw new Error('Memory content is required.');
+      const indexed = stage(content, 'comb');
+      return indexed
+        ? `Staged ${content.length} chars into memory.`
+        : 'This memory was already present.';
     } catch (err) {
       return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
     }

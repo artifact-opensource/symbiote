@@ -137,26 +137,31 @@ export class SessionManager {
   }
 
   load(id: string): Session | null {
+    let data: Session;
     try {
-      const data = JSON.parse(fs.readFileSync(this.filePath(id), 'utf-8')) as Session;
-      // Backfill metadata for old sessions
-      if (!data.metadata || typeof data.metadata !== 'object' || !('messageCount' in data.metadata)) {
-        data.metadata = { ...this.defaultMetadata(), ...(data.metadata as Record<string, unknown> ?? {}) } as SessionMetadata;
-      }
-      // Sanitize tool pairs — persist cleanup so stale results are not dropped on every load.
-      const originalMessages = JSON.stringify(data.messages);
-      data.messages = sanitizeToolPairs(data.messages);
-      if (JSON.stringify(data.messages) !== originalMessages) this.save(data);
-      return data;
-    } catch {
-      return null;
+      data = JSON.parse(fs.readFileSync(this.filePath(id), 'utf-8')) as Session;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw new Error(`Failed to load session ${id}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
+    // Backfill metadata for old sessions
+    if (!data.metadata || typeof data.metadata !== 'object' || !('messageCount' in data.metadata)) {
+      data.metadata = { ...this.defaultMetadata(), ...(data.metadata as Record<string, unknown> ?? {}) } as SessionMetadata;
+    }
+    // Sanitize tool pairs — persist cleanup so stale results are not dropped on every load.
+    const originalMessages = JSON.stringify(data.messages);
+    data.messages = sanitizeToolPairs(data.messages);
+    if (JSON.stringify(data.messages) !== originalMessages) this.save(data);
+    return data;
   }
 
   save(session: Session): void {
     session.updatedAt = Date.now();
     session.metadata.messageCount = session.messages.length;
-    fs.writeFileSync(this.filePath(session.id), JSON.stringify(session, null, 2));
+    const destination = this.filePath(session.id);
+    const temporary = `${destination}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify(session, null, 2));
+    fs.renameSync(temporary, destination);
   }
 
   delete(id: string): boolean {

@@ -223,6 +223,13 @@ export class SarsiStore {
   /** Record a rule change in history and persist */
   recordChange(change: RuleChange): void {
     if (!this.model) this.load();
+    const existingIndex = this.model!.ruleHistory.findIndex(entry => entry.id === change.id);
+    if (existingIndex >= 0) {
+      const existing = this.model!.ruleHistory[existingIndex];
+      this.model!.ruleHistory[existingIndex] = { ...existing, ...change, rollback: existing.rollback };
+      this.persist();
+      return;
+    }
     this.model!.ruleHistory.push(change);
     // Keep last 500 changes to prevent unbounded growth
     if (this.model!.ruleHistory.length > 500) {
@@ -271,6 +278,7 @@ export class SarsiStore {
         break;
     }
 
+    entry.rollback = false;
     this.persist();
     console.log(`[SARSI] Rolled back change ${changeId} (${entry.ruleType} ${entry.ruleId})`);
     return true;

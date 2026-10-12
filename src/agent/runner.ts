@@ -12,6 +12,7 @@ import type { BlinkController } from './blink.js';
 import type { ContextStore } from './context-store.js';
 import { TodoManager } from './todo.js';
 import { randomUUID } from 'node:crypto';
+import { getSarsiModel } from '../sarsi/index.js';
 
 export const DEFAULT_MAX_CONTEXT_TOKENS = 100_000;
 
@@ -53,7 +54,17 @@ const envMs = (name: string, fallback: number): number => {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 };
 // A hung tool or silent stream must never stall the loop forever.
-const toolTimeoutMs = (): number => envMs('SYMBIOTE_TOOL_TIMEOUT_MS', 15 * 60_000);
+const toolTimeoutMs = (toolName: string): number => {
+  const configured = Number(process.env.SYMBIOTE_TOOL_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+
+  const rule = getSarsiModel().toolRules.find(item =>
+    item.preferredTool === toolName || item.fallbackTool === toolName,
+  );
+  return rule && Number.isFinite(rule.timeoutMs) && rule.timeoutMs > 0
+    ? rule.timeoutMs
+    : 15 * 60_000;
+};
 const streamIdleMs = (): number => envMs('SYMBIOTE_STREAM_IDLE_MS', 3 * 60_000);
 
 function isTransientStreamError(err: unknown): boolean {
@@ -469,7 +480,7 @@ export async function runAgent(
           : tc.input;
         try { config.onToolStart?.(tc.name, toolInput); } catch { /* progress reporting is non-critical */ }
         try {
-          let result = clipResult(await withTimeout(config.toolRegistry.execute(tc.name, toolInput), toolTimeoutMs(), config.abortSignal, `Tool ${tc.name}`));
+          let result = clipResult(await withTimeout(config.toolRegistry.execute(tc.name, toolInput), toolTimeoutMs(tc.name), config.abortSignal, `Tool ${tc.name}`));
           // Sanitize tool result before it enters the LLM context
           const sanitized = sanitizeToolResult(tc.name, result);
           if (sanitized.injectionDetected) {

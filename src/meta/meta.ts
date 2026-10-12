@@ -1,184 +1,338 @@
-// Meta^n — Recursive meta-operation for self-improvement of routing rules.
-// Takes Curator's proposed rule updates, applies them, validates whether they
-// improve delivery outcomes, and commits or rolls back based on results.
-//
-// The "recursive" part: Meta^n uses the gateway's own output feedback to evaluate
-// whether a rule change improved delivery quality. If it did, the change is committed.
-// If not, it's rolled back. The evaluation itself uses the same routing system —
-// making it a fixed meta-operation applied recursively.
+// Meta^n — evaluates routing and tool-policy changes against observed outcomes.
+// A rule change is retained only when matched runtime samples demonstrate benefit.
 
 import { getSarsi, getSarsiModel } from '../sarsi/index.js';
-import { getCurator, RuleProposal, InteractionRecord } from '../curator/index.js';
-import { RuleChange, SarsiModel, ProviderRule } from '../sarsi/model.js';
+import { Curator, getCurator, type InteractionRecord, type RuleProposal } from '../curator/index.js';
+import type { RuleChange, SarsiModel } from '../sarsi/model.js';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const MIN_BASELINE_SAMPLES = 8;
+const MIN_CANDIDATE_SAMPLES = 8;
+const MAX_CANDIDATE_SAMPLES = 20;
+const MAX_BASELINE_SAMPLES = 20;
+const MIN_EFFECT = 0.05;
+const MAX_HISTORY = 200;
+const MAX_OUTCOME_HISTORY = 1000;
+
+interface OutcomeSample {
+  record: InteractionRecord;
+  score: number;
+}
+
+interface ActiveEvaluation {
+  change: RuleChange;
+  baselineMetrics: SarsiModel['metrics'];
+  baselineScores: number[];
+  candidateScores: number[];
+  opportunities: number;
+}
 
 export interface MetaEvaluation {
   changeId: string;
   beforeMetrics: SarsiModel['metrics'];
   afterMetrics: SarsiModel['metrics'];
-  improvement: number; // -1..1 — positive = improved, negative = degraded
+  improvement: number;
   decision: 'commit' | 'rollback' | 'hold';
   reason: string;
+  baselineSamples?: number;
+  candidateSamples?: number;
+  confidenceInterval?: [number, number];
+}
+
+function mean(values: number[]): number {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function sampleVariance(values: number[], average: number): number {
+  if (values.length < 2) return 0;
+  return values.reduce((sum, value) => sum + (value - average) ** 2, 0) / (values.length - 1);
+}
+
+function outcomeScore(record: InteractionRecord): number {
+  const latencyTarget = getSarsiModel().goals.find(goal => goal.metric === 'latency')?.target ?? 2000;
+  const tokenTarget = getSarsiModel().goals.find(goal => goal.metric === 'cost')?.target ?? 500;
+  const toolSuccess = record.toolResults?.length
+    ? record.toolResults.filter(result => result.success).length / record.toolResults.length
+    : Number(record.toolSuccess);
+  const latencyScore = 1 / (1 + Math.max(0, record.latencyMs) / latencyTarget);
+  const tokenScore = 1 / (1 + Math.max(0, record.tokensUsed) / tokenTarget);
+
+  return 0.4 * Number(record.userSatisfied)
+    + 0.2 * Number(record.delivered)
+    + 0.2 * toolSuccess
+    + 0.1 * latencyScore
+    + 0.1 * tokenScore;
+}
+
+function changeBefore(change: RuleChange): Record<string, unknown> {
+  return change.before && typeof change.before === 'object'
+    ? change.before as Record<string, unknown>
+    : {};
+}
+
+function changeAfter(change: RuleChange): Record<string, unknown> {
+  return change.after && typeof change.after === 'object'
+    ? change.after as Record<string, unknown>
+    : {};
 }
 
 export class MetaN {
   private evaluationHistory: MetaEvaluation[] = [];
-  private activeEvaluations: Map<string, { change: RuleChange; beforeMetrics: SarsiModel['metrics'] }> = new Map();
-  private readonly maxHistory = 200;
+  private activeEvaluations = new Map<string, ActiveEvaluation>();
+  private outcomeHistory: OutcomeSample[] = [];
+  private readonly seenOutcomeIds = new Set<string>();
   private iterationCount = 0;
+  private readonly statePath?: string;
+  private readonly curator: Curator;
+
+  constructor(statePath?: string, curator: Curator = getCurator()) {
+    this.statePath = statePath;
+    this.curator = curator;
+    if (statePath) this.restore();
+  }
 
   /**
-   * Run one Meta^n cycle:
-   * 1. Get pending proposals from Curator
-   * 2. Apply them (above threshold)
-   * 3. Evaluate whether they improved outcomes
-   * 4. Commit or rollback
-   *
-   * This is the "recursive route" — it uses the system's own routing to evaluate
-   * whether the routing improved.
+   * Apply only proposals that have enough matched baseline evidence. Evaluation
+   * begins with later outcomes; applying a change never counts as evidence.
    */
   async runCycle(): Promise<MetaEvaluation[]> {
     this.iterationCount++;
-    const curator = getCurator();
-    const sarsi = getSarsi();
     const model = getSarsiModel();
-    const evaluations: MetaEvaluation[] = [];
+    const pending = this.curator.getPendingProposals();
+    const reservedRules = new Set<string>();
+    const appliedChanges = this.curator.applyProposals(0.5, proposal => {
+      const key = `${proposal.ruleType}:${proposal.ruleId}`;
+      const alreadyEvaluating = [...this.activeEvaluations.values()]
+        .some(active => active.change.ruleType === proposal.ruleType && active.change.ruleId === proposal.ruleId);
+      if (alreadyEvaluating || reservedRules.has(key)) return false;
+      if ((this.baselineFor(proposal, pending)?.length ?? 0) < MIN_BASELINE_SAMPLES) return false;
+      reservedRules.add(key);
+      return true;
+    });
 
-    // Snapshot before metrics
-    const beforeMetrics = { ...model.metrics };
-
-    // Get and apply proposals from Curator
-    const appliedChanges = curator.applyProposals(0.5);
-
-    if (appliedChanges.length === 0) {
-      return evaluations; // Nothing to evaluate
-    }
-
-    // For each applied change, set up an evaluation window
     for (const change of appliedChanges) {
+      const baseline = this.baselineForChange(change);
+      if (!baseline || baseline.length < MIN_BASELINE_SAMPLES) {
+        // The proposal may have changed while being applied; do not leave an
+        // unobservable change active.
+        getSarsi().rollback(change.id);
+        continue;
+      }
       this.activeEvaluations.set(change.id, {
         change,
-        beforeMetrics: { ...beforeMetrics },
+        baselineMetrics: { ...model.metrics },
+        baselineScores: baseline.map(sample => this.scoreForChange(change, sample.record, sample.score)),
+        candidateScores: [],
+        opportunities: 0,
       });
     }
 
-    // Evaluate each change based on the delta
-    for (const change of appliedChanges) {
-      const evaluation = this.evaluateChange(change, beforeMetrics, getSarsiModel().metrics);
-      evaluations.push(evaluation);
-
-      if (evaluation.decision === 'rollback') {
-        sarsi.rollback(change.id);
-        console.log(`[Meta^n] Rolled back ${change.id}: ${evaluation.reason}`);
-      } else if (evaluation.decision === 'commit') {
-        // Mark as verified
-        change.verified = true;
-        sarsi.recordChange(change);
-        console.log(`[Meta^n] Committed ${change.id}: ${evaluation.reason}`);
-      }
-      // 'hold' = keep but don't verify yet — needs more data
+    this.persist();
+    if (appliedChanges.length > 0) {
+      console.log(`[Meta^n] Applied ${this.activeEvaluations.size} evidence-eligible changes; awaiting matched outcomes`);
     }
-
-    // Store evaluation history
-    this.evaluationHistory.push(...evaluations);
-    if (this.evaluationHistory.length > this.maxHistory) {
-      this.evaluationHistory = this.evaluationHistory.slice(-this.maxHistory);
-    }
-
-    return evaluations;
+    return [];
   }
 
-  /**
-   * Evaluate whether a specific change improved outcomes.
-   * This is the core meta-operation — it compares before/after metrics.
-   */
-  private evaluateChange(
-    change: RuleChange,
-    before: SarsiModel['metrics'],
-    after: SarsiModel['metrics'],
-  ): MetaEvaluation {
-    // Calculate improvement score
-    // Weight: routingAccuracy (40%), toolSuccessRate (30%), latency (20%), tokenCost (10%)
-    const routingDelta = (after.routingAccuracy - before.routingAccuracy) * 0.4;
-    const toolDelta = (after.toolSuccessRate - before.toolSuccessRate) * 0.3;
-    const latencyDelta = before.averageLatencyMs > 0
-      ? ((before.averageLatencyMs - after.averageLatencyMs) / before.averageLatencyMs) * 0.2
-      : 0;
-    const tokenDelta = before.totalTokensUsed > 0
-      ? ((before.totalTokensUsed - after.totalTokensUsed) / before.totalTokensUsed) * 0.1
-      : 0;
+  /** Record an interaction and evaluate only changes it could have affected. */
+  async feedOutcome(record: InteractionRecord): Promise<void> {
+    if (this.seenOutcomeIds.has(record.id)) return;
 
-    const improvement = routingDelta + toolDelta + latencyDelta + tokenDelta;
+    const sample: OutcomeSample = { record, score: outcomeScore(record) };
+    this.seenOutcomeIds.add(record.id);
+    this.outcomeHistory.push(sample);
+    if (this.outcomeHistory.length > MAX_OUTCOME_HISTORY) {
+      const removed = this.outcomeHistory.splice(0, this.outcomeHistory.length - MAX_OUTCOME_HISTORY);
+      for (const old of removed) this.seenOutcomeIds.delete(old.record.id);
+    }
 
-    let decision: 'commit' | 'rollback' | 'hold';
-    let reason: string;
+    for (const [changeId, active] of this.activeEvaluations) {
+      if (!this.matchesOpportunity(active.change, record)) continue;
+      active.opportunities++;
+      if (this.matchesCandidate(active.change, record)) {
+        active.candidateScores.push(this.scoreForChange(active.change, record, sample.score));
+      }
 
-    if (improvement > 0.02) {
+      const evaluation = this.evaluate(active);
+      if (evaluation.decision === 'hold') continue;
+
+      const sarsi = getSarsi();
+      if (evaluation.decision === 'rollback') {
+        sarsi.rollback(changeId);
+        console.log(`[Meta^n] Rolled back ${changeId}: ${evaluation.reason}`);
+      } else {
+        active.change.verified = true;
+        sarsi.recordChange(active.change);
+        console.log(`[Meta^n] Committed ${changeId}: ${evaluation.reason}`);
+      }
+      this.activeEvaluations.delete(changeId);
+      this.evaluationHistory.push(evaluation);
+      if (this.evaluationHistory.length > MAX_HISTORY) {
+        this.evaluationHistory = this.evaluationHistory.slice(-MAX_HISTORY);
+      }
+    }
+    this.persist();
+  }
+
+  private baselineFor(proposal: RuleProposal, proposals: RuleProposal[]): OutcomeSample[] | undefined {
+    const applicable = proposals.find(item => item.id === proposal.id);
+    if (!applicable) return undefined;
+    return this.outcomeHistory
+      .filter(sample => this.matchesBaselineProposal(proposal, sample.record))
+      .slice(-MAX_BASELINE_SAMPLES);
+  }
+
+  private baselineForChange(change: RuleChange): OutcomeSample[] {
+    return this.outcomeHistory
+      .filter(sample => this.matchesBaselineChange(change, sample.record))
+      .slice(-MAX_BASELINE_SAMPLES);
+  }
+
+  private matchesBaselineProposal(proposal: RuleProposal, record: InteractionRecord): boolean {
+    if (proposal.ruleType === 'provider') {
+      const before = proposal.before as { taskType?: string } | undefined;
+      return !!before?.taskType && record.taskType === before.taskType;
+    }
+    if (proposal.ruleType === 'tool') {
+      const before = proposal.before as { preferredTool?: string } | undefined;
+      const tool = before?.preferredTool;
+      return !!tool && !!record.toolResults?.some(result => result.tool === tool);
+    }
+    return false;
+  }
+
+  private matchesBaselineChange(change: RuleChange, record: InteractionRecord): boolean {
+    if (change.ruleType === 'provider') {
+      const before = changeBefore(change);
+      return typeof before.taskType === 'string'
+        && record.taskType === before.taskType;
+    }
+    if (change.ruleType === 'tool') {
+      const tool = changeBefore(change).preferredTool;
+      return typeof tool === 'string' && !!record.toolResults?.some(result => result.tool === tool);
+    }
+    return false;
+  }
+
+  private matchesCandidate(change: RuleChange, record: InteractionRecord): boolean {
+    if (change.ruleType === 'provider') {
+      const after = changeAfter(change);
+      return typeof after.taskType === 'string'
+        && record.taskType === after.taskType
+        && record.routingRuleId === change.ruleId
+        && (typeof after.provider !== 'string' || record.provider === after.provider);
+    }
+    if (change.ruleType === 'tool') {
+      const tool = changeAfter(change).preferredTool;
+      return typeof tool === 'string' && !!record.toolResults?.some(result => result.tool === tool);
+    }
+    return false;
+  }
+
+  private matchesOpportunity(change: RuleChange, record: InteractionRecord): boolean {
+    if (change.ruleType === 'provider') {
+      return record.taskType === changeAfter(change).taskType;
+    }
+    if (change.ruleType === 'tool') {
+      const tool = changeBefore(change).preferredTool ?? changeAfter(change).preferredTool;
+      return typeof tool === 'string' && !!record.toolResults?.some(item => item.tool === tool);
+    }
+    return false;
+  }
+
+  private scoreForChange(change: RuleChange, record: InteractionRecord, overallScore: number): number {
+    if (change.ruleType !== 'tool') return overallScore;
+    const tool = changeAfter(change).preferredTool ?? changeBefore(change).preferredTool;
+    const result = record.toolResults?.find(item => item.tool === tool);
+    if (!result) return 0;
+    const latencyTarget = getSarsiModel().goals.find(goal => goal.metric === 'latency')?.target ?? 2000;
+    const latencyScore = 1 / (1 + Math.max(0, record.latencyMs) / latencyTarget);
+    return 0.8 * Number(result.success) + 0.2 * latencyScore;
+  }
+
+  private evaluate(active: ActiveEvaluation): MetaEvaluation {
+    const baseline = active.baselineScores;
+    const candidate = active.candidateScores;
+    const model = getSarsiModel();
+    if (candidate.length < MIN_CANDIDATE_SAMPLES) {
+      if (active.opportunities >= MAX_CANDIDATE_SAMPLES) {
+        const reason = candidate.length === 0
+          ? `The changed route was not selected in ${active.opportunities} matching task opportunities; reverting ineffective change`
+          : `Only ${candidate.length}/${MIN_CANDIDATE_SAMPLES} candidate outcomes were observed in ${active.opportunities} matching opportunities; reverting unproven change`;
+        return {
+          changeId: active.change.id,
+          beforeMetrics: active.baselineMetrics,
+          afterMetrics: { ...model.metrics },
+          improvement: 0,
+          decision: 'rollback',
+          reason,
+          baselineSamples: baseline.length,
+          candidateSamples: candidate.length,
+        };
+      }
+      return {
+        changeId: active.change.id,
+        beforeMetrics: active.baselineMetrics,
+        afterMetrics: { ...model.metrics },
+        improvement: 0,
+        decision: 'hold',
+        reason: `Collecting matched candidate outcomes (${candidate.length}/${MIN_CANDIDATE_SAMPLES})`,
+        baselineSamples: baseline.length,
+        candidateSamples: candidate.length,
+      };
+    }
+
+    const before = baseline.length > 0 ? mean(baseline) : 0;
+    const after = mean(candidate);
+    const improvement = after - before;
+    const standardError = baseline.length > 1
+      ? Math.sqrt(sampleVariance(baseline, before) / baseline.length + sampleVariance(candidate, after) / candidate.length)
+      : Number.POSITIVE_INFINITY;
+    const confidenceInterval: [number, number] = [
+      improvement - 1.96 * standardError,
+      improvement + 1.96 * standardError,
+    ];
+
+    let decision: MetaEvaluation['decision'] = 'hold';
+    let reason = `No decision yet: observed change ${improvement >= 0 ? '+' : ''}${improvement.toFixed(3)}`;
+    if (baseline.length < MIN_BASELINE_SAMPLES) {
+      decision = active.opportunities >= MAX_CANDIDATE_SAMPLES ? 'rollback' : 'hold';
+      reason = `No valid baseline evidence for this change (${baseline.length}/${MIN_BASELINE_SAMPLES}); ${decision === 'rollback' ? 'reverting unverified change' : 'collecting bounded candidate sample'}`;
+    } else if (improvement >= MIN_EFFECT && confidenceInterval[0] > 0) {
       decision = 'commit';
-      reason = `Improvement score +${improvement.toFixed(3)} — routing ${before.routingAccuracy.toFixed(2)}→${after.routingAccuracy.toFixed(2)}, tool ${before.toolSuccessRate.toFixed(2)}→${after.toolSuccessRate.toFixed(2)}`;
-    } else if (improvement < -0.03) {
+      reason = `Matched samples show improvement +${improvement.toFixed(3)} (95% CI ${confidenceInterval[0].toFixed(3)} to ${confidenceInterval[1].toFixed(3)})`;
+    } else if (improvement <= -MIN_EFFECT && confidenceInterval[1] < 0) {
       decision = 'rollback';
-      reason = `Degradation score ${improvement.toFixed(3)} — change made things worse, reverting`;
-    } else {
-      decision = 'hold';
-      reason = `Marginal change (score ${improvement.toFixed(3)}) — keeping but needs more data to verify`;
+      reason = `Matched samples show regression ${improvement.toFixed(3)} (95% CI ${confidenceInterval[0].toFixed(3)} to ${confidenceInterval[1].toFixed(3)})`;
+    } else if (active.opportunities >= MAX_CANDIDATE_SAMPLES) {
+      decision = 'rollback';
+      reason = `No demonstrated improvement after ${active.opportunities} matching opportunities (score ${improvement >= 0 ? '+' : ''}${improvement.toFixed(3)}); reverting`;
     }
 
     return {
-      changeId: change.id,
-      beforeMetrics: before,
-      afterMetrics: after,
+      changeId: active.change.id,
+      beforeMetrics: active.baselineMetrics,
+      afterMetrics: { ...model.metrics },
       improvement,
       decision,
       reason,
+      baselineSamples: baseline.length,
+      candidateSamples: candidate.length,
+      confidenceInterval,
     };
   }
 
-  /**
-   * Feed an interaction outcome back into Meta^n.
-   * This is the recursive part — the gateway's own output is used to evaluate
-   * whether the routing rules are improving.
-   */
-  async feedOutcome(record: InteractionRecord): Promise<void> {
-    // Record the outcome in SARSI metrics
-    const sarsi = getSarsi();
-    const model = getSarsiModel();
-
-    // Determine if this interaction validates any pending evaluations
-    for (const [changeId, evalState] of this.activeEvaluations) {
-      // If the interaction used the provider/rule that was changed, it's relevant
-      const change = evalState.change;
-      if (change.ruleType === 'provider') {
-        const rule = model.providerRules.find(r => r.id === change.ruleId);
-        if (rule && rule.provider === record.provider) {
-          // This interaction is affected by this change — evaluate
-          const evaluation = this.evaluateChange(
-            change,
-            evalState.beforeMetrics,
-            model.metrics,
-          );
-
-          if (evaluation.decision === 'rollback') {
-            sarsi.rollback(changeId);
-            console.log(`[Meta^n] Rolled back ${changeId} based on outcome: ${evaluation.reason}`);
-          }
-
-          this.activeEvaluations.delete(changeId);
-        }
-      }
-    }
-  }
-
-  /** Get evaluation history for audit/debugging */
+  /** Get evaluation history for audit/debugging. */
   getHistory(): MetaEvaluation[] {
     return [...this.evaluationHistory];
   }
 
-  /** Get active evaluations still being monitored */
+  /** Get active evaluations still being monitored. */
   getActiveCount(): number {
     return this.activeEvaluations.size;
   }
 
-  /** Get Meta^n stats */
   getStats(): {
     iterations: number;
     evaluations: number;
@@ -199,6 +353,52 @@ export class MetaN {
       holds,
     };
   }
+
+  private restore(): void {
+    if (!this.statePath || !fs.existsSync(this.statePath)) return;
+    try {
+      const state = JSON.parse(fs.readFileSync(this.statePath, 'utf8')) as {
+        version: number;
+        iterationCount: number;
+        evaluationHistory: MetaEvaluation[];
+        activeEvaluations: Array<[string, ActiveEvaluation | { change: RuleChange; beforeMetrics: SarsiModel['metrics'] }]>;
+        outcomeHistory?: OutcomeSample[];
+      };
+      if (![1, 2].includes(state.version) || !Array.isArray(state.evaluationHistory)
+        || !Array.isArray(state.activeEvaluations) || !Number.isInteger(state.iterationCount)
+        || state.iterationCount < 0 || (state.version === 2 && !Array.isArray(state.outcomeHistory))) {
+        throw new Error('unsupported or malformed Meta^n state');
+      }
+      this.iterationCount = state.iterationCount;
+      this.evaluationHistory = state.evaluationHistory.slice(-MAX_HISTORY);
+      this.activeEvaluations = new Map(state.activeEvaluations.map(([id, value]) => [
+        id,
+        'baselineScores' in value
+          ? { ...value, opportunities: value.opportunities ?? value.candidateScores.length }
+          : { change: value.change, baselineMetrics: value.beforeMetrics, baselineScores: [], candidateScores: [], opportunities: 0 },
+      ]));
+      this.outcomeHistory = (state.outcomeHistory ?? []).slice(-MAX_OUTCOME_HISTORY);
+      this.seenOutcomeIds.clear();
+      for (const sample of this.outcomeHistory) this.seenOutcomeIds.add(sample.record.id);
+    } catch (error) {
+      throw new Error(`Failed to restore Meta^n state from ${this.statePath}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    }
+  }
+
+  private persist(): void {
+    if (!this.statePath) return;
+    const directory = path.dirname(this.statePath);
+    fs.mkdirSync(directory, { recursive: true });
+    const temporaryPath = `${this.statePath}.tmp`;
+    fs.writeFileSync(temporaryPath, JSON.stringify({
+      version: 2,
+      iterationCount: this.iterationCount,
+      evaluationHistory: this.evaluationHistory,
+      activeEvaluations: [...this.activeEvaluations],
+      outcomeHistory: this.outcomeHistory,
+    }, null, 2), 'utf8');
+    fs.renameSync(temporaryPath, this.statePath);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -209,17 +409,13 @@ let metaInstance: MetaN | null = null;
 let metaInterval: NodeJS.Timeout | null = null;
 
 export function getMeta(): MetaN {
-  if (!metaInstance) metaInstance = new MetaN();
+  if (!metaInstance) metaInstance = new MetaN(path.join(process.cwd(), '.symbiote', 'meta-state.json'));
   return metaInstance;
 }
 
-/**
- * Start the Meta^n background loop.
- * Runs a cycle every N interactions or on a timer.
- * @param intervalMs How often to run (default: every 5 minutes)
- */
+/** Start the Meta^n background loop. */
 export function startMetaLoop(intervalMs: number = 5 * 60 * 1000): void {
-  if (metaInterval) return; // Already running
+  if (metaInterval) return;
   const meta = getMeta();
 
   metaInterval = setInterval(async () => {
@@ -233,12 +429,10 @@ export function startMetaLoop(intervalMs: number = 5 * 60 * 1000): void {
     }
   }, intervalMs);
 
-  // Don't keep the process alive for this
   if (metaInterval.unref) metaInterval.unref();
   console.log(`[Meta^n] Background loop started — interval: ${intervalMs}ms`);
 }
 
-/** Stop the Meta^n background loop */
 export function stopMetaLoop(): void {
   if (metaInterval) {
     clearInterval(metaInterval);
@@ -247,12 +441,10 @@ export function stopMetaLoop(): void {
   }
 }
 
-/** One-shot: run a single Meta^n cycle now */
 export async function runMetaCycleNow(): Promise<MetaEvaluation[]> {
   return getMeta().runCycle();
 }
 
-/** Feed an interaction outcome to Meta^n for recursive evaluation (standalone wrapper) */
 export async function feedOutcome(record: InteractionRecord): Promise<void> {
   return getMeta().feedOutcome(record);
 }

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execTool } from '../tools/builtin/exec.js';
+import { ProcessManager } from '../tools/builtin/process.js';
 import { classifySession } from '../tools/sandbox.js';
 
 test('exec runs a shell command on this host', async () => {
@@ -39,4 +40,18 @@ test('failed commands carry a hint that exec itself is healthy', async () => {
   if (process.platform !== 'win32') return;
   const out = String(await execTool.execute({ command: 'Get-DefinitelyNotACommand', shell: 'powershell' }));
   assert.match(out, /exec is working/);
+});
+
+test('background process spawn failures are reported as completed failures', async () => {
+  const manager = new ProcessManager();
+  const missingWorkdir = `${process.env.TEMP ?? process.cwd()}\\symbiote-missing-${Date.now()}`;
+  const proc = manager.start('echo should-not-run', missingWorkdir);
+  await new Promise<void>(resolve => proc.proc.once('close', () => resolve()));
+
+  const result = manager.poll(proc.id);
+  assert.ok(result);
+  assert.equal(result.running, false);
+  assert.notEqual(result.exitCode, null);
+  assert.notEqual(result.exitCode, 0);
+  assert.match(result.output, /Error:/);
 });

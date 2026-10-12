@@ -13,6 +13,7 @@ import { getSarsiModel, classifyTask, routeProvider, recordOutcome } from '../sa
 import { reviewAsync } from '../curator/index.js';
 import { auditInteraction, MeaAuditContext, MeaAuditResult, getMeaStats } from '../agent/mea.js';
 import { feedOutcome } from '../meta/index.js';
+import { randomUUID } from 'node:crypto';
 
 export type ParcNodeType = 'planning' | 'routing' | 'assessment';
 
@@ -126,6 +127,7 @@ export async function assessRouting(
 
   // 1. Record outcome in SARSI metrics
   const routingWasOptimal = overallScore > 0.6;
+  const interactionId = `interaction-${randomUUID()}`;
   recordOutcome(
     decision.taskType,
     decision.provider,
@@ -150,7 +152,7 @@ export async function assessRouting(
 
   // 3. Feed to Curator for background review
   reviewAsync({
-    id: `interaction-${Date.now()}`,
+    id: interactionId,
     timestamp: new Date().toISOString(),
     taskType: decision.taskType,
     provider: decision.provider,
@@ -163,12 +165,13 @@ export async function assessRouting(
     delivered: outcome.delivered,
     channel,
     routingWasOptimal,
+    routingRuleId: decision.ruleId,
     toolResults: outcome.toolResults,
   });
 
   // 4. Feed outcome to Meta^n for recursive evaluation
   feedOutcome({
-    id: `interaction-${Date.now()}`,
+    id: interactionId,
     timestamp: new Date().toISOString(),
     taskType: decision.taskType,
     provider: decision.provider,
@@ -181,6 +184,8 @@ export async function assessRouting(
     delivered: outcome.delivered,
     channel,
     routingWasOptimal,
+    routingRuleId: decision.ruleId,
+    toolResults: outcome.toolResults,
   });
 
   return {

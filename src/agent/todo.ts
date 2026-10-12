@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -57,36 +57,39 @@ export class TodoManager {
       return TodoManager.defaultState(this.scope);
     }
 
+    let parsed: Partial<TodoState>;
     try {
-      const raw = readFileSync(this.storagePath, 'utf8').trim();
-      if (!raw) {
-        return TodoManager.defaultState(this.scope);
-      }
-
-      const parsed = JSON.parse(raw) as Partial<TodoState>;
-      const items = Array.isArray(parsed.items) ? parsed.items as TodoItem[] : [];
-      return {
-        version: 1,
-        scope: parsed.scope ?? this.scope,
-        items: items.map((item, index) => ({
-          id: item.id ?? randomUUID(),
-          title: item.title ?? `Task ${index + 1}`,
-          status: item.status ?? 'pending',
-          description: item.description,
-          createdAt: item.createdAt ?? new Date().toISOString(),
-          updatedAt: item.updatedAt ?? new Date().toISOString(),
-          order: item.order ?? index,
-        })),
-        updatedAt: parsed.updatedAt ?? new Date().toISOString(),
-      };
-    } catch {
-      return TodoManager.defaultState(this.scope);
+      const raw = readFileSync(this.storagePath, 'utf8');
+      parsed = JSON.parse(raw) as Partial<TodoState>;
+    } catch (error) {
+      throw new Error(`Failed to read todo state at ${this.storagePath}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
+
+    if (!Array.isArray(parsed.items)) {
+      throw new Error(`Invalid todo state at ${this.storagePath}: expected an items array.`);
+    }
+    const items = parsed.items as TodoItem[];
+    return {
+      version: 1,
+      scope: parsed.scope ?? this.scope,
+      items: items.map((item, index) => ({
+        id: item.id ?? randomUUID(),
+        title: item.title ?? `Task ${index + 1}`,
+        status: item.status ?? 'pending',
+        description: item.description,
+        createdAt: item.createdAt ?? new Date().toISOString(),
+        updatedAt: item.updatedAt ?? new Date().toISOString(),
+        order: item.order ?? index,
+      })),
+      updatedAt: parsed.updatedAt ?? new Date().toISOString(),
+    };
   }
 
   private writeState(state: TodoState): void {
     this.ensureStorage();
-    writeFileSync(this.storagePath, JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2));
+    const temporaryPath = `${this.storagePath}.tmp`;
+    writeFileSync(temporaryPath, JSON.stringify({ ...state, updatedAt: new Date().toISOString() }, null, 2));
+    renameSync(temporaryPath, this.storagePath);
   }
 
   private sortItems(items: TodoItem[]): TodoItem[] {

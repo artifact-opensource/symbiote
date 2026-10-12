@@ -524,7 +524,7 @@ export class SymbioteGateway {
     setCombVdbHook(
       // indexFn
       (text: string, source: string) => {
-        vdb.index({
+        return vdb.index({
           id: '', text: text.length > 2000 ? text.slice(0, 2000) : text,
           source, role: 'context', timestamp: Date.now(), sessionId: 'comb',
         });
@@ -1011,7 +1011,7 @@ export class SymbioteGateway {
             tokensUsed: (finalResult as any).tokensUsed,
             latencyMs: Date.now() - startMs,
             hadErrors: (finalResult as any).hadErrors,
-          }, true);
+          }, Boolean(finalResult.text?.trim()) && !finalResult.aborted && !finalResult.maxIterationsHit);
         } catch {
           // Non-critical — don't let meta-cognitive layer break delivery
         }
@@ -1612,7 +1612,7 @@ export class SymbioteGateway {
               tokensUsed: (finalResult as any)?.tokensUsed,
               latencyMs: (finalResult as any)?.latencyMs,
               hadErrors: (finalResult as any)?.hadErrors,
-            }, true);
+            }, Boolean(finalResult?.text?.trim()) && !finalResult?.aborted && !finalResult?.maxIterationsHit);
           } catch {
             // Non-critical — don't let meta-cognitive layer break delivery
           }

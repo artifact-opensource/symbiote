@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runAgent } from '../agent/runner.js';
 
 type Script = Array<() => AsyncGenerator<any>>;
@@ -93,4 +96,44 @@ test('a hung tool is cut off by the timeout instead of stalling the loop', async
   delete process.env.SYMBIOTE_TOOL_TIMEOUT_MS;
   assert.match(seen[1].find(m => m.role === 'tool').content, /timed out/);
   assert.match(result.text, /moved on/);
+});
+
+test('unscoped todo calls use the runner checklist and returned tool errors are marked', async () => {
+  const originalCwd = process.cwd();
+  const workspace = mkdtempSync(join(tmpdir(), 'symbiote-runner-todo-'));
+  const seen: any[][] = [];
+  const provider = fakeProvider([
+    async function* () {
+      yield { type: 'tool_use_start', id: 'todo-1', name: 'todo' };
+      yield { type: 'tool_use_delta', id: 'todo-1', input: '{"action":"add","title":"Inspect and verify"}' };
+      yield { type: 'tool_use_end', id: 'todo-1' };
+    },
+    async function* () {
+      yield { type: 'tool_use_start', id: 'read-1', name: 'read' };
+      yield { type: 'tool_use_delta', id: 'read-1', input: '{"path":"missing.txt"}' };
+      yield { type: 'tool_use_end', id: 'read-1' };
+    },
+    say('The requested work is complete.'),
+  ], seen);
+
+  try {
+    process.chdir(workspace);
+    const result = await runAgent([{ role: 'user', content: 'Do a multi-step task' }], {
+      ...base,
+      provider,
+      todoScope: 'test-turn-scope',
+      toolRegistry: registry(async (name, input) => {
+        if (name === 'todo') {
+          assert.equal(input.scope, 'test-turn-scope');
+          return JSON.stringify({ ok: true });
+        }
+        return 'Error: File not found: missing.txt';
+      }),
+    });
+    assert.equal(result.toolCalls[0].input.scope, 'test-turn-scope');
+    assert.ok(seen[2].some(message => message.role === 'tool' && message.name === '__error'));
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(workspace, { recursive: true, force: true });
+  }
 });

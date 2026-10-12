@@ -9,7 +9,7 @@ import { PulseBudgetManager } from '../agent/pulse.js';
 import { BaseAdapter } from '../channels/adapter.js';
 import type { ChannelCapabilities, ChannelConfig, OutboundMessage, SendResult } from '../channels/types.js';
 
-test('runner reviews completion, bounds tool fan-out, throttles sends, and persists PULSE', async () => {
+test('runner reviews completion, serializes tool calls, throttles sends, and persists PULSE', async () => {
   const originalCwd = process.cwd();
   const workspace = mkdtempSync(join(tmpdir(), 'symbiote-reliability-'));
 
@@ -134,7 +134,7 @@ test('runner reviews completion, bounds tool fan-out, throttles sends, and persi
       maxIterations: 10,
     });
     assert.equal(fanoutResult.toolCalls.length, 7);
-    assert.ok(peakTools <= 5);
+    assert.equal(peakTools, 1);
     assert.equal(readdirSync(join(workspace, '.symbiote', 'todos')).length, 3);
   } finally {
     process.chdir(originalCwd);

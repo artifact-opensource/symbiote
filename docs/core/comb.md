@@ -15,7 +15,7 @@ Two tools are available to agents:
 
 ## Storage and Retrieval
 
-`comb_stage` indexes text with source `comb`; `comb_recall` queries recent COMB records. The VDB stores append-only JSONL documents and builds BM25 + sparse TF-IDF hybrid search indexes on demand. Session and Memograph records remain in distinct namespaces.
+`comb_stage` indexes text with source `comb`; it reports an error if the durable memory backend is not initialized and reports when an identical entry is already present. `comb_recall` queries recent COMB records. The VDB stores append-only JSONL documents and builds BM25 + sparse TF-IDF hybrid search indexes on demand. Session and Memograph records remain in distinct namespaces.
 
 Memograph snapshots can be imported from `MEMOGRAPH_STORAGE_DIR` or the sibling `memograph/.memograph_storage` directory. Imported shards preserve graph ID, domain, scope, permissions, content type, version, parent hash, and relation IDs in VDB metadata.
 
