@@ -4,11 +4,28 @@
 
 **Persistent AI agent runtime for your workspace.**
 
-v5.2.0 · Node.js 20+ · TypeScript · MIT
+v5.3.0 · Node.js 20+ · TypeScript · MIT
 
-[Quick start](#quick-start) · [Configuration](#configuration) · [Memory](#memory) · [CLI](#cli)
+[Features](#persistent-intelligent-and-built-for-real-work) · [Quick start](#quick-start) · [Configuration](#configuration) · [Memory](#memory) · [CLI](#cli)
 
 </div>
+
+---
+
+## Persistent, Intelligent, And Built For Real Work
+
+Symbiote is more than a chat interface around an LLM. It is a local-first agent runtime designed to stay present in your workspace, use real tools, retain useful context, and recover cleanly as work spans turns and restarts.
+
+| Capability | What it gives you |
+|---|---|
+| **A persistent agent, not a disposable chat** | A gateway process connects your channels, preserves session state on disk, resumes eligible conversations after restarts, and keeps long-running work moving across iteration budgets. |
+| **Memory with provenance and boundaries** | Embedded lexical retrieval, durable sessions, COMB continuity, and optional Memograph imports work together. A separate bounded Ops Memory records only coarse metadata about completed tool calls; it expires observations and labels them as historical evidence, never live status. |
+| **A tool-using runtime** | Built-in file, filesystem, shell, process, browser, web, hardware, memory, messaging, and sub-agent tools let the agent inspect and act in its configured environment. Tool execution is sequential within an iteration, results are checked, and failures are returned to the agent to guide a different approach. |
+| **Adaptive and self-evaluating behavior** | SARSI, PARC, Curator, MEA, and Meta^n support routing, outcome assessment, and controlled evaluation of proposed improvements without inserting extra model calls into the tool-execution loop. |
+| **Channels and interfaces** | Run interactively in the CLI or keep the gateway online for Discord, WhatsApp, and the local HTTP/web interface. Channel-specific formatting, queued input, steering, and interrupt handling keep the interaction usable during long tasks. |
+| **Local-first and portable** | Sessions, configuration, and memory live on disk in your workspace. No Docker, Redis, or external vector database is required. Providers and channel services still need their own credentials and network access. |
+
+The runtime exposes the actual tools configured for each process. Access is governed by the configured trust and sandbox policy; admin access can reach the host machine, so only run it with credentials and permissions appropriate to your deployment. Browser computer-use tools control the Playwright browser viewport, not the host desktop.
 
 ---
 
@@ -81,6 +98,10 @@ The native VDB is stored under `<workspace>/.vdb`. It persists JSONL documents a
 
 This implementation does not generate dense neural embeddings. Its similarity ranking is based on lexical BM25/TF-IDF signals, recency, and optional Memograph metadata.
 
+### Operational continuity
+
+Ops Memory is a separate, bounded store under `<workspace>/.symbiote/ops-memory.json`. After delivery, it records only coarse metadata about supported completed tool executions—not commands, arguments, output bodies, or user text. Records are workspace-scoped, deduplicated, capped, and expire according to how quickly the observed category can change. Retrieval is limited to relevant operational questions and clearly warns that historical evidence must not be treated as current state. Set `SYMBIOTE_OPS_MEMORY=0` to disable it.
+
 ### Memograph
 
 Memograph snapshots can be imported into the VDB from `MEMOGRAPH_STORAGE_DIR`. By default, Symbiote looks for a sibling `memograph/.memograph_storage` directory. Each shard is imported as its own document with graph, domain, scope, permission, version, content type, parent, and relation metadata preserved. LIVE, PROJECT, and ENTERPRISE memories use separate namespaces.
@@ -101,7 +122,7 @@ node dist/cli/vdb-maintenance.js stage "Remember this for the next session"
 
 The gateway can connect configured Discord and WhatsApp adapters and expose an HTTP API. Channel access policies and owner IDs are configured in `symbiote.json`.
 
-Built-in tools cover unrestricted file reading, writing, editing and filesystem management (`fs`), hardware inspection (`hardware`), shell and background process management, web fetching/browsing, native browser CUA (viewport screenshot, coordinate pointer, keyboard, and scroll), image analysis, messaging, sub-agents, speech, persistent memory, and session continuity. The agent runs with full admin access to the machine; set `SYMBIOTE_SANDBOX=1` to restore per-session restrictions. On Windows, `exec` runs PowerShell and routes POSIX-style commands (`ls -la`, `grep`, `&&`) to Git Bash when it is installed; pass `shell` to force one. CUA controls the Playwright browser, not the host OS desktop. The CLI and gateway display the actual number of tools registered for that process; the set can differ when tools or channels are disabled.
+Built-in tools cover file reading, writing, editing and filesystem management (`fs`), hardware inspection (`hardware`), shell and background process management, web fetching/browsing, native browser CUA (viewport screenshot, coordinate pointer, keyboard, and scroll), image analysis, messaging, sub-agents, speech, persistent memory, and session continuity. Access follows the configured trust and sandbox policy; review [Security](docs/security/README.md) before exposing an instance to other users. On Windows, `exec` runs PowerShell by default and routes POSIX-style commands (`ls -la`, `grep`, `&&`) to Git Bash when installed. Commands start in the configured working directory unless `workdir` is passed; do not assume Linux paths on Windows. Use `shell` to force a shell. The CLI and gateway display the actual number of tools registered for that process; the set can differ when tools or channels are disabled.
 
 Agent tool calls run with bounded concurrency. Long tasks can continue across iteration budgets, and completion is reviewed before the runner accepts a final answer. Discord input queued during an active turn is processed in order.
 
@@ -128,11 +149,11 @@ npm run build
 node --test dist/test/*.test.js
 ```
 
-The project includes focused tests for provider routing, continuation behavior, VDB-backed Memograph import, tool execution, and session memory. Provider and channel integrations should also be exercised with their configured test credentials before deployment.
+The project includes focused tests for provider routing, continuation behavior, VDB-backed Memograph import, tool execution and result handling, operational-memory expiry and retrieval, Discord progress formatting, and session persistence. Provider and channel integrations should also be exercised with their configured test credentials before deployment.
 
 ## Documentation
 
-Additional guides live in [`docs/`](docs/README.md). Start with [Quick Start](docs/getting-started/quick-start.md), [Configuration](docs/getting-started/configuration.md), and [Built-in Tools](docs/tools/built-in.md).
+Additional guides live in [`docs/`](docs/README.md). Start with [Quick Start](docs/getting-started/quick-start.md), [Configuration](docs/getting-started/configuration.md), [Built-in Tools](docs/tools/built-in.md), and the [full changelog](CHANGELOG.md). Current release details are in [Release Notes](RELEASE_NOTES_v5.3.0.md).
 
 ## License
 

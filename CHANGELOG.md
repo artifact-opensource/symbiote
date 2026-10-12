@@ -1,8 +1,43 @@
 # Changelog
 
+## v5.3.0 (2026-10-12) — Apex
+
+Full release notes: [RELEASE_NOTES_v5.3.0.md](RELEASE_NOTES_v5.3.0.md)
+
+### Added
+- **Ops Memory:** a separate bounded operational-history store records coarse metadata from completed tool executions after delivery. It stores no command text, arguments, output bodies, or user messages; observations are workspace-scoped, deduplicated, capped, and expire by category.
+- **Historical operational retrieval:** relevant past execution metadata can be surfaced for an operational user query with explicit expiry and a warning to verify volatile state before relying on it. No background model call or tool-loop decision was added.
+- Tests for Ops Memory persistence, data minimization, deduplication, workspace scoping, expiry, corrupt-state reporting, opt-out, and context retrieval.
+- Tests and diagnostics for Windows/Git Bash path mistakes, successful commands with intentionally empty output, Discord progress message sizing, and sensitive argument redaction.
+
+### Changed
+- `exec` now distinguishes a successful silent command from absent results and provides actionable guidance for path and shell mismatches on Windows.
+- Discord tool-progress previews are capped below Discord's 2,000-character message limit and redact common credential/header formats before display.
+- README and release documentation now describe the current runtime, memory boundaries, tool execution, adaptive subsystems, channels, and security considerations.
+- Version reporting remains package-metadata driven: the package, gateway banner, daemon, web status, and MCP server all resolve the same application version.
+
+### Fixed
+- Prevented Discord progress edits from exceeding the platform message-content limit.
+- Clarified that Windows Git Bash is not a Linux filesystem: Windows drive paths and guessed `/workspace` or `/tmp` paths are not valid unless they exist in that shell.
+- Successful `exec` calls with no stdout/stderr now return an explicit exit-code-0 result rather than an empty string.
+- Restored and retained the committed Discord.js 14.25.1 dependency and lockfile after an unintended local downgrade.
+
+### Included since v5.2.0
+- More reliable tool-call pairing and session-message sanitization.
+- Hardened session persistence, self-improvement evaluation, and long-running agent behavior.
+- Corrected historical COMB wording and removed hard-coded OpenRouter quota/reset assumptions; retries now follow provider response metadata.
+
+### Upgrade notes
+- No configuration migration is required for this release.
+- Ops Memory is enabled by default and can be disabled with `SYMBIOTE_OPS_MEMORY=0`.
+- Run `npm ci` followed by `npm run build` when upgrading from a source checkout.
+- On Windows, provide `workdir` instead of issuing `cd` with guessed paths; use `/c/...` for explicit Git Bash paths.
+
+---
+
 ## v5.2.0 (2026-10-10) — Apex
 
-Full notes: [RELEASE_NOTES.md](RELEASE_NOTES.md)
+Full notes are superseded by the current [v5.3.0 release notes](RELEASE_NOTES_v5.3.0.md); this section preserves the v5.2.0 release summary.
 
 ### Added
 - Curator tool-bug detection (v5.1): per-tool failure windows, minor/major classification, retry/timeout/fallback proposals

@@ -1,12 +1,13 @@
 # Symbiote Releases
 
-## Latest: v5.2.0 Apex (October 10, 2026)
-Admin-grade tooling (`fs`, `hardware`, unrestricted `read`/`write`), Windows-native shell execution, a rebuilt prompt-injection guard, a resilient agent loop with stream retry and tool timeouts, Curator tool-bug detection and Memograph integration. Details: [RELEASE_NOTES.md](RELEASE_NOTES.md).
+## Latest: v5.3.0 Apex (October 12, 2026)
+Bounded, privacy-preserving Ops Memory; clearer Windows shell results; safer, correctly sized Discord progress updates; and agent-loop, persistence, and provider-retry improvements since v5.2.0. Details: [Release Notes](RELEASE_NOTES_v5.3.0.md).
 
 ## All Releases
 
 | Version | Date | Highlights |
 |---------|------|-----------|
+| **v5.3.0 Apex** | Oct 12, 2026 | Ops Memory, Windows shell diagnostics, Discord progress limits and redaction, persistence and retry hardening |
 | **v5.2.0 Apex** | Oct 10, 2026 | Admin tools, Windows shell, injection guard rebuild, loop reliability, Curator bug detection, Memograph |
 | **v4.0.0 Apex** | Sep 3, 2026 | Windows-first runtime fixes, installer cleanup, packaging prep, docs + landing overhaul |
 | **v3.0.0 Apex** | Aug 23, 2026 | Production hardening, desktop installer UI, CLI install overhaul, release alignment |
@@ -22,4 +23,4 @@ Admin-grade tooling (`fs`, `hardware`, unrestricted `read`/`write`), Windows-nat
 
 ## Changelog
 
-Full changelog with detailed breaking changes, fixes, and migration notes: [docs/reference/changelog.md](docs/reference/changelog.md)
+Full changelog with detailed changes and upgrade notes: [CHANGELOG.md](CHANGELOG.md)

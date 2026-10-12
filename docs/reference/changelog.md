@@ -1,8 +1,14 @@
 # Changelog
 
+The maintained, full release history and upgrade notes are in the repository [CHANGELOG.md](../../CHANGELOG.md).
+
+## v5.3.0 — Operational Memory and Runtime Reliability (2026-10-12)
+
+See the [v5.3.0 release notes](../../RELEASE_NOTES_v5.3.0.md) for upgrade instructions and the full feature list. This release adds bounded, privacy-preserving operational history; makes Windows shell outcomes and path failures clearer; and keeps Discord progress updates within API limits while redacting sensitive previews.
+
 ## v5.2.0 — Admin Tools, Hardened Agent Loop (2026-10-10)
 
-See the repository [RELEASE_NOTES.md](../../RELEASE_NOTES.md) for the full list. Highlights: `fs` and `hardware` tools, unrestricted `read`/`write`, Windows-native shell execution, rebuilt prompt-injection guard, stream retry and tool timeouts, Curator tool-bug detection, Memograph integration.
+The previous release introduced `fs` and `hardware` tools, unrestricted `read`/`write`, Windows-native shell execution, the rebuilt prompt-injection guard, stream retries and tool timeouts, Curator tool-bug detection, and Memograph integration. Its summary is preserved in the root [CHANGELOG.md](../../CHANGELOG.md).
 
 ## v3.0.0 — Meta-Cognitive Layer, 14 Providers, Self-Improvement (3.06-09-18)
 

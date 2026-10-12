@@ -1,6 +1,6 @@
 {
   "name": "symbiote",
-  "version": "5.2.0",
+  "version": "5.3.0",
   "description": "Symbiote — AI agent framework with persistent memory and web automation. Runs on a laptop.",
   "type": "module",
   "main": "dist/index.js",
@@ -11,6 +11,9 @@
     "dist",
     "web",
     "README.md",
+    "CHANGELOG.md",
+    "RELEASES.md",
+    "RELEASE_NOTES_v5.3.0.md",
     "LICENSE",
     "symbiote.example.json",
     "symbiote.schema.json",
