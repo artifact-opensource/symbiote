@@ -18,7 +18,6 @@
     "symbiote.sh",
     "symbiote.ps1",
     "symbiote-gateway.service",
-    "scripts/patch-discord-rest.mjs",
     "install.sh",
     "install.ps1",
     "install.command",
@@ -28,8 +27,7 @@
     "build": "tsc && node scripts/copy-runtime-assets.mjs",
     "start": "node dist/gateway/daemon.js --config=symbiote.json",
     "dev": "tsc && node dist/index.js",
-    "init": "tsc && node dist/cli/wizard.js",
-    "postinstall": "node scripts/patch-discord-rest.mjs"
+    "init": "tsc && node dist/cli/wizard.js"
   },
   "keywords": [
     "ai-agent",
