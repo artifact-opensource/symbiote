@@ -56,6 +56,8 @@ whatsapp-auth/
 /TOOLS.md
 /BOOTSTRAP.md
 /MEMORY.md
+/skills/
+/.index/
 
 # ── Logs ────────────────────────────────────────────────
 *.log
@@ -79,7 +81,7 @@ __pycache__/
 .venv/
 venv/
 
-# ── Editors & OS ────────────────────────────────────────
+# ── Editors, OS & Misc. ────────────────────────────────────────
 .vscode/
 .idea/
 .claude/

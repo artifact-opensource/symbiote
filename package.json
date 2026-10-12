@@ -28,6 +28,7 @@
   ],
   "scripts": {
     "build": "tsc && node scripts/copy-runtime-assets.mjs",
+    "index:codebase": "node scripts/generate-codebase-index.mjs",
     "start": "node dist/gateway/daemon.js --config=symbiote.json",
     "dev": "tsc && node dist/index.js",
     "init": "tsc && node dist/cli/wizard.js"
