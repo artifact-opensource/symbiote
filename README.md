@@ -2,7 +2,7 @@
 
 # Symbiote
 
-**Persistent AI agent runtime for your workspace.**
+**Persistent AI agent runtime for any type of workspace.**
 
 v5.3.0 · Node.js 20+ · TypeScript · MIT
 
