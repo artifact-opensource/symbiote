@@ -45,6 +45,7 @@ import {
   processListTool,
 } from '../tools/builtin/process.js';
 import { ttsTool } from '../tools/builtin/tts.js';
+import { sttTool } from '../tools/builtin/stt.js';
 import { webFetchTool } from '../tools/builtin/web-fetch.js';
 import { memorySearchTool } from '../tools/builtin/memory.js';
 import { combRecallTool, combStageTool, setCombVdbHook, flushMessages } from '../tools/builtin/comb.js';
@@ -240,7 +241,7 @@ export class SymbioteGateway {
       for (const tool of [
         readTool, writeTool, editTool, execTool, imageTool,
         processStartTool, processPollTool, processKillTool, processListTool,
-        ttsTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool,
+        ttsTool, sttTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool,
         vdbSearchTool, vdbIngestTool, vdbStatsTool,
         webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool,
         webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool,
