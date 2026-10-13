@@ -266,6 +266,7 @@ export class SymbioteGateway {
 
     // Sessions
     this.sessionManager = new SessionManager(this.config.sessionsDir ?? '.sessions');
+    console.log(`${palette.dim}  [sessions] Store: ${palette.cyan}${this.config.sessionsDir ?? path.join(os.homedir(), '.symbiote', 'sessions')}${palette.reset}`);
 
     // v2.0 — Metrics collector
     this.metrics = getMetrics({
@@ -1821,6 +1822,10 @@ export class SymbioteGateway {
     console.log(`${palette.dim}  [gateway]${palette.reset} ${palette.cyan}${trigger}${palette.reset} — reloading config...`);
     try {
       const nextConfig = loadConfig(this.gatewayConfig.configPath);
+      if (nextConfig.workspace !== this.config.workspace || nextConfig.sessionsDir !== this.config.sessionsDir) {
+        console.warn('[gateway] Workspace or session-directory changes require a restart; config reload was not applied.');
+        return;
+      }
       if (!validateAndReport(nextConfig)) {
         throw new Error('Configuration validation failed');
       }

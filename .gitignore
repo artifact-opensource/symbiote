@@ -119,3 +119,4 @@ package.json
 .models/vosk-model-small-en-us-0.15/ivector/online_cmvn.conf
 .models/vosk-model-small-en-us-0.15/ivector/splice.conf
 test_sample.wav
+.models/vosk-model-small-en-us-0.15

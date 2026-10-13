@@ -41,6 +41,7 @@ export interface TranscriptionResult {
   duration: number;
   processingTime: number;
   isEmpty: boolean;
+  error?: string;
 }
 
 /**
@@ -82,6 +83,7 @@ export async function transcribeAudio(audioPath: string): Promise<TranscriptionR
       duration: 0,
       processingTime: 0,
       isEmpty: true,
+      error: err instanceof Error ? err.message : String(err),
     };
   }
 }
