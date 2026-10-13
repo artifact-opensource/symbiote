@@ -89,6 +89,7 @@ export interface SymbioteConfig {
     ollama?: ProviderConfigBlock;
     gladius?: ProviderConfigBlock;
     'github-copilot'?: ProviderConfigBlock;
+    artifactEngine?: ProviderConfigBlock;
   };
   defaultProvider: string;
   defaultModel: string;
