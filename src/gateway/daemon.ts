@@ -26,7 +26,16 @@ import {
 import { ChannelRegistry } from '../channels/registry.js';
 import { ToolProgressBubble } from '../channels/progress-bubble.js';
 import { expandHome } from '../runtime/platform.js';
-import { DiscordAdapter } from '../channels/adapters/discord.js';
+import {
+  DiscordAdapter,
+  type DiscordSlashCommandDefinition,
+} from '../channels/adapters/discord.js';
+import {
+  buildDiscordSlashCommands,
+  buildDiscordSkillTask,
+  discoverDiscordSkillCommands,
+  type DiscordSkillCommand,
+} from '../channels/discord-slash-commands.js';
 import { WhatsAppAdapter } from '../channels/adapters/whatsapp.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { presenceManager } from '../channels/presence.js';
@@ -99,6 +108,7 @@ interface DiscordChannelConfig {
   enabled: boolean;
   token: string;
   botId?: string;
+  channelId?: string;
   /** Adapter ID — must be unique per bot instance (default: 'discord-main') */
   adapterId?: string;
   policy?: Partial<ChannelPolicy>;
@@ -178,6 +188,7 @@ export class SymbioteGateway {
   private shutdownRequested = false;
   private heartbeat: HeartbeatScheduler;
   private subAgentManager: SubAgentManager;
+  private discordSlashDestinations = new Map<string, { adapterId: string; chatId: string }>();
   private pulseBudget: PulseBudgetManager;
   private startTime = Date.now();
   private httpApi: HttpApiServer | null = null;
@@ -333,7 +344,18 @@ export class SymbioteGateway {
     }
 
     // Sub-agent manager + spawn tools
-    this.subAgentManager = new SubAgentManager(this.sessionManager);
+    this.subAgentManager = new SubAgentManager(this.sessionManager, (parentSessionId, handle) => {
+      const destination = this.discordSlashDestinations.get(parentSessionId);
+      if (!destination) return;
+      const content = handle.status === 'completed'
+        ? `Skill task completed (${handle.sessionId}):\n${handle.result ?? '(no result)'}`
+        : `Skill task ${handle.status} (${handle.sessionId}): ${handle.error ?? 'No further details.'}`;
+      void this.channelRegistry.send(destination.adapterId, destination.chatId, {
+        content: content.slice(0, 1900),
+      }).catch((err) => {
+        console.error(`[gateway] Could not deliver Discord skill result to ${destination.chatId}:`, err);
+      });
+    });
     this.pulseBudget = new PulseBudgetManager(this.config.sessionsDir ?? '.sessions');
     const provCfg = (this.config.providers as Record<string, any>)[this.providerName] ?? {};
     const spawnProvConfig = {
@@ -688,7 +710,19 @@ export class SymbioteGateway {
       const adapterId = dcfg.adapterId ?? 'discord-main';
       try {
         console.log(info(`Starting Discord adapter ${palette.cyan}${adapterId}${palette.reset}...`));
-        const adapter = new DiscordAdapter(adapterId);
+        const skillCommands = discoverDiscordSkillCommands(this.config.workspace);
+        const slashCommands = buildDiscordSlashCommands(skillCommands);
+        const adapter = new DiscordAdapter(
+          adapterId,
+          slashCommands,
+          (interaction) => this.handleDiscordSlashCommand(
+            adapterId,
+            dcfg,
+            skillCommands,
+            slashCommands,
+            interaction,
+          ),
+        );
         // Day 21 — Mention-Only Protocol: one rule for all bots.
         // Process message only if it @mentions this bot's ID (or is a DM).
         const policy: ChannelPolicy = {
@@ -701,7 +735,7 @@ export class SymbioteGateway {
 
         await this.channelRegistry.register(
           adapter,
-          { token: dcfg.token, botId: dcfg.botId },
+          { token: dcfg.token, botId: dcfg.botId, channelId: dcfg.channelId },
           policy,
         );
         console.log(ok(`Discord ${palette.cyan}${adapterId}${palette.reset} ${palette.green}connected${palette.reset}`));
@@ -774,6 +808,139 @@ export class SymbioteGateway {
         console.log(warn(`WhatsApp failed — ${(err as Error).message}`));
       }
     }
+  }
+
+  private async handleDiscordSlashCommand(
+    adapterId: string,
+    dcfg: DiscordChannelConfig,
+    skills: DiscordSkillCommand[],
+    commands: DiscordSlashCommandDefinition[],
+    interaction: import('discord.js').ChatInputCommandInteraction,
+  ): Promise<void> {
+    const senderId = interaction.user.id;
+    const allowedSenders = new Set([
+      ...(this.gatewayConfig.ownerIds ?? []),
+      ...(dcfg.policy?.ownerIds ?? []),
+      ...(dcfg.policy?.allowedSenders ?? []),
+    ]);
+    if (!allowedSenders.has('*') && !allowedSenders.has(senderId)) {
+      await interaction.reply({ content: 'You are not authorized to use Symbiote commands.', ephemeral: true });
+      return;
+    }
+
+    const commandName = interaction.commandName;
+    if (commandName === 'commands') {
+      const listing = commands.map((command) => {
+        const usage = command.options?.map((option) => `<${option.name}>`).join(' ') ?? '';
+        return `/${command.name}${usage ? ` ${usage}` : ''} — ${command.description}`;
+      }).join('\n');
+      await interaction.reply({ content: listing || 'No commands are available.', ephemeral: true });
+      return;
+    }
+
+    if (commandName === 'model') {
+      const model = interaction.options.getString('model', true).trim();
+      if (!model) throw new Error('Model identifier cannot be empty');
+      this.model = model;
+      await interaction.reply({ content: `Active model set to \`${model}\`.`, ephemeral: true });
+      return;
+    }
+
+    if (commandName === 'provider') {
+      const providerName = interaction.options.getString('provider', true).trim().toLowerCase();
+      const provider = PROVIDERS.get(providerName);
+      if (!provider) {
+        throw new Error(`Unknown provider "${providerName}". Available: ${[...PROVIDERS.keys()].join(', ')}`);
+      }
+      this.providerName = providerName;
+      this.provider = provider;
+      const configuredModel = (this.config.providers as Record<string, ProviderConfig>)[providerName]?.model;
+      if (configuredModel) this.model = configuredModel;
+      await interaction.reply({
+        content: `Active provider set to \`${providerName}\`${configuredModel ? ` with model \`${this.model}\`` : ''}.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (commandName === 'reset') {
+      const channelId = interaction.channelId;
+      if (!channelId || !this.resetDiscordConversation(adapterId, channelId)) {
+        await interaction.reply({ content: 'There is no active conversation to reset.', ephemeral: true });
+        return;
+      }
+      await interaction.reply({ content: 'This Discord conversation has been reset.', ephemeral: true });
+      return;
+    }
+
+    if (commandName === 'restart') {
+      this.reloadConfig(`Discord /restart from ${senderId}`);
+      const channelId = interaction.channelId;
+      const reset = channelId ? this.resetDiscordConversation(adapterId, channelId) : false;
+      await interaction.reply({
+        content: reset
+          ? 'Config reloaded and this Discord conversation restarted.'
+          : 'Config reloaded. There was no active conversation to reset.',
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const skill = skills.find((candidate) => candidate.name === commandName);
+    if (!skill) throw new Error(`No handler is configured for /${commandName}`);
+
+    const task = interaction.options.getString('task', true).trim();
+    if (!task) throw new Error('Task cannot be empty');
+    const channelId = interaction.channelId;
+    if (!channelId) throw new Error('This command must be used in a Discord channel or DM');
+    await interaction.deferReply({ ephemeral: true });
+
+    const prefix = `${adapterId}-${channelId}-`;
+    const parent = this.sessionManager.list()
+      .filter((summary) => summary.id.startsWith(prefix))
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    const parentSessionId = parent?.id ?? `${adapterId}-${channelId}-${senderId}`;
+    this.discordSlashDestinations.set(parentSessionId, { adapterId, chatId: channelId });
+    const configuredProvider = (this.config.providers as Record<string, ProviderConfig>)[this.providerName] ?? {};
+    const providerConfig: ProviderConfig = {
+      ...configuredProvider,
+      model: this.model,
+      maxTokens: this.config.maxTokens ?? configuredProvider.maxTokens,
+      temperature: this.config.temperature ?? configuredProvider.temperature,
+      timeoutMs: this.config.timeouts?.llmRequestMs
+        ?? configuredProvider.timeoutMs
+        ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS,
+    };
+    const handle = await this.subAgentManager.spawn({
+      parentSessionId,
+      task: buildDiscordSkillTask(skill, task),
+      provider: this.providerName,
+      model: this.model,
+      depth: this.subAgentManager.getDepth(parentSessionId) + 1,
+    }, this.provider, providerConfig, this.toolRegistry, this.config.workspace);
+
+    if (handle.status !== 'running') {
+      throw new Error(handle.error ?? `Could not start ${skill.skillName} sub-agent`);
+    }
+    await interaction.editReply(
+      `Started **${skill.skillName}** as a background sub-agent (\`${handle.sessionId}\`). `
+      + 'I will post its result in this channel when it finishes.',
+    );
+  }
+
+  private resetDiscordConversation(adapterId: string, channelId: string): boolean {
+    const prefix = `${adapterId}-${channelId}-`;
+    const current = this.sessionManager.list()
+      .filter((summary) => summary.id.startsWith(prefix))
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    if (!current) return false;
+    const session = this.sessionManager.load(current.id);
+    if (!session) return false;
+    session.messages = session.messages.filter((message) => message.role === 'system').slice(0, 1);
+    session.metadata.tokenUsage = { input: 0, output: 0 };
+    session.metadata.toolsUsed = {};
+    this.sessionManager.save(session);
+    return true;
   }
 
   // ── HTTP API ───────────────────────────────────────────────────────────

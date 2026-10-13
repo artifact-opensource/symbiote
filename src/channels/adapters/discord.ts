@@ -14,6 +14,7 @@ import {
   Events,
   type Message as DiscordMessage,
   type TextChannel,
+  type Guild,
   type DMChannel,
   type ThreadChannel,
   type NewsChannel,
@@ -23,6 +24,9 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  SlashCommandBuilder,
+  type ChatInputCommandInteraction,
+  type ApplicationCommandDataResolvable,
 } from 'discord.js';
 import { BaseAdapter, TokenBucketLimiter } from '../adapter.js';
 import { formatForChannel } from '../formatter.js';
@@ -67,9 +71,25 @@ export interface DiscordAdapterConfig extends ChannelConfig {
   token: string;
   /** Bot's application/user ID (for mention detection) */
   botId?: string;
+  /** Configured Discord channel, used to register guild-scoped commands immediately */
+  channelId?: string;
   /** Sibling bot IDs — these bots are NOT filtered out (enables multi-bot coordination) */
   siblingBotIds?: string[];
 }
+
+export interface DiscordSlashCommandOption {
+  name: string;
+  description: string;
+  required?: boolean;
+}
+
+export interface DiscordSlashCommandDefinition {
+  name: string;
+  description: string;
+  options?: DiscordSlashCommandOption[];
+}
+
+type DiscordSlashCommandHandler = (interaction: ChatInputCommandInteraction) => Promise<void>;
 
 // ─── Adapter ───────────────────────────────────────────────────────────────
 
@@ -81,11 +101,20 @@ export class DiscordAdapter extends BaseAdapter {
   private client?: Client;
   private token = '';
   private botId = '';
+  private channelId = '';
   private siblingBotIds: Set<string> = new Set();
+  private slashCommands: DiscordSlashCommandDefinition[];
+  private slashCommandHandler?: DiscordSlashCommandHandler;
 
-  constructor(id = 'discord-main') {
+  constructor(
+    id = 'discord-main',
+    slashCommands: DiscordSlashCommandDefinition[] = [],
+    slashCommandHandler?: DiscordSlashCommandHandler,
+  ) {
     super();
     this.id = id;
+    this.slashCommands = slashCommands;
+    this.slashCommandHandler = slashCommandHandler;
   }
 
   // ── Platform Lifecycle ─────────────────────────────────────────────────
@@ -93,6 +122,7 @@ export class DiscordAdapter extends BaseAdapter {
   protected async platformConnect(config: ChannelConfig): Promise<void> {
     const discordConfig = config as DiscordAdapterConfig;
     this.token = discordConfig.token;
+    this.channelId = discordConfig.channelId ?? '';
 
     // Sibling bots are peers — never filter them out
     if (discordConfig.siblingBotIds?.length) {
@@ -132,11 +162,18 @@ export class DiscordAdapter extends BaseAdapter {
     this.client.on(Events.MessageDelete, (msg) => {
       this.handleDelete(msg as DiscordMessage);
     });
+    this.client.on(Events.InteractionCreate, (interaction) => {
+      if (!interaction.isChatInputCommand() || !this.slashCommandHandler) return;
+      void this.handleSlashCommand(interaction);
+    });
 
     // Health events
     this.client.on(Events.ClientReady, () => {
       this.botId = this.client!.user?.id ?? '';
       console.log(`[${this.id}] Connected as ${this.client!.user?.tag} (${this.botId})`);
+      void this.registerSlashCommands().catch((err) => {
+        console.error(`[${this.id}] Slash command registration failed:`, err);
+      });
     });
     this.client.on(Events.Error, (err) => {
       console.error(`[${this.id}] Error:`, err.message);
@@ -153,6 +190,88 @@ export class DiscordAdapter extends BaseAdapter {
     });
 
     await this.client.login(this.token);
+  }
+
+  private async registerSlashCommands(): Promise<void> {
+    if (!this.slashCommands.length || !this.client?.application) return;
+
+    const payload: ReturnType<SlashCommandBuilder['toJSON']>[] = this.slashCommands.map((definition) => {
+      const command = new SlashCommandBuilder()
+        .setName(definition.name)
+        .setDescription(definition.description);
+      for (const option of definition.options ?? []) {
+        command.addStringOption((builder) => builder
+          .setName(option.name)
+          .setDescription(option.description)
+          .setRequired(option.required ?? false));
+      }
+      return command.toJSON();
+    });
+
+    await this.registerSlashCommandScope(
+      'global',
+      [...(await this.client.application.commands.fetch({})).values()],
+      payload,
+      (command) => this.client!.application!.commands.create(command),
+      (id, command) => this.client!.application!.commands.edit(id, command),
+    );
+    const registeredGuildIds = new Set<string>();
+    const registerGuild = async (guild: Guild): Promise<void> => {
+      if (registeredGuildIds.has(guild.id)) return;
+      registeredGuildIds.add(guild.id);
+      await this.registerSlashCommandScope(
+        `guild ${guild.id}`,
+        [...(await guild.commands.fetch({})).values()],
+        payload,
+        (command) => guild.commands.create(command),
+        (id, command) => guild.commands.edit(id, command),
+      );
+    };
+    for (const guild of this.client.guilds.cache.values()) {
+      await registerGuild(guild);
+    }
+    if (this.channelId) {
+      try {
+        const channel = await this.client.channels.fetch(this.channelId);
+        if (channel && !channel.isDMBased()) await registerGuild(channel.guild);
+      } catch (err) {
+        console.error(`[${this.id}] Could not resolve configured Discord channel for guild command registration:`, err);
+      }
+    }
+  }
+
+  private async registerSlashCommandScope(
+    label: string,
+    existing: readonly { id: string; name: string }[],
+    payload: readonly ReturnType<SlashCommandBuilder['toJSON']>[],
+    create: (command: ApplicationCommandDataResolvable) => Promise<unknown>,
+    edit: (id: string, command: ApplicationCommandDataResolvable) => Promise<unknown>,
+  ): Promise<void> {
+    const byName = new Map(existing.map((command) => [command.name, command.id]));
+    for (const command of payload) {
+      const existingId = byName.get(command.name);
+      if (existingId) await edit(existingId, command);
+      else await create(command);
+    }
+    console.log(`[${this.id}] Registered ${payload.length} slash commands (${label})`);
+  }
+
+  private async handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+    try {
+      await this.slashCommandHandler!(interaction);
+    } catch (err) {
+      console.error(`[${this.id}] Slash command /${interaction.commandName} failed:`, err);
+      const message = `Command failed: ${err instanceof Error ? err.message : String(err)}`;
+      if (interaction.deferred || interaction.replied) {
+        await interaction.followUp({ content: message, ephemeral: true }).catch((replyErr) => {
+          console.error(`[${this.id}] Could not report slash command failure:`, replyErr);
+        });
+      } else {
+        await interaction.reply({ content: message, ephemeral: true }).catch((replyErr) => {
+          console.error(`[${this.id}] Could not report slash command failure:`, replyErr);
+        });
+      }
+    }
   }
 
   protected async platformDisconnect(): Promise<void> {
