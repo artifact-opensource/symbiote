@@ -248,8 +248,7 @@ export class SymbioteBus implements MessageBus {
 
     for (const subId of subIds) {
       const sub = this.subscriptions.get(subId);
-      if (!sub) continue;
-      // Interrupt handlers AND regular handlers both receive interrupts
+      if (!sub || !sub.isInterruptOnly) continue;
       try {
         sub.handler(envelope);
         this._totalDelivered++;

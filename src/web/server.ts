@@ -58,6 +58,17 @@ interface SubAgent {
   startedAt: number;
 }
 
+export interface WebControlPlane {
+  getStatus: () => Record<string, unknown>;
+  getConfig: () => Record<string, unknown>;
+  getSessions: () => unknown[];
+  getSessionMessages: (id: string) => unknown[] | null;
+  createSession: (name?: string) => unknown;
+  getTools: () => unknown[];
+  chat: (request: { text: string; sessionId: string; senderId: string; senderName: string; source: string }) => Promise<unknown>;
+  logPath: string;
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 
 const startTime = Date.now();
@@ -335,9 +346,45 @@ function serveStatic(res: http.ServerResponse, filePath: string): void {
 
 // ── Router ─────────────────────────────────────────────────────────────────
 
-const WEB_DIR = path.resolve(import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url)), '../../web');
+const SERVER_DIR = path.resolve(import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url)));
+const WEBAPP_DIR = path.resolve(SERVER_DIR, '../../webapp/dist');
+const LEGACY_WEB_DIR = path.resolve(SERVER_DIR, '../../web');
 
-async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+function isLoopbackRequest(req: http.IncomingMessage): boolean {
+  const address = req.socket.remoteAddress;
+  return address === '127.0.0.1' || address === '::1' || (address?.startsWith('::ffff:127.') ?? false);
+}
+
+function tailFile(filename: string, requestedLines: number): string {
+  const lines = Math.min(Math.max(Math.trunc(requestedLines) || 100, 1), 300);
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(filename, 'r');
+    const size = fs.fstatSync(fd).size;
+    const chunkSize = 64 * 1024;
+    const maxBytes = 512 * 1024;
+    let position = size;
+    let remaining = Math.min(size, maxBytes);
+    const chunks: Buffer[] = [];
+    while (remaining > 0) {
+      const length = Math.min(chunkSize, remaining);
+      position -= length;
+      const chunk = Buffer.allocUnsafe(length);
+      const bytesRead = fs.readSync(fd, chunk, 0, length, position);
+      if (bytesRead === 0) break;
+      chunks.unshift(chunk.subarray(0, bytesRead));
+      remaining -= bytesRead;
+    }
+    return Buffer.concat(chunks).toString('utf8').split(/\r?\n/).filter(Boolean).slice(-lines).join('\n');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return '';
+    throw error;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse, control?: WebControlPlane): Promise<void> {
   const method = req.method ?? 'GET';
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const pathname = url.pathname;
@@ -351,6 +398,51 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     });
     res.end();
     return;
+  }
+
+  if (control && pathname.startsWith('/api/')) {
+    if (!isLoopbackRequest(req)) {
+      return json(res, { error: 'The local control API is available only from this machine.' }, 403);
+    }
+
+    if (method === 'GET' && pathname === '/api/status') {
+      return json(res, control.getStatus());
+    }
+    if (method === 'GET' && pathname === '/api/config') {
+      return json(res, control.getConfig());
+    }
+    if (method === 'GET' && pathname === '/api/sessions') {
+      return json(res, control.getSessions());
+    }
+    if (method === 'GET' && pathname === '/api/tools') {
+      return json(res, control.getTools());
+    }
+    if (method === 'GET' && pathname === '/api/logs') {
+      return json(res, { lines: tailFile(control.logPath, Number(url.searchParams.get('lines'))) });
+    }
+    let controlParams = matchRoute('/api/sessions/:id/messages', pathname);
+    if (method === 'GET' && controlParams) {
+      const messages = control.getSessionMessages(decodeURIComponent(controlParams.id));
+      return messages ? json(res, messages) : json(res, { error: 'Session not found' }, 404);
+    }
+    if (method === 'POST' && pathname === '/api/sessions') {
+      const body = JSON.parse(await readBody(req) || '{}') as { name?: unknown };
+      return json(res, control.createSession(typeof body.name === 'string' ? body.name : undefined), 201);
+    }
+    if (method === 'POST' && pathname === '/api/chat') {
+      const body = JSON.parse(await readBody(req) || '{}') as { text?: unknown; sessionId?: unknown };
+      if (typeof body.text !== 'string' || !body.text.trim() || typeof body.sessionId !== 'string' || !body.sessionId.trim()) {
+        return json(res, { error: 'A non-empty text and sessionId are required.' }, 400);
+      }
+      const result = await control.chat({
+        text: body.text,
+        sessionId: body.sessionId,
+        senderId: 'webapp-local',
+        senderName: 'Local operator',
+        source: 'webapp',
+      });
+      return json(res, result);
+    }
   }
 
   // ── API Routes ─────────────────────────────────────────────────────────
@@ -501,11 +593,15 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 
   if (method === 'GET') {
     if (pathname === '/' || pathname === '/index.html') {
-      return serveStatic(res, path.join(WEB_DIR, 'index.html'));
+      const appIndex = path.join(WEBAPP_DIR, 'index.html');
+      if (fs.existsSync(appIndex)) return serveStatic(res, appIndex);
+      return serveStatic(res, path.join(LEGACY_WEB_DIR, 'index.html'));
     }
     // Serve other static files
     const safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
-    return serveStatic(res, path.join(WEB_DIR, safePath));
+    const appFile = path.join(WEBAPP_DIR, safePath);
+    if (fs.existsSync(appFile)) return serveStatic(res, appFile);
+    return serveStatic(res, path.join(LEGACY_WEB_DIR, safePath));
   }
 
   // 404
@@ -525,9 +621,9 @@ function formatUptime(ms: number): string {
 
 // ── Server ─────────────────────────────────────────────────────────────────
 
-export function startWebServer(port = 3006, host = '127.0.0.1'): http.Server {
+export function startWebServer(port = 3006, host = '127.0.0.1', control?: WebControlPlane): http.Server {
   const server = http.createServer((req, res) => {
-    handleRequest(req, res).catch(err => {
+    handleRequest(req, res, control).catch(err => {
       console.error(`${palette.dim}  [symbiote-web]${palette.reset}`, err);
       if (!res.headersSent) {
         json(res, { error: 'Internal server error' }, 500);

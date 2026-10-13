@@ -264,6 +264,8 @@ export interface ChannelPolicy {
 export interface SessionRoute {
   /** Channel type + chat ID → session ID mapping */
   channelType: string;
+  /** Adapter instance, used to distinguish multiple bots on one platform */
+  adapterId?: string;
   chatId: string;
   sessionId: string;
   /** When this route was last active */

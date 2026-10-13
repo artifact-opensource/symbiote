@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Message } from '../providers/types.js';
+import type { SessionRoute } from '../channels/types.js';
 import type { Session, SessionSummary, SessionMetadata } from './types.js';
 
 const DEFAULT_DIR = '.symbiote/sessions';
@@ -111,6 +112,46 @@ export class SessionManager {
   private filePath(id: string): string {
     const safe = id.replace(/[^a-zA-Z0-9_\-:.]/g, '_');
     return path.join(this.dir, `${safe}.json`);
+  }
+
+  private routesFilePath(): string {
+    return path.join(this.dir, 'routes.json');
+  }
+
+  loadRoutes(): SessionRoute[] {
+    let data: unknown;
+    try {
+      data = JSON.parse(fs.readFileSync(this.routesFilePath(), 'utf-8')) as unknown;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw new Error(`Failed to load session routes: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+    }
+    if (!Array.isArray(data)) throw new Error('Failed to load session routes: expected a JSON array');
+    return data.filter((route): route is SessionRoute =>
+      !!route
+      && typeof route === 'object'
+      && typeof route.channelType === 'string'
+      && typeof route.chatId === 'string'
+      && typeof route.sessionId === 'string'
+      && typeof route.lastActive === 'number'
+      && (route.adapterId === undefined || typeof route.adapterId === 'string'),
+    );
+  }
+
+  saveRoute(route: SessionRoute): void {
+    const routes = this.loadRoutes();
+    const adapterId = route.adapterId ?? route.channelType;
+    const existingIndex = routes.findIndex(existing =>
+      (existing.adapterId ?? existing.channelType) === adapterId
+      && existing.chatId === route.chatId,
+    );
+    if (existingIndex >= 0) routes[existingIndex] = route;
+    else routes.push(route);
+
+    const destination = this.routesFilePath();
+    const temporary = `${destination}.tmp`;
+    fs.writeFileSync(temporary, JSON.stringify(routes, null, 2));
+    fs.renameSync(temporary, destination);
   }
 
   private defaultMetadata(): SessionMetadata {

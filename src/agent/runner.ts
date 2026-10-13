@@ -11,6 +11,7 @@ import type { TemperatureConfig, TaskCategory } from './temperature.js';
 import type { BlinkController } from './blink.js';
 import type { ContextStore } from './context-store.js';
 import { TodoManager } from './todo.js';
+import type { ToolExecuteOptions } from '../tools/types.js';
 import { randomUUID } from 'node:crypto';
 import { getSarsiModel } from '../sarsi/index.js';
 
@@ -19,7 +20,7 @@ export const DEFAULT_MAX_CONTEXT_TOKENS = 100_000;
 /** Minimal interface for tool registries (satisfied by both ToolRegistry and SandboxedToolRegistry) */
 export interface ToolExecutor {
   toProviderFormat(): ToolDef[];
-  execute(name: string, input: Record<string, unknown>): Promise<string>;
+  execute(name: string, input: Record<string, unknown>, options?: ToolExecuteOptions): Promise<string>;
   list(): Array<{ name: string; description: string; parameters: any }>;
 }
 
@@ -36,6 +37,8 @@ export interface RunnerConfig {
   abortSignal?: AbortSignal;
   contextStore?: ContextStore;
   todoScope?: string;
+  /** Stable identity for one user turn, shared across BLINK continuations. */
+  turnId?: string;
   blinkController?: BlinkController;
   onProgress?: (event: RunnerProgressEvent) => void;
   onEvent?: (event: StreamEvent) => void;
@@ -76,9 +79,12 @@ function isTransientStreamError(err: unknown): boolean {
 /** Reject if `promise` takes longer than `ms` or `signal` aborts. */
 function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortSignal | undefined, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    let settled = false;
     const timer = setTimeout(() => finish(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`))), ms);
     const onAbort = () => finish(() => reject(new Error(`${label} aborted`)));
     const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
       settle();
@@ -86,6 +92,43 @@ function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortSignal | u
     if (signal?.aborted) return onAbort();
     signal?.addEventListener('abort', onAbort, { once: true });
     promise.then(v => finish(() => resolve(v)), e => finish(() => reject(e)));
+  });
+}
+
+function executeToolWithTimeout(
+  execute: (signal: AbortSignal) => Promise<string>,
+  ms: number,
+  parentSignal: AbortSignal | undefined,
+  label: string,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const controller = new AbortController();
+    let settled = false;
+    const finish = (settle: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      parentSignal?.removeEventListener('abort', onAbort);
+      settle();
+    };
+    const onAbort = () => {
+      controller.abort(parentSignal?.reason);
+      finish(() => reject(new Error(`${label} aborted`)));
+    };
+    const timer = setTimeout(() => {
+      controller.abort(`${label} timed out`);
+      finish(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)));
+    }, ms);
+
+    if (parentSignal?.aborted) {
+      onAbort();
+      return;
+    }
+    parentSignal?.addEventListener('abort', onAbort, { once: true });
+    execute(controller.signal).then(
+      (result) => finish(() => resolve(result)),
+      (error) => finish(() => reject(error)),
+    );
   });
 }
 
@@ -156,6 +199,7 @@ export async function runAgent(
   let emptyNudges = 0;
   const callCounts = new Map<string, number>();
   const todoScope = config.todoScope ?? `run-${randomUUID()}`;
+  const completionReviewId = config.turnId ?? randomUUID();
   const todoManager = new TodoManager({ scope: todoScope, workspace: process.cwd() });
 
   const ensureTodoPlan = () => {
@@ -400,17 +444,16 @@ export async function runAgent(
       // Persist completionReviewUsed in contextStore to survive restarts
       let completionReviewUsedPersisted = completionReviewUsed;
       if (config.contextStore && config.sessionId) {
-        const reviewKey = `completion-review-used:${config.sessionId}`;
-        // Check if we've already done a review for this session
-        // We store this as a simple absorbed message marker
+        const reviewKey = `completion-review-used:${completionReviewId}`;
+        // Check whether this turn's review prompt was already persisted.
         try {
           // Query vdb for our review marker
           const results = config.contextStore['vdb']?.search(reviewKey, 1);
-          if (results && results.length > 0) {
+          if (results?.some(result => result.text === reviewKey)) {
             completionReviewUsedPersisted = true;
           }
-        } catch (e) {
-          // Ignore, fall back to local flag
+        } catch (error) {
+          console.error('[runner] Could not read persisted completion-review marker:', error);
         }
       }
       const needsReview = !completionReviewPending && !completionReviewUsedPersisted && allToolCalls.length > 0;
@@ -426,7 +469,7 @@ export async function runAgent(
         completionReviewUsed = true;
         // Persist the review flag so it survives restarts
         if (config.contextStore && config.sessionId) {
-          const reviewKey = `completion-review-used:${config.sessionId}`;
+          const reviewKey = `completion-review-used:${completionReviewId}`;
           const doc = {
             id: '',
             text: reviewKey,
@@ -435,7 +478,16 @@ export async function runAgent(
             timestamp: Date.now(),
             sessionId: config.sessionId,
           };
-          try { config.contextStore['vdb']?.index(doc); } catch (e) { /* ignore */ }
+          try {
+            config.contextStore['vdb']?.index(doc);
+          } catch (error) {
+            console.error('[runner] Could not persist completion-review marker:', error);
+          }
+        }
+        try {
+          config.onCheckpoint?.(currentMessages);
+        } catch (error) {
+          console.error('[runner] Completion-review checkpoint persistence failed:', error);
         }
         continue;
       }
@@ -480,7 +532,15 @@ export async function runAgent(
           : tc.input;
         try { config.onToolStart?.(tc.name, toolInput); } catch { /* progress reporting is non-critical */ }
         try {
-          let result = clipResult(await withTimeout(config.toolRegistry.execute(tc.name, toolInput), toolTimeoutMs(tc.name), config.abortSignal, `Tool ${tc.name}`));
+          const toolOptions: ToolExecuteOptions = {
+            sessionId: config.sessionId,
+          };
+          let result = clipResult(await executeToolWithTimeout(
+            (signal) => config.toolRegistry.execute(tc.name, toolInput, { ...toolOptions, signal }),
+            toolTimeoutMs(tc.name),
+            config.abortSignal,
+            `Tool ${tc.name}`,
+          ));
           // Sanitize tool result before it enters the LLM context
           const sanitized = sanitizeToolResult(tc.name, result);
           if (sanitized.injectionDetected) {
@@ -524,7 +584,11 @@ export async function runAgent(
     // Track recent tool names for ATM classification in next iteration
     recentToolNames = pendingToolCalls.map(tc => tc.name);
     completionReviewPending = false;
-    try { config.onCheckpoint?.(currentMessages); } catch { /* persistence must not break the loop */ }
+    try {
+      config.onCheckpoint?.(currentMessages);
+    } catch (error) {
+      console.error('[runner] Checkpoint persistence failed; continuing the active turn:', error);
+    }
 
     // Check abort after tool execution before next LLM call
     if (config.abortSignal?.aborted) {

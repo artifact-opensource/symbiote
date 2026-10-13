@@ -101,6 +101,10 @@ export interface RouterConfig {
   globalOwnerIds?: string[];
   /** Active session tracking */
   getActiveSessions?: () => Set<string>;
+  /** Routes restored from durable session storage */
+  sessionRoutes?: SessionRoute[];
+  /** Persist newly created or explicitly changed routes */
+  onSessionRoute?: (route: SessionRoute) => void;
 }
 
 export class InboundRouter {
@@ -113,6 +117,9 @@ export class InboundRouter {
   constructor(bus: SymbioteBus, config: RouterConfig) {
     this.bus = bus;
     this.config = config;
+    for (const route of config.sessionRoutes ?? []) {
+      this.routes.set(this.routeKey(route.adapterId ?? route.channelType, route.chatId), route);
+    }
   }
 
   /**
@@ -127,6 +134,9 @@ export class InboundRouter {
     // 2. @end — universal conversation terminator. Any message containing @end
     // signals "do not respond." All bots honor this. No LLM turn, no reaction.
     if (payload.text && /@end\b/i.test(payload.text)) return false;
+
+    // Platform events that are not user prompts must not enter the reasoning loop.
+    if (payload.type !== 'text' && payload.type !== 'media' && payload.type !== 'system') return false;
 
     // 3. Policy check (mention-only protocol)
     const policy = this.getPolicy(source.channelType);
@@ -219,7 +229,7 @@ export class InboundRouter {
   // ── Session Resolution ─────────────────────────────────────────────────
 
   private resolveSession(source: ChannelSource): string {
-    const routeKey = `${source.adapterId}:${source.chatId}`;
+    const routeKey = this.routeKey(source.adapterId, source.chatId);
     const existing = this.routes.get(routeKey);
 
     if (existing) {
@@ -230,12 +240,22 @@ export class InboundRouter {
     const sessionId = `${source.adapterId}-${source.chatId}-${++this.sessionCounter}`;
     this.routes.set(routeKey, {
       channelType: source.channelType,
+      adapterId: source.adapterId,
       chatId: source.chatId,
       sessionId,
       lastActive: Date.now(),
     });
+    try {
+      this.config.onSessionRoute?.(this.routes.get(routeKey)!);
+    } catch (error) {
+      console.error(`[router] Failed to persist route ${routeKey}:`, error);
+    }
 
     return sessionId;
+  }
+
+  private routeKey(adapterId: string, chatId: string): string {
+    return `${adapterId}:${chatId}`;
   }
 
   // ── Priority Assignment ────────────────────────────────────────────────
@@ -275,11 +295,13 @@ export class InboundRouter {
   }
 
   getSessionId(adapterId: string, chatId: string): string | undefined {
-    return this.routes.get(`${adapterId}:${chatId}`)?.sessionId;
+    return this.routes.get(this.routeKey(adapterId, chatId))?.sessionId;
   }
 
   setRoute(route: SessionRoute): void {
-    this.routes.set(`${route.channelType}:${route.chatId}`, route);
+    const key = this.routeKey(route.adapterId ?? route.channelType, route.chatId);
+    this.routes.set(key, route);
+    this.config.onSessionRoute?.(route);
   }
 
   pruneRoutes(maxIdleMs: number): number {

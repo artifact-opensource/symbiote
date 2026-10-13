@@ -10,6 +10,7 @@ import type {
   ChannelConfig,
   ChannelPolicy,
   AdapterHealth,
+  SessionRoute,
 } from './types.js';
 import { SymbioteBus } from './bus.js';
 import { InboundRouter } from './router.js';
@@ -38,6 +39,8 @@ export class ChannelRegistry {
     busOptions?: ConstructorParameters<typeof SymbioteBus>[0];
     globalOwnerIds?: string[];
     onAdapterHealthChange?: (adapterId: string, health: AdapterHealth) => void;
+    sessionRoutes?: SessionRoute[];
+    onSessionRoute?: (route: SessionRoute) => void;
   }) {
     this.bus = new SymbioteBus(options?.busOptions);
     this.onAdapterHealthChange = options?.onAdapterHealthChange;
@@ -46,6 +49,8 @@ export class ChannelRegistry {
       policies: new Map(),
       globalOwnerIds: options?.globalOwnerIds,
       getActiveSessions: () => this.activeSessions,
+      sessionRoutes: options?.sessionRoutes,
+      onSessionRoute: options?.onSessionRoute,
     });
   }
 

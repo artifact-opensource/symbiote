@@ -1,49 +1,65 @@
-export interface Part {
-  text: string;
-}
+export type ViewId = 'overview' | 'chat' | 'sessions' | 'operations' | 'tools' | 'settings';
 
-export interface Message {
+export interface SessionSummary {
   id: string;
-  role: "user" | "assistant";
-  parts: Part[];
-  timestamp: string;
-  isSimulated?: boolean;
-  executedTool?: string | null;
-  toolResult?: any;
-  imageUrl?: string; // Generated images projected inline
-}
-
-export interface ChatSession {
-  id: string;
-  name: string;
-  messages: Message[];
+  label?: string;
+  messageCount: number;
+  updatedAt: number;
   createdAt: number;
-  keywords?: string[];
 }
 
-export interface SymbiotePlugin {
+export interface ChatMessage {
   id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: number;
+  durationMs?: number;
+  iterations?: number;
+  toolCalls?: Array<{ name: string; input: Record<string, unknown>; result: string }>;
+}
+
+export interface ChannelStatus {
+  id: string;
+  channelType: string;
+  status: string;
+  health?: { state?: string; lastError?: string };
+}
+
+export interface GatewayStatus {
+  version?: string;
+  uptime?: number;
+  uptimeHuman?: string;
+  provider?: string;
+  channels: ChannelStatus[];
+  activeTurns?: number;
+  sessions?: number;
+  tools?: number;
+  providerHealth?: Record<string, unknown> | unknown[];
+  metrics?: Record<string, number | undefined>;
+  memory?: { rss?: number; heap?: number };
+  pid?: number;
+}
+
+export interface GatewayConfig {
+  name?: string;
+  version?: string;
+  workspace?: string;
+  provider?: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  configuredProviders?: string[];
+  gateway?: {
+    webHost: string;
+    webPort: number;
+    apiHost: string;
+    apiPort: number;
+    apiEnabled: boolean;
+  };
+}
+
+export interface ToolSummary {
   name: string;
   description: string;
-  icon: string; // lucide icon name
-  active: boolean;
-  accent: string; // neon color class
-}
-
-export interface SymbioteTelemetry {
-  coreCohesion: number;
-  thermalLevel: number;
-  neuralBandwidth: number;
-  connectedSymbionts: number;
-  memoryEntropy: number;
-  _raw?: {
-    timestamp: string;
-    hostname: string;
-    platform: string;
-    cpu: { model: string; cores: number; speed: number; load: { "1min": number; "5min": number; "15min": number; percent: number } };
-    memory: { total: number; used: number; free: number; percent: number; process: { rss: number; heapTotal: number; heapUsed: number; external: number } };
-    uptime: { system: number; systemFormatted: string; process: number; processFormatted: string };
-    network: Record<string, { address: string; family: string; internal: boolean }[]>;
-    env: { nodeVersion: string; pid: number; cwd: string };
-  };
+  parameters?: Record<string, unknown>;
 }

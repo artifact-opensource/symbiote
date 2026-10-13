@@ -23,4 +23,5 @@ export interface ToolDefinition {
 export interface ToolExecuteOptions {
   sessionId?: string;
   onProgress?: (chunk: string) => void;
+  signal?: AbortSignal;
 }

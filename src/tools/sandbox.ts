@@ -302,7 +302,7 @@ export class SandboxedToolRegistry {
   }
 
   /** Execute with sandbox enforcement */
-  async execute(name: string, input: Record<string, unknown>): Promise<string> {
+  async execute(name: string, input: Record<string, unknown>, options?: ToolExecuteOptions): Promise<string> {
     // Check all applicable rules
     for (const rule of this.rules) {
       if (rule.tools === '*' || rule.tools.includes(name)) {
@@ -324,7 +324,7 @@ export class SandboxedToolRegistry {
     }
 
     // All rules passed — execute
-    return this.inner.execute(name, input);
+    return this.inner.execute(name, input, options);
   }
 
   /** Sanitize input for audit log (remove large content, sensitive values) */

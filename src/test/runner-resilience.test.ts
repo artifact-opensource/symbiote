@@ -81,6 +81,7 @@ test('runner keeps the tail of oversized tool output', async () => {
 test('a hung tool is cut off by the timeout instead of stalling the loop', async () => {
   process.env.SYMBIOTE_TOOL_TIMEOUT_MS = '150';
   const seen: any[][] = [];
+  let toolSignal: AbortSignal | undefined;
   const provider = fakeProvider([
     async function* () {
       yield { type: 'tool_use_start', id: 't1', name: 'exec' };
@@ -91,10 +92,20 @@ test('a hung tool is cut off by the timeout instead of stalling the loop', async
     say('moved on'),
   ], seen);
   const result = await runAgent([{ role: 'user', content: 'go' }], {
-    ...base, provider, toolRegistry: registry(() => new Promise<string>(() => { /* never settles */ })),
+    ...base,
+    provider,
+    toolRegistry: {
+      toProviderFormat: () => [],
+      list: () => [],
+      execute: (_name: string, _input: unknown, options?: { signal?: AbortSignal }) => {
+        toolSignal = options?.signal;
+        return new Promise<string>(() => { /* never settles */ });
+      },
+    } as any,
   });
   delete process.env.SYMBIOTE_TOOL_TIMEOUT_MS;
   assert.match(seen[1].find(m => m.role === 'tool').content, /timed out/);
+  assert.equal(toolSignal?.aborted, true);
   assert.match(result.text, /moved on/);
 });
 

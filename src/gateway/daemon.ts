@@ -88,7 +88,7 @@ import { groqProvider } from '../providers/groq.js';
 import { openrouterProvider } from '../providers/openrouter.js';
 import { ollamaProvider } from '../providers/ollama.js';
 import { xaiProvider } from '../providers/xai.js';
-import type { BusEnvelope, ChannelPolicy, OutboundMessage } from '../channels/types.js';
+import type { BusEnvelope, ChannelPolicy, OutboundMessage, SessionRoute } from '../channels/types.js';
 import { formatForChannel } from '../channels/formatter.js';
 import { createSandboxedRegistry, type SessionContext } from '../tools/sandbox.js';
 import { HttpApiServer, type ChatRequest, type ChatResponse } from '../web/http-api.js';
@@ -181,6 +181,7 @@ export class SymbioteGateway {
   private toolRegistry: ToolRegistry;
   private sessionManager: SessionManager;
   private activeTurns = new Map<string, ActiveTurn>();
+  private httpSessionLocks = new Map<string, Promise<void>>();
   private provider: Provider;
   private providerName: string;
   private model: string;
@@ -204,6 +205,7 @@ export class SymbioteGateway {
   private vdbWatermarks = new Map<string, number>();
   private vdbPulseTimer: ReturnType<typeof setInterval> | null = null;
   private vdbInstance: import('../memory/vdb.js').VectorDB | null = null;
+  private vdbPulseRunning = false;
   /** Context Store — bridges attention (context window) and memory (vdb) */
   private contextStore: ContextStore | null = null;
 
@@ -327,8 +329,16 @@ export class SymbioteGateway {
     console.log(`${palette.dim}  [gateway]${palette.reset} System prompt: ${palette.silver}${this.systemPrompt.length} chars${palette.reset}`);
 
     // Channel registry
+    let sessionRoutes: SessionRoute[] = [];
+    try {
+      sessionRoutes = this.sessionManager.loadRoutes();
+    } catch (error) {
+      console.error('[sessions] Could not restore channel routes; new routes will be created:', error);
+    }
     this.channelRegistry = new ChannelRegistry({
       globalOwnerIds: gatewayConfig.ownerIds,
+      sessionRoutes,
+      onSessionRoute: (route) => this.sessionManager.saveRoute(route),
       onAdapterHealthChange: (id, health) => {
         console.log(`${palette.dim}  [gateway]${palette.reset} Adapter ${palette.cyan}${id}${palette.reset}: ${palette.silver}${health.state}${palette.reset}${health.lastError ? ` ${palette.dim}(${health.lastError})${palette.reset}` : ''}`);
       },
@@ -469,7 +479,9 @@ export class SymbioteGateway {
 
     this.vdbPulseTimer = setInterval(() => {
       if (this.shutdownRequested) return;
-      this.vdbPulseFlush().catch(() => { /* non-fatal */ });
+      this.vdbPulseFlush().catch(error => {
+        console.error(`${palette.dim}  [vdb]${palette.reset} Pulse failed:`, error);
+      });
     }, VDB_PULSE_MS);
 
     // Dont block process exit
@@ -562,6 +574,8 @@ export class SymbioteGateway {
 
   /** Flush new messages from all active sessions to VDB */
   private async vdbPulseFlush(): Promise<void> {
+    if (this.vdbPulseRunning) return;
+    this.vdbPulseRunning = true;
     try {
       // Lazy-init VDB
       if (!this.vdbInstance) {
@@ -574,7 +588,11 @@ export class SymbioteGateway {
 
       for (const summary of sessions) {
         // Only process sessions with new messages since last flush
-        const watermark = this.vdbWatermarks.get(summary.id) ?? 0;
+        let watermark = this.vdbWatermarks.get(summary.id) ?? 0;
+        if (summary.messageCount < watermark) {
+          watermark = 0;
+          this.vdbWatermarks.set(summary.id, 0);
+        }
         if (summary.messageCount <= watermark) continue;
 
         const session = this.sessionManager.load(summary.id);
@@ -617,8 +635,8 @@ export class SymbioteGateway {
       }
 
       this.vdbInstance.checkIdle();
-    } catch {
-      // Non-fatal — VDB pulse is best-effort
+    } finally {
+      this.vdbPulseRunning = false;
     }
   }
 
@@ -990,7 +1008,47 @@ export class SymbioteGateway {
     const webPort = this.gatewayConfig.webPort ?? 3009;
     const webHost = this.gatewayConfig.webHost ?? '127.0.0.1';
     try {
-      this.webServer = startWebServer(webPort, webHost);
+      this.webServer = startWebServer(webPort, webHost, {
+        getStatus: () => this.status(),
+        getConfig: () => ({
+          name: this.config.name,
+          version: APP_VERSION,
+          workspace: this.config.workspace,
+          provider: this.providerName,
+          model: this.model,
+          temperature: this.config.temperature,
+          maxTokens: this.config.maxTokens,
+          configuredProviders: Object.keys(this.config.providers ?? {}),
+          gateway: {
+            webHost,
+            webPort,
+            apiHost: this.gatewayConfig.apiHost ?? '127.0.0.1',
+            apiPort: this.gatewayConfig.apiPort ?? 3006,
+            apiEnabled: Boolean(process.env.SYMBIOTE_API_KEY || process.env.API_KEY),
+          },
+        }),
+        getSessions: () => this.sessionManager.list(),
+        getSessionMessages: (id) => {
+          const session = this.sessionManager.load(id);
+          return session?.messages ?? null;
+        },
+        createSession: (name) => {
+          const id = `web-${randomUUID()}`;
+          const session = this.sessionManager.create(id, {
+            label: name?.trim() || 'New conversation',
+            provider: this.providerName,
+            model: this.model,
+          });
+          return { id: session.id, name: session.metadata.label, createdAt: session.createdAt };
+        },
+        getTools: () => this.toolRegistry.list().map(({ name, description, parameters }) => ({
+          name,
+          description,
+          parameters,
+        })),
+        chat: (request) => this.handleHttpChat(request),
+        logPath: path.join(process.cwd(), 'symbiote.log'),
+      });
     } catch (err) {
       console.log(warn(`Web UI failed to start — ${(err as Error).message}`));
     }
@@ -1001,9 +1059,48 @@ export class SymbioteGateway {
    * Creates a synthetic BusEnvelope and processes it like any other channel message.
    */
   private handleHttpChat(request: ChatRequest): Promise<ChatResponse> {
+    const sessionId = request.sessionId ?? `http-${request.source ?? 'web'}-${request.senderId ?? 'anon'}`;
+    const previous = this.httpSessionLocks.get(sessionId) ?? Promise.resolve();
+    const run = previous.then(async () => {
+      while (this.activeTurns.has(sessionId)) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      const controller = new AbortController();
+      const turn: ActiveTurn = {
+        sessionId,
+        abortController: controller,
+        startedAt: Date.now(),
+        channelType: 'http',
+        chatId: sessionId,
+        adapterId: 'http-api',
+      };
+      this.activeTurns.set(sessionId, turn);
+      this.channelRegistry.setSessionActive(sessionId, true);
+      try {
+        return await this.runHttpChat(request, controller);
+      } finally {
+        if (this.activeTurns.get(sessionId) === turn) {
+          this.activeTurns.delete(sessionId);
+          this.channelRegistry.setSessionActive(sessionId, false);
+          const pending = this.pendingEnvelopes.get(sessionId);
+          if (pending?.length) {
+            this.pendingEnvelopes.delete(sessionId);
+            for (const envelope of pending) await this.runAgentTurn(envelope);
+          }
+        }
+      }
+    });
+    const lock = run.then(() => undefined, () => undefined);
+    this.httpSessionLocks.set(sessionId, lock);
+    void lock.then(() => {
+      if (this.httpSessionLocks.get(sessionId) === lock) this.httpSessionLocks.delete(sessionId);
+    });
+    return run;
+  }
+
+  private runHttpChat(request: ChatRequest, controller: AbortController): Promise<ChatResponse> {
     return new Promise(async (resolve, reject) => {
       const sessionId = request.sessionId ?? `http-${request.source ?? 'web'}-${request.senderId ?? 'anon'}`;
-      const controller = new AbortController();
 
       try {
         // Load or create session
@@ -1054,6 +1151,7 @@ export class SymbioteGateway {
         const startMs = Date.now();
         const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
         const turnTodoScope = `turn-${randomUUID()}`;
+        const turnId = randomUUID();
 
         // ── PARC: Pre-route — determine optimal provider based on SARSI rules ──
         let parcDecision: { provider: string; model: string; taskType: string; confidence: number; ruleId: string; reasoning: string } | null = null;
@@ -1089,27 +1187,84 @@ export class SymbioteGateway {
         let currentSessionMessages = session.messages;
         let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
 
-        while (blinkCtrl.shouldContinue()) {
-          const result = await runAgent(currentSessionMessages, {
-            provider: routeChoice.provider,
-            providerConfig: provConfig,
-            toolRegistry: sandboxedTools,
-            sessionId,
-            maxIterations: this.pulseBudget.getEffectiveCap(),
-            contextMonitor: this.contextMonitor,
-            contextStore: this.contextStore ?? undefined,
-            todoScope: turnTodoScope,
-            blinkController: blinkCtrl,
-            abortSignal: controller.signal,
-            onCheckpoint: (msgs) => { session.messages = msgs; this.sessionManager.save(session); },
-            onEvent: (ev) => {
-              if (ev.type === 'usage') {
-                this.sessionManager.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
+        this.sessionManager.save(session);
+        const runHttpAgent = (useProvider: Provider, useConfig: ProviderConfig) => runAgent(currentSessionMessages, {
+          provider: useProvider,
+          providerConfig: useConfig,
+          toolRegistry: sandboxedTools,
+          sessionId,
+          maxIterations: this.pulseBudget.getEffectiveCap(),
+          contextMonitor: this.contextMonitor,
+          contextStore: this.contextStore ?? undefined,
+          todoScope: turnTodoScope,
+          turnId,
+          blinkController: blinkCtrl,
+          abortSignal: controller.signal,
+          onCheckpoint: (msgs) => {
+            session.messages = msgs;
+            currentSessionMessages = msgs;
+            try {
+              this.sessionManager.save(session);
+            } catch (error) {
+              console.error(`[sessions] Failed to persist HTTP checkpoint for ${sessionId}:`, error);
+            }
+          },
+          onEvent: (ev) => {
+            if (ev.type === 'usage') {
+              this.sessionManager.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
+            }
+          },
+          onToolStart: (name) => console.log(`  ${palette.violet}⚡ ${name}${palette.reset}`),
+          onToolEnd: (name) => console.log(`  ${palette.green}✓ ${name}${palette.reset}`),
+        });
+        const runHttpWithFallback = async () => {
+          try {
+            const startedAt = Date.now();
+            const result = await runHttpAgent(routeChoice.provider, provConfig);
+            this.providerHealth.recordSuccess(routeChoice.name, Date.now() - startedAt);
+            return result;
+          } catch (primaryError) {
+            this.providerHealth.recordFailure(
+              routeChoice.name,
+              primaryError instanceof Error ? primaryError.message : String(primaryError),
+            );
+            this.metrics.recordProviderError(
+              routeChoice.name,
+              primaryError instanceof Error ? primaryError.message : String(primaryError),
+            );
+            for (const fallback of this.fallbackChain) {
+              if (!this.providerHealth.isAvailable(fallback.name)) continue;
+              try {
+                const fallbackConfig = (this.config.providers as Record<string, any>)[fallback.name] ?? {};
+                const fallbackProviderConfig: ProviderConfig = {
+                  model: fallbackConfig.model ?? this.model,
+                  maxTokens: this.config.maxTokens,
+                  temperature: this.config.temperature,
+                  systemPrompt: this.systemPrompt,
+                  ...fallbackConfig,
+                };
+                const startedAt = Date.now();
+                const result = await runHttpAgent(fallback.provider, fallbackProviderConfig);
+                this.providerHealth.recordSuccess(fallback.name, Date.now() - startedAt);
+                return result;
+              } catch (fallbackError) {
+                this.providerHealth.recordFailure(
+                  fallback.name,
+                  fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+                );
+                this.metrics.recordProviderError(
+                  fallback.name,
+                  fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+                );
+                console.error(`[http] Fallback provider ${fallback.name} failed:`, fallbackError);
               }
-            },
-            onToolStart: (name) => console.log(`  ${palette.violet}⚡ ${name}${palette.reset}`),
-            onToolEnd: (name) => console.log(`  ${palette.green}✓ ${name}${palette.reset}`),
-          });
+            }
+            throw primaryError;
+          }
+        };
+
+        while (blinkCtrl.shouldContinue()) {
+          const result = await runHttpWithFallback();
 
           // Handle abort — save state and break
           if (result.aborted) {
@@ -1525,6 +1680,7 @@ export class SymbioteGateway {
       const turnStartTime = Date.now();
       const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
       const turnTodoScope = `turn-${randomUUID()}`;
+      const turnId = randomUUID();
 
       let currentSessionMessages = session.messages;
       let finalResult: Awaited<ReturnType<typeof runAgent>> | null = null;
@@ -1539,9 +1695,18 @@ export class SymbioteGateway {
         maxIterations: this.pulseBudget.getEffectiveCap(),
         contextMonitor: this.contextMonitor,
         contextStore: this.contextStore ?? undefined,
+        turnId,
         blinkController: blinkCtrl,
         abortSignal: controller.signal,
-        onCheckpoint: (msgs: typeof currentSessionMessages) => { session.messages = msgs; this.sessionManager.save(session); },
+        onCheckpoint: (msgs: typeof currentSessionMessages) => {
+          session.messages = msgs;
+          currentSessionMessages = msgs;
+          try {
+            this.sessionManager.save(session);
+          } catch (error) {
+            console.error(`[sessions] Failed to persist checkpoint for ${sessionId}:`, error);
+          }
+        },
         onEvent: (ev: any) => {
           if (ev.type === 'usage') {
             this.sessionManager.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
@@ -1564,10 +1729,10 @@ export class SymbioteGateway {
       });
 
       // Helper: run agent with fallback chain
-      const runWithFallback = async (msgs: typeof currentSessionMessages): Promise<Awaited<ReturnType<typeof runAgent>>> => {
+      const runWithFallback = async (): Promise<Awaited<ReturnType<typeof runAgent>>> => {
         try {
           const turnStartTime = Date.now();
-          const result = await runAgent(msgs, makeRunOpts(routeChoice.provider, provConfig));
+          const result = await runAgent(currentSessionMessages, makeRunOpts(routeChoice.provider, provConfig));
           // v2.0 — Record provider success metrics
           this.providerHealth.recordSuccess(routeChoice.name, Date.now() - turnStartTime);
           return result;
@@ -1596,7 +1761,7 @@ export class SymbioteGateway {
                 ...fbCfg,
               };
               const fbStartTime = Date.now();
-              const result = await runAgent(msgs, makeRunOpts(fb.provider, fbProvConfig));
+              const result = await runAgent(currentSessionMessages, makeRunOpts(fb.provider, fbProvConfig));
               console.log(`${palette.dim}  [fallback]${palette.reset} ${palette.green}${fb.name} succeeded${palette.reset}`);
               // v2.0 — Record fallback success
               this.providerHealth.recordSuccess(fb.name, Date.now() - fbStartTime);
@@ -1613,9 +1778,11 @@ export class SymbioteGateway {
         }
       };
 
+      this.sessionManager.save(session);
+
       // BLINK loop: run agent, check if budget hit, blink and continue if needed
       while (blinkCtrl.shouldContinue()) {
-        const result = await runWithFallback(currentSessionMessages);
+        const result = await runWithFallback();
 
         // Check if agent was aborted (SIGTERM, interrupt, new message)
         // Save session state so work-in-progress is not lost on restart

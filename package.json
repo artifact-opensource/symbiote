@@ -10,6 +10,7 @@
   "files": [
     "dist",
     "web",
+    "webapp/dist",
     "README.md",
     "CHANGELOG.md",
     "RELEASES.md",
@@ -27,7 +28,9 @@
     "install.cmd"
   ],
   "scripts": {
-    "build": "tsc && node scripts/copy-runtime-assets.mjs",
+    "build": "tsc && node scripts/copy-runtime-assets.mjs && npm --prefix webapp run build",
+    "dev:webapp": "npm --prefix webapp run dev",
+    "build:webapp": "npm --prefix webapp run build",
     "index:codebase": "node scripts/generate-codebase-index.mjs",
     "start": "node dist/gateway/daemon.js --config=symbiote.json",
     "dev": "tsc && node dist/index.js",

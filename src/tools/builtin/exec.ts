@@ -39,7 +39,7 @@ export const execTool: ToolDefinition = {
     },
     required: ['command'],
   },
-  async execute(input) {
+  async execute(input, options) {
     const command = input.command as string;
     const workdir = (input.workdir as string) ?? process.cwd();
     const background = input.background as boolean ?? false;
@@ -55,6 +55,7 @@ export const execTool: ToolDefinition = {
       return JSON.stringify({ processId: p.id, pid: p.pid, status: 'running' });
     }
 
+    if (options?.signal?.aborted) return 'Error: Command aborted before it started.';
     const timeoutMs = ((input.timeout as number) ?? 600) * 1000;
 
     // PTY wrapping: use `script` to allocate a pseudo-terminal
@@ -66,6 +67,7 @@ export const execTool: ToolDefinition = {
 
     return new Promise<string>((resolve) => {
       const chunks: Buffer[] = [];
+      let settled = false;
       const proc = spawn(shell.file, shell.args, {
         windowsHide: true,
         cwd: workdir,
@@ -77,16 +79,28 @@ export const execTool: ToolDefinition = {
         },
       });
 
+      const finish = (output: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        options?.signal?.removeEventListener('abort', onAbort);
+        resolve(output);
+      };
+      const onAbort = () => {
+        killProcessTree(proc);
+        finish(`Error: Command aborted.\n${Buffer.concat(chunks).toString('utf-8')}`);
+      };
       const timer = setTimeout(() => {
         killProcessTree(proc);
-        resolve(`Error: Command timed out after ${timeoutMs / 1000}s\n${Buffer.concat(chunks).toString('utf-8')}`);
+        finish(`Error: Command timed out after ${timeoutMs / 1000}s\n${Buffer.concat(chunks).toString('utf-8')}`);
       }, timeoutMs);
+      options?.signal?.addEventListener('abort', onAbort, { once: true });
+      if (options?.signal?.aborted) onAbort();
 
       proc.stdout.on('data', (d: Buffer) => chunks.push(d));
       proc.stderr.on('data', (d: Buffer) => chunks.push(d));
 
       proc.on('close', (code) => {
-        clearTimeout(timer);
         let output = Buffer.concat(chunks).toString('utf-8');
         if (output.length > 100_000) output = output.slice(0, 100_000) + '\n... (truncated)';
         if (code === 0 && output.trim().length === 0) {
@@ -96,12 +110,11 @@ export const execTool: ToolDefinition = {
         }
         const hint = hintForFailure(command, output);
         if (hint && !output.includes(hint)) output += `\n${hint}`;
-        resolve(output);
+        finish(output);
       });
 
       proc.on('error', (err) => {
-        clearTimeout(timer);
-        resolve(`Error: ${err.message}`);
+        finish(`Error: ${err.message}`);
       });
     });
   },

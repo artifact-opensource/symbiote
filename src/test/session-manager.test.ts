@@ -62,3 +62,40 @@ test('loading an orphaned tool result persists cleanup once', () => {
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('channel routes survive session-manager restarts and remain adapter-scoped', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-session-routes-'));
+  try {
+    const first = new SessionManager(directory);
+    first.saveRoute({
+      channelType: 'discord',
+      adapterId: 'discord-main',
+      chatId: 'room-1',
+      sessionId: 'session-a',
+      lastActive: 100,
+    });
+    first.saveRoute({
+      channelType: 'discord',
+      adapterId: 'discord-secondary',
+      chatId: 'room-1',
+      sessionId: 'session-b',
+      lastActive: 200,
+    });
+
+    const restored = new SessionManager(directory).loadRoutes();
+    assert.equal(restored.length, 2);
+    assert.equal(restored.find(route => route.adapterId === 'discord-main')?.sessionId, 'session-a');
+    assert.equal(restored.find(route => route.adapterId === 'discord-secondary')?.sessionId, 'session-b');
+
+    first.saveRoute({
+      channelType: 'discord',
+      adapterId: 'discord-main',
+      chatId: 'room-1',
+      sessionId: 'session-a',
+      lastActive: 300,
+    });
+    assert.equal(new SessionManager(directory).loadRoutes().length, 2);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
