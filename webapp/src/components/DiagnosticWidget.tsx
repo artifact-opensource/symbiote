@@ -1,201 +1,157 @@
-import { useEffect, useState } from "react";
-import { Activity, Gauge, Monitor, Server, Thermometer, Radio } from "lucide-react";
-import { SymbioteTelemetry } from "../types";
+import React from 'react';
+import { Activity, Gauge, Server, Thermometer, Radio, RotateCw, Zap } from 'lucide-react';
+import { SymbioteTelemetry } from '../types';
 
 interface DiagnosticWidgetProps {
   telemetry: SymbioteTelemetry;
   onRefresh: () => void;
   isScanning: boolean;
+  tokenHistory?: number[];
+  tokenSpeed?: number;
+  totalTokens?: number;
 }
 
-export default function DiagnosticWidget({ telemetry, onRefresh, isScanning }: DiagnosticWidgetProps) {
-  // Local history array to draw an interactive floating neural graph
-  const [history, setHistory] = useState<number[]>([98, 97.4, 98.1, 97.9, 98.4, 98.2, 98.5]);
-
-  useEffect(() => {
-    // Append the cohesion value to the plotting cache
-    setHistory(prev => {
-      const next = [...prev, telemetry.coreCohesion];
-      if (next.length > 12) next.shift();
-      return next;
-    });
-  }, [telemetry.coreCohesion]);
-
-  // Construct SVG Polyline coordinates dynamically for our beautiful responsive chart
-  const padding = 15;
+export default function DiagnosticWidget({
+  telemetry,
+  onRefresh,
+  isScanning,
+  tokenHistory = [12, 24, 38, 45, 52, 48, 62, 55, 70],
+  tokenSpeed = 0,
+  totalTokens = 0,
+}: DiagnosticWidgetProps) {
+  const padding = 10;
   const width = 280;
-  const height = 80;
-  
-  const minVal = 90;
-  const maxVal = 100;
-  const range = maxVal - minVal;
+  const height = 60;
 
-  const points = history.map((val, index) => {
-    const x = padding + (index / (history.length - 1)) * (width - padding * 2);
-    // invert Y coordinates so higher values plot higher up in the graph
-    const normalized = (val - minVal) / range;
-    const y = height - padding - normalized * (height - padding * 2);
-    return `${x},${y}`;
-  }).join(" ");
+  const validHistory = tokenHistory.length > 1 ? tokenHistory : [0, tokenSpeed || 10];
+  const maxVal = Math.max(75, ...validHistory);
+  const minVal = 0;
+  const range = maxVal - minVal || 1;
+
+  const points = validHistory
+    .map((val, index) => {
+      const x = padding + (index / Math.max(1, validHistory.length - 1)) * (width - padding * 2);
+      const normalized = Math.min(1, Math.max(0, (val - minVal) / range));
+      const y = height - padding - normalized * (height - padding * 2);
+      return `${x},${y}`;
+    })
+    .join(' ');
+
+  const raw = telemetry._raw;
+  const cpuPercent = raw ? raw.cpu?.load?.percent : Math.round(telemetry.thermalLevel);
+  const memPercent = raw ? raw.memory?.percent : Math.round(telemetry.memoryEntropy * 100);
+  const uptimeStr = raw ? raw.uptime?.systemFormatted : 'Online';
+  const nodeVer = raw?.env?.nodeVersion || 'v22';
+  const pid = raw?.env?.pid || process?.pid || 'host';
 
   return (
-    <div id="plugin-system-monitor-card" className="w-full flex flex-col gap-4 p-4 bg-slate-950/40 border border-slate-900 rounded-3xl relative overflow-hidden group">
-      {/* HUD Accent Glows */}
-      <div className="absolute -top-12 -right-12 w-24 h-24 rounded-full bg-cyan-500/5 filter blur-2xl group-hover:bg-cyan-500/10 transition-all duration-700"></div>
-
-      {/* Plugin Header */}
-      <div className="flex items-center justify-between border-b border-slate-900/60 pb-2.5">
+    <div className="w-full flex flex-col gap-3 p-3.5 bg-zinc-950 border border-zinc-800 rounded-xl">
+      {/* Header */}
+      <div className="flex items-center justify-between pb-2 border-b border-zinc-800/80">
         <div className="flex items-center gap-2">
-          <Monitor className="w-4 h-4 text-cyan-400" />
-          <h3 className="font-sans text-xs font-semibold tracking-wide text-slate-200">SYSTEM MONITORS</h3>
+          <Activity className="w-4 h-4 text-sky-400" />
+          <h3 className="text-xs font-semibold text-zinc-200">Host Runtime Telemetry</h3>
         </div>
-        <div className="flex items-center gap-1">
-          <span className={`w-1.5 h-1.5 rounded-full ${isScanning ? "bg-purple-500 animate-ping" : "bg-cyan-500 animate-pulse"}`}></span>
-          <span className="font-mono text-[9px] text-slate-500 tracking-wider font-medium">{isScanning ? "SCANNING" : "SYNCD"}</span>
+        <div className="flex items-center gap-1.5 text-[10px] text-zinc-400 font-mono">
+          <span className={`w-1.5 h-1.5 rounded-full ${isScanning ? 'bg-sky-400 animate-ping' : 'bg-emerald-400'}`}></span>
+          <span>{isScanning ? 'POLLING' : 'ACTIVE'}</span>
         </div>
       </div>
 
-      {/* Grid of Micro-meters — live data from /api/telemetry */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* CPU Load */}
-        <div className="flex items-center gap-3 p-2.5 bg-slate-900/30 border border-slate-900/80 rounded-xl">
-          <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
-            <Thermometer className="w-4 h-4" />
+      {/* Real Host Metric Cards */}
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        {/* CPU */}
+        <div className="p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-lg flex items-center gap-2.5">
+          <div className="p-1.5 rounded-md bg-sky-500/10 text-sky-400">
+            <Thermometer className="w-3.5 h-3.5" />
           </div>
-          <div className="flex flex-col">
-            <span className="font-mono text-[9px] text-slate-500">CPU LOAD</span>
-            <span className="font-sans text-sm font-medium text-slate-200">
-              {telemetry._raw ? `${telemetry._raw.cpu.load.percent}%` : `${telemetry.thermalLevel.toFixed(1)}%`}
-            </span>
-            {telemetry._raw && (
-              <span className="font-mono text-[8px] text-slate-600">{telemetry._raw.cpu.cores} cores · {telemetry._raw.cpu.model.slice(0, 20)}</span>
-            )}
+          <div className="min-w-0">
+            <div className="text-[10px] text-zinc-500 font-mono">CPU LOAD</div>
+            <div className="font-semibold text-zinc-200 truncate">{cpuPercent}%</div>
           </div>
         </div>
 
-        {/* RAM Usage */}
-        <div className="flex items-center gap-3 p-2.5 bg-slate-900/30 border border-slate-900/80 rounded-xl">
-          <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400">
-            <Gauge className="w-4 h-4" />
+        {/* Memory */}
+        <div className="p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-lg flex items-center gap-2.5">
+          <div className="p-1.5 rounded-md bg-emerald-500/10 text-emerald-400">
+            <Gauge className="w-3.5 h-3.5" />
           </div>
-          <div className="flex flex-col">
-            <span className="font-mono text-[9px] text-slate-500">MEMORY</span>
-            <span className="font-sans text-sm font-medium text-slate-200">
-              {telemetry._raw ? `${telemetry._raw.memory.percent}%` : `${(telemetry.neuralBandwidth / 20).toFixed(0)}%`}
-            </span>
-            {telemetry._raw && (
-              <span className="font-mono text-[8px] text-slate-600">
-                {(telemetry._raw.memory.used / 1073741824).toFixed(1)} / {(telemetry._raw.memory.total / 1073741824).toFixed(1)} GB
-              </span>
-            )}
+          <div className="min-w-0">
+            <div className="text-[10px] text-zinc-500 font-mono">MEMORY</div>
+            <div className="font-semibold text-zinc-200 truncate">{memPercent}%</div>
           </div>
         </div>
 
-        {/* System Uptime */}
-        <div className="flex items-center gap-3 p-2.5 bg-slate-900/30 border border-slate-900/80 rounded-xl">
-          <div className="p-2 rounded-lg bg-purple-500/10 text-purple-400">
-            <Server className="w-4 h-4" />
+        {/* Uptime */}
+        <div className="p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-lg flex items-center gap-2.5">
+          <div className="p-1.5 rounded-md bg-purple-500/10 text-purple-400">
+            <Server className="w-3.5 h-3.5" />
           </div>
-          <div className="flex flex-col">
-            <span className="font-mono text-[9px] text-slate-500">UPTIME</span>
-            <span className="font-sans text-sm font-medium text-slate-200">
-              {telemetry._raw ? telemetry._raw.uptime.systemFormatted : "—"}
-            </span>
+          <div className="min-w-0">
+            <div className="text-[10px] text-zinc-500 font-mono">UPTIME</div>
+            <div className="font-semibold text-zinc-200 truncate max-w-[85px]">{uptimeStr}</div>
           </div>
         </div>
 
-        {/* Network / Nodes */}
-        <div className="flex items-center gap-3 p-2.5 bg-slate-900/30 border border-slate-900/80 rounded-xl">
-          <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-450">
-            <Radio className="w-4 h-4 text-emerald-450" />
+        {/* Host Node / Process */}
+        <div className="p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-lg flex items-center gap-2.5">
+          <div className="p-1.5 rounded-md bg-amber-500/10 text-amber-400">
+            <Radio className="w-3.5 h-3.5" />
           </div>
-          <div className="flex flex-col">
-            <span className="font-mono text-[9px] text-slate-500">NETWORK</span>
-            <span className="font-sans text-sm font-medium text-slate-200">
-              {telemetry._raw ? `${Object.keys(telemetry._raw.network).length} IFs` : `${telemetry.connectedSymbionts} ACTIVE`}
-            </span>
-            {telemetry._raw && telemetry._raw.env?.pid && (
-              <span className="font-mono text-[8px] text-slate-600">PID {telemetry._raw.env.pid}</span>
-            )}
+          <div className="min-w-0">
+            <div className="text-[10px] text-zinc-500 font-mono">RUNTIME</div>
+            <div className="font-semibold text-zinc-200 truncate text-[11px] font-mono">Node {nodeVer}</div>
           </div>
         </div>
       </div>
 
-      {/* Reactive Visual Oscilloscope Chart */}
-      <div className="flex flex-col gap-1.5 p-2 bg-slate-900/30 border border-slate-900/80 rounded-2xl">
-        <div className="flex justify-between items-center px-1 font-mono text-[8px] text-slate-500 tracking-wider">
-          <span className="flex items-center gap-1">
-            <Activity className="w-2.5 h-2.5 text-cyan-500 animate-pulse" />
-            SYNAPTIC CORE COHESION WAVE
+      {/* Token Throughput Graph */}
+      <div className="flex flex-col gap-1.5 p-2.5 bg-zinc-900/60 border border-zinc-800 rounded-lg">
+        <div className="flex justify-between items-center text-[10px] font-mono text-zinc-400">
+          <span className="flex items-center gap-1 text-zinc-300">
+            <Zap className="w-3 h-3 text-sky-400" />
+            TOKEN GENERATION SPEED
           </span>
-          <span>{telemetry.coreCohesion.toFixed(2)}%</span>
+          <span className="text-sky-400 font-semibold">{tokenSpeed > 0 ? `${tokenSpeed} tok/s` : 'IDLE'}</span>
         </div>
 
-        <div className="w-full h-20 bg-slate-950/80 border border-slate-950 rounded-lg overflow-hidden relative">
-          {/* Neon background scanlines */}
-          <div className="absolute inset-0 bg-radial-grid opacity-10"></div>
-          
-          {/* Floating diagnostic scanner ribbon */}
-          {isScanning && (
-            <div className="absolute top-0 bottom-0 w-12 bg-gradient-to-r from-transparent via-cyan-500/20 to-transparent animate-slide-scan"></div>
-          )}
-
-          {/* SVG Sparkline Graph */}
-          <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" className="overflow-visible">
-            {/* Grid base indicators */}
-            <line x1="0" y1="40" x2={width} y2="40" stroke="#1e293b" strokeWidth="0.5" strokeDasharray="3,3" />
-            
-            {/* Glow backing line */}
-            <polyline 
-              fill="none" 
-              stroke="url(#sparkGlow)" 
-              strokeWidth="5" 
-              points={points} 
-              className="opacity-40 filter blur-[2px]"
-            />
-            {/* Fine sharp text line */}
-            <polyline 
-              fill="none" 
-              stroke="url(#sparkGrad)" 
-              strokeWidth="1.5" 
-              points={points} 
-              className="drop-shadow-[0_0_8px_rgba(6,182,212,0.8)]"
-            />
-            
-            {/* Interactive End Dot glow */}
-            {points.length > 0 && (
-              <circle 
-                cx={padding + ((history.length - 1) / (history.length - 1)) * (width - padding * 2)}
-                cy={height - padding - ((history[history.length - 1] - minVal) / range) * (height - padding * 2)}
-                r="3.5"
-                fill="#ffffff"
-                className="animate-ping"
-              />
-            )}
-
-            {/* Gradients declaration */}
-            <defs>
-              <linearGradient id="sparkGrad" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#818cf8" />
-                <stop offset="50%" stopColor="#06b6d4" />
-                <stop offset="100%" stopColor="#10b981" />
-              </linearGradient>
-              <linearGradient id="sparkGlow" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#818cf8" />
-                <stop offset="100%" stopColor="#06b6d4" />
-              </linearGradient>
-            </defs>
+        <div className="w-full h-12 bg-black/60 rounded overflow-hidden relative border border-zinc-800/80">
+          <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+            <line x1="0" y1="30" x2={width} y2="30" stroke="rgba(255,255,255,0.06)" strokeWidth="0.5" strokeDasharray="3,3" />
+            <polyline fill="none" stroke="#38bdf8" strokeWidth="1.5" points={points} />
           </svg>
         </div>
+
+        <div className="flex justify-between text-[9px] font-mono text-zinc-500">
+          <span>PEAK: {maxVal} T/S</span>
+          <span>SESSION: {totalTokens} TOKENS</span>
+        </div>
       </div>
 
-      {/* Sync trigger CTA */}
+      {/* Host Environment Info */}
+      <div className="text-[11px] font-mono text-zinc-500 space-y-1 pt-1 border-t border-zinc-850">
+        <div className="flex justify-between">
+          <span>Platform:</span>
+          <span className="text-zinc-300">{raw?.platform || 'linux'} ({raw?.cpu?.cores || 4} cores)</span>
+        </div>
+        <div className="flex justify-between">
+          <span>Working Dir:</span>
+          <span className="text-zinc-300 truncate max-w-[150px]">{raw?.env?.cwd || '.'}</span>
+        </div>
+        <div className="flex justify-between">
+          <span>PID:</span>
+          <span className="text-zinc-300">{pid}</span>
+        </div>
+      </div>
+
+      {/* Refresh Button */}
       <button
         onClick={onRefresh}
-        id="trigger-diagnostic-refresh-btn"
-        className="w-full py-1.5 bg-cyan-950/20 hover:bg-cyan-950/40 border border-cyan-800/20 hover:border-cyan-800/50 rounded-xl font-mono text-[10px] tracking-wider text-cyan-400 cursor-pointer active:scale-98 transition-all"
+        disabled={isScanning}
+        className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 active:bg-zinc-750 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-300 hover:text-white transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
       >
-        {isScanning ? "ANALYSING SYSMETRICS..." : "RUN FULL DIAGNOSTIC RUN"}
+        <RotateCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin text-sky-400' : ''}`} />
+        <span>{isScanning ? 'POLLING SYSTEM...' : 'REFRESH METRICS'}</span>
       </button>
     </div>
   );
