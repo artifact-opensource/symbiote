@@ -7,6 +7,22 @@ import { describeShell, hintForFailure, isWindows, killProcessTree, shellCommand
 
 const SHELLS: ShellKind[] = ['auto', 'powershell', 'bash', 'cmd'];
 
+/** Convert a Windows path (C:\foo\bar) to a Git Bash path (/c/foo/bar) */
+function toGitBashPath(p: string): string {
+  if (!isWindows()) return p;
+  // C:\path -> /c/path
+  return p.replace(/^([A-Za-z]):[\/]/g, '/$1/').replace(/[\\]/g, '/');
+}
+
+/** Normalize Windows paths in a command string for Git Bash compatibility */
+function normalizeCommandForBash(command: string): string {
+  if (!isWindows()) return command;
+  // Replace cd C:\path with cd /c/path
+  return command.replace(/\bcd\s+([A-Za-z]:[\/][^\s;&|]*)/gi, (match, path) => {
+    return `cd ${toGitBashPath(path)}`;
+  });
+}
+
 export const execTool: ToolDefinition = {
   name: 'exec',
   description: `Execute a shell command and return its output (stdout + stderr). Set background=true to run in background (returns process ID for polling). ${describeShell()}`,
@@ -43,7 +59,10 @@ export const execTool: ToolDefinition = {
 
     // PTY wrapping: use `script` to allocate a pseudo-terminal
     const actualCommand = pty ? wrapPtyCommand(command) : command;
-    const shell = shellCommand(actualCommand, false, kind);
+    
+    // Normalize Windows paths for Git Bash if needed
+    const normalizedCommand = kind === 'bash' ? normalizeCommandForBash(actualCommand) : actualCommand;
+    const shell = shellCommand(normalizedCommand, false, kind);
 
     return new Promise<string>((resolve) => {
       const chunks: Buffer[] = [];
