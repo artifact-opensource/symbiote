@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+  <Product Id="*"
+           Name="Symbiote"
+           Language="1033"
+           Version="$(var.ProductVersion)"
+           Manufacturer="Artifact Virtual"
+           UpgradeCode="{A2064B1D-594B-49F4-8447-4B5E3ABFC03C}">
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Platform="x64" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Symbiote is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <UIRef Id="WixUI_InstallDir" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Symbiote" />
+      </Directory>
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="DATAFOLDER" Name="Symbiote">
+          <Directory Id="WORKSPACEFOLDER" Name="workspace" />
+          <Directory Id="SESSIONFOLDER" Name="sessions" />
+          <Directory Id="LOGFOLDER" Name="logs" />
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Complete" Title="Symbiote" Level="1">
+      <ComponentGroupRef Id="ApplicationFiles" />
+      <ComponentRef Id="PersistentData" />
+      <ComponentRef Id="WorkspaceDirectory" />
+      <ComponentRef Id="SessionsDirectory" />
+      <ComponentRef Id="LogsDirectory" />
+      <ComponentRef Id="GatewayService" />
+    </Feature>
+
+    <DirectoryRef Id="DATAFOLDER">
+      <Component Id="PersistentData" Guid="{98F35DF6-898D-49C4-B31A-2DB99E9E0FA2}" Permanent="yes" NeverOverwrite="yes" Win64="yes">
+        <File Id="SymbioteConfig"
+              Name="symbiote.json"
+              Source="$(var.DataSource)\symbiote.json"
+              KeyPath="yes">
+          <Permission User="SYSTEM" GenericAll="yes" />
+          <Permission User="Administrators" GenericAll="yes" />
+        </File>
+        <File Id="SymbioteEnvironment"
+              Name=".env"
+              Source="$(var.DataSource)\.env"
+              DiskId="1">
+          <Permission User="SYSTEM" GenericAll="yes" />
+          <Permission User="Administrators" GenericAll="yes" />
+        </File>
+        <CreateFolder>
+          <Permission User="SYSTEM" GenericAll="yes" />
+          <Permission User="Administrators" GenericAll="yes" />
+        </CreateFolder>
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="WORKSPACEFOLDER">
+      <Component Id="WorkspaceDirectory" Guid="{CB4F7E36-3884-4D3F-A1F4-7E90C5D9D9ED}" Permanent="yes" Win64="yes">
+        <CreateFolder>
+          <Permission User="SYSTEM" GenericAll="yes" />
+          <Permission User="Administrators" GenericAll="yes" />
+        </CreateFolder>
+        <RegistryValue Root="HKLM"
+                       Key="Software\Artifact Virtual\Symbiote"
+                       Name="WorkspaceDirectory"
+                       Type="string"
+                       Value="[WORKSPACEFOLDER]"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="SESSIONFOLDER">
+      <Component Id="SessionsDirectory" Guid="{D92D7853-45D9-4B7B-A1D7-4953487EF17E}" Permanent="yes" Win64="yes">
+        <CreateFolder>
+          <Permission User="SYSTEM" GenericAll="yes" />
+          <Permission User="Administrators" GenericAll="yes" />
+        </CreateFolder>
+        <RegistryValue Root="HKLM"
+                       Key="Software\Artifact Virtual\Symbiote"
+                       Name="SessionsDirectory"
+                       Type="string"
+                       Value="[SESSIONFOLDER]"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="LOGFOLDER">
+      <Component Id="LogsDirectory" Guid="{901EA3A7-1A5C-469B-8DFD-AE2548D6900F}" Permanent="yes" Win64="yes">
+        <CreateFolder>
+          <Permission User="SYSTEM" GenericAll="yes" />
+          <Permission User="Administrators" GenericAll="yes" />
+        </CreateFolder>
+        <RegistryValue Root="HKLM"
+                       Key="Software\Artifact Virtual\Symbiote"
+                       Name="LogsDirectory"
+                       Type="string"
+                       Value="[LOGFOLDER]"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="GatewayService" Guid="{1EED58B8-5795-4F92-9510-52DE45A9CC20}" Win64="yes">
+        <File Id="NssmExecutable"
+              Name="nssm.exe"
+              Source="$(var.NssmSource)"
+              KeyPath="yes" />
+        <ServiceInstall Id="SymbioteServiceInstall"
+                        Name="SymbioteGateway"
+                        DisplayName="Symbiote Gateway"
+                        Description="Persistent Symbiote agent gateway"
+                        Type="ownProcess"
+                        Start="auto"
+                        ErrorControl="normal"
+                        Account="LocalSystem"
+                        Vital="yes" />
+        <ServiceControl Id="SymbioteServiceControl"
+                        Name="SymbioteGateway"
+                        Start="install"
+                        Stop="both"
+                        Remove="uninstall"
+                        Wait="yes" />
+        <util:ServiceConfig FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            ServiceName="SymbioteGateway"
+                            RestartServiceDelayInSeconds="5"
+                            ResetPeriodInDays="1" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="Application"
+                       Type="string"
+                       Value="[INSTALLFOLDER]node.exe" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppDirectory"
+                       Type="string"
+                       Value="[DATAFOLDER]" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppParameters"
+                       Type="string"
+                       Value="&quot;[INSTALLFOLDER]dist\gateway\daemon.js&quot; --config=&quot;[DATAFOLDER]symbiote.json&quot;" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppExit\Default"
+                       Type="string"
+                       Value="Restart" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppRestartDelay"
+                       Type="integer"
+                       Value="5000" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppThrottle"
+                       Type="integer"
+                       Value="1500" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppStopMethodConsole"
+                       Type="integer"
+                       Value="5000" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppStdout"
+                       Type="string"
+                       Value="[LOGFOLDER]gateway.stdout.log" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppStderr"
+                       Type="string"
+                       Value="[LOGFOLDER]gateway.stderr.log" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppRotateFiles"
+                       Type="integer"
+                       Value="1" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppRotateOnline"
+                       Type="integer"
+                       Value="1" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppRotateBytes"
+                       Type="integer"
+                       Value="10485760" />
+        <RegistryValue Root="HKLM"
+                       Key="SYSTEM\CurrentControlSet\Services\SymbioteGateway\Parameters"
+                       Name="AppEnvironmentExtra"
+                       Type="multiString"
+                       Value="NODE_ENV=production" />
+      </Component>
+    </DirectoryRef>
+  </Product>
+</Wix>

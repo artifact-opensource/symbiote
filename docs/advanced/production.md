@@ -79,15 +79,32 @@ launchctl load ~/Library/LaunchAgents/com.symbiote.gateway.plist
 
 ## Windows
 
-Use [NSSM](https://nssm.cc/) to run as a Windows service:
+Build the per-machine Windows MSI from a Windows x64 machine:
 
 ```powershell
-nssm install Symbiote "C:\Program Files\nodejs\node.exe" "dist\gateway\daemon.js --config=symbiote.json"
-nssm set Symbiote AppDirectory "C:\path\to\symbiote"
-nssm start Symbiote
+npm run build:msi
 ```
 
-Alternatively, use Task Scheduler for a simpler setup.
+The MSI installs a bundled Node.js runtime and NSSM service wrapper, then configures
+`SymbioteGateway` to start automatically as LocalSystem. NSSM restarts a failed gateway
+after five seconds; Windows Service Control Manager recovery also restarts a failed
+service wrapper. The installer keeps configuration, credentials, sessions, workspace,
+and logs under `%ProgramData%\Symbiote`; uninstalling the MSI preserves that data.
+
+The initial `.env` is empty. Add provider keys and channel credentials to
+`%ProgramData%\Symbiote\.env`, then restart the service from an elevated PowerShell:
+
+```powershell
+Restart-Service SymbioteGateway
+Get-Service SymbioteGateway
+Get-Content "$env:ProgramData\Symbiote\logs\gateway.stdout.log" -Tail 50
+```
+
+Build the MSI with `npm run build:msi`; it downloads pinned WiX, Node.js, and NSSM
+archives and verifies each SHA-256 digest before packaging. The output is written to
+`dist\windows-installer`. To install the current checkout as a service instead, run
+`scripts\windows\install-service.ps1` from an elevated PowerShell; remove only the
+service while preserving its state with `scripts\windows\uninstall-service.ps1`.
 
 > **Note:** `SIGUSR1` hot-reload is not available on Windows. Restart the service to apply config changes.
 

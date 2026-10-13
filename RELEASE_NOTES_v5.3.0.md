@@ -53,6 +53,12 @@ npm run build
 
 No `symbiote.json` migration is required. To disable Ops Memory, set `SYMBIOTE_OPS_MEMORY=0` in the gateway environment and restart the process.
 
+Windows x64 deployments can build a per-machine MSI with `npm run build:msi`. It installs
+a bundled Node.js runtime and NSSM-managed gateway service with automatic crash recovery.
+Configuration, credentials, workspace, sessions, and rotated logs are kept under
+`%ProgramData%\Symbiote` and are preserved on uninstall. The machine-wide service runs
+as LocalSystem; review the Windows production deployment instructions before installing.
+
 On Windows, let `exec` start in the configured workspace or pass its `workdir` parameter. When explicitly using Git Bash, use `/c/...` paths rather than Windows backslashes or assumed Linux directories.
 
 ## Verification
