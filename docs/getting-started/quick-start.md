@@ -66,12 +66,12 @@ The fastest path to a running agent:
 
 ```bash
 # .env
-GROQ_API_KEY=gsk_your_key_here
+OPENROUTER_API_KEY=your_key_here
 ```
 
 ```json
 {
-  "defaultProvider": "groq",
+  "defaultProvider": "openrouter",
   "defaultModel": "openrouter/free",
   "workspace": ".",
   "providers": { "openrouter": {} }

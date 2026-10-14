@@ -12,7 +12,7 @@ The setup flow writes every section below. Values shown are the defaults.
   "configVersion": 2,
 
   "name": "Symbiote",
-  "emoji": "🤖",
+  "emoji": "",
 
   // Model
   "defaultProvider": "openrouter",
@@ -51,8 +51,7 @@ The setup flow writes every section below. Values shown are the defaults.
     "xai": { "apiKey": "${XAI_API_KEY}" },
     "nvidia": { "apiKey": "${NVIDIA_API_KEY}" },
     "github-copilot": {},
-    "ollama": { "baseUrl": "http://127.0.0.1:11434" },
-    "gladius": { "baseUrl": "http://127.0.0.1:8741" }
+    "ollama": { "baseUrl": "http://127.0.0.1:11434" }
   },
 
   "discord": { "enabled": false, "token": "${DISCORD_BOT_TOKEN}", "botId": "${DISCORD_CLIENT_ID}", "policy": { "dmPolicy": "allowlist", "groupPolicy": "mention-only", "requireMention": true, "allowedSenders": [], "allowedGroups": [], "ownerIds": [] } },
@@ -77,30 +76,40 @@ All string values in `symbiote.json` support `${ENV_VAR}` syntax:
 
 Variables are resolved from `process.env` at load time. The `.env` file is auto-loaded by the built-in dotenv loader.
 
-## .env
+## Environment file (`.env`)
+
+Copy `.env.example` to `.env`, or let `symbiote init` create it. Add credentials only for the providers and channels you plan to use. Keep `.env` private and never commit it.
 
 ```bash
-# LLM Providers
-GROQ_API_KEY=gsk_...           # https://console.groq.com/keys (free tier)
-ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com/
-OPENAI_API_KEY=sk-...          # https://platform.openai.com/api-keys
-GEMINI_API_KEY=AIza...         # https://aistudio.google.com/apikey
-XAI_API_KEY=xai-...            # https://console.x.ai/
+# LLM providers: set the key for each provider you use
+OPENROUTER_API_KEY=
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GEMINI_API_KEY=
+GROQ_API_KEY=
+XAI_API_KEY=
+NVIDIA_API_KEY=
 
-# GitHub Copilot — usually automatic via `gh auth login`
-# COPILOT_GITHUB_TOKEN=
+# GitHub Copilot: optional; `gh auth login` can provide credentials automatically
+COPILOT_GITHUB_TOKEN=
 
-# Ollama — no key needed, just run `ollama serve`
-
-# Discord
+# Discord: fill these in if Discord is enabled in symbiote.json
 DISCORD_BOT_TOKEN=
 DISCORD_CLIENT_ID=
 
-# HTTP API authentication
+# HTTP API: required when binding the API beyond loopback
 SYMBIOTE_API_KEY=
+SYMBIOTE_API_PORT=3006
+SYMBIOTE_API_HOST=127.0.0.1
+SYMBIOTE_PORT=3009
+SYMBIOTE_WEB_HOST=127.0.0.1
 
-# Port (default: 3006)
-SYMBIOTE_PORT=3006
+# Ollama runs locally and does not need an API key.
+# Optional runtime settings:
+# SYMBIOTE_LOG=debug
+# SYMBIOTE_SANDBOX=1
+# SYMBIOTE_INJECTION_GUARD=strict
+# SYMBIOTE_SHELL=
 ```
 
 > Install with `npm i @symbiote-agi/symbiote`, then run `npx symbiote init` for the guided CLI setup or `npx symbiote init --ui` for the desktop installer UI. See [Setup Flow](wizard.md).
