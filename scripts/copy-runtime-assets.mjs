@@ -8,6 +8,7 @@ const sourceDir = path.join(projectRoot, 'src', 'web');
 const destinationDir = path.join(projectRoot, 'dist', 'web');
 
 fs.mkdirSync(destinationDir, { recursive: true });
+fs.writeFileSync(path.join(projectRoot, 'dist', '.npmignore'), 'windows-installer/\n');
 for (const filename of fs.readdirSync(sourceDir)) {
   if (!filename.endsWith('.py')) continue;
   fs.copyFileSync(path.join(sourceDir, filename), path.join(destinationDir, filename));

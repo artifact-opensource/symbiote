@@ -1,5 +1,5 @@
 {
-  "name": "symbiote",
+  "name": "@symbiote-agi/symbiote",
   "version": "5.3.0",
   "description": "Super-Agent, at scale",
   "type": "module",
@@ -70,6 +70,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/artifact-opensource/symbiote.git"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "bugs": {
     "url": "https://github.com/artifact-opensource/symbiote/issues"

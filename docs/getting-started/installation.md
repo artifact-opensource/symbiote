@@ -9,7 +9,7 @@
 ## From npm
 
 ```bash
-npm install -g symbiote
+npm i @symbiote-agi/symbiote
 ```
 
 ## From Source

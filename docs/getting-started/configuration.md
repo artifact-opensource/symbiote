@@ -103,7 +103,7 @@ SYMBIOTE_API_KEY=
 SYMBIOTE_PORT=3006
 ```
 
-> Run `npx symbiote init` for the guided CLI setup, or `npx symbiote init --ui` for the desktop installer UI. See [Setup Flow](wizard.md).
+> Install with `npm i @symbiote-agi/symbiote`, then run `npx symbiote init` for the guided CLI setup or `npx symbiote init --ui` for the desktop installer UI. See [Setup Flow](wizard.md).
 
 ## Key Settings
 

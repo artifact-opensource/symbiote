@@ -2,9 +2,10 @@
 
 Get a working agent in under 2 minutes.
 
-## 1. Initialize
+## 1. Install and Initialize
 
 ```bash
+npm i @symbiote-agi/symbiote
 npx symbiote init
 ```
 

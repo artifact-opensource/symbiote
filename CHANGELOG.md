@@ -11,6 +11,7 @@ Full release notes: [RELEASE_NOTES_v5.3.0.md](RELEASE_NOTES_v5.3.0.md)
 - Tests and diagnostics for Windows/Git Bash path mistakes, successful commands with intentionally empty output, Discord progress message sizing, and sensitive argument redaction.
 
 ### Changed
+- The package metadata now targets `@symbiote-agi/symbiote` for public npm publishing; the installed CLI command remains `symbiote`.
 - `exec` now distinguishes a successful silent command from absent results and provides actionable guidance for path and shell mismatches on Windows.
 - Discord tool-progress previews are capped below Discord's 2,000-character message limit and redact common credential/header formats before display.
 - README and release documentation now describe the current runtime, memory boundaries, tool execution, adaptive subsystems, channels, and security considerations.
@@ -76,7 +77,7 @@ Full notes are superseded by the current [v5.3.0 release notes](RELEASE_NOTES_v5
 ### Release & Packaging Prep
 - Aligned package metadata and runtime version reporting to **v4.0.0 Apex**
 - Refreshed release surfaces and static landing assets for public packaging and deployment handoff
-- Updated installation guidance to use the published `symbiote` package name
+- Updated installation guidance to use the npm package name
 
 ---
 
