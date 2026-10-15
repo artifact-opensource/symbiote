@@ -1432,7 +1432,7 @@ function AgentSettingsDialog({ config, onSave, onClose }: {
 function PageHeading({ eyebrow, title, detail, action }: {
   eyebrow?: string;
   title: string;
-  detail?: string;
+  detail?: ReactNode;
   action?: ReactNode;
 }) {
   return (
@@ -1486,6 +1486,7 @@ function OverviewView(props: {
     <div className="page page-overview">
       <PageHeading
         title={(config?.agentName || config?.name || 'Agent').toLowerCase()}
+        detail={<WorkspaceClock />}
         action={<button className="button button-primary" onClick={onNewSession} disabled={creatingSession}><Plus size={16} />New conversation</button>}
       />
 
@@ -1513,7 +1514,7 @@ function OverviewView(props: {
 
       <section className="metric-grid" aria-label="Runtime summary">
         <MetricCard icon={Server} label="Uptime" tone="neutral">
-          <div className="uptime-card-main"><strong className="metric-value">{status?.uptimeHuman || '—'}</strong><StopwatchDial seconds={status?.uptime ?? 0} /></div>
+          <div className="uptime-card-main"><strong className="metric-value">{status?.uptimeHuman || '—'}</strong><StopwatchDial seconds={(status?.uptime ?? 0) / 1000} /></div>
         </MetricCard>
         <MetricCard icon={MessageSquare} label="Conversations" tone="green">
           <strong className="metric-value">{status?.sessions ?? sessions.length}</strong>
@@ -2006,20 +2007,48 @@ function MetricCard({ icon: Icon, label, tone, children }: {
 }
 
 function StopwatchDial({ seconds }: { seconds: number }) {
-  const [elapsed, setElapsed] = useState(seconds);
-  useEffect(() => setElapsed(seconds), [seconds]);
+  const [clock, setClock] = useState({ seconds, syncedAt: Date.now(), now: Date.now() });
   useEffect(() => {
-    const timer = window.setInterval(() => setElapsed(value => value + 1), 1000);
+    const syncedAt = Date.now();
+    setClock(current => ({ ...current, seconds, syncedAt }));
+  }, [seconds]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(current => ({ ...current, now: Date.now() })), 100);
     return () => window.clearInterval(timer);
   }, []);
+  const elapsed = Math.max(0, clock.seconds + (clock.now - clock.syncedAt) / 1000);
+  const secondAngle = (elapsed % 60) * 6;
+  const minuteAngle = (elapsed / 60 % 60) * 6;
+  const hourAngle = (elapsed / 3600 % 12) * 30;
   return (
-    <svg className="uptime-stopwatch" viewBox="0 0 84 84" role="img" aria-label="Live uptime stopwatch">
+    <svg className="uptime-stopwatch" viewBox="0 0 84 84" role="img" aria-label={`Live uptime stopwatch, ${Math.floor(elapsed / 3600)} hours, ${Math.floor(elapsed / 60) % 60} minutes, ${Math.floor(elapsed) % 60} seconds`}>
       <circle cx="42" cy="44" r="31" className="stopwatch-face" />
       {Array.from({ length: 12 }, (_, index) => <line key={index} x1="42" y1="16" x2="42" y2="20" className="stopwatch-tick" transform={`rotate(${index * 30} 42 44)`} />)}
-      <line x1="42" y1="44" x2="42" y2="21" className="stopwatch-hand" transform={`rotate(${(elapsed % 60) * 6} 42 44)`} />
+      <line x1="42" y1="44" x2="42" y2="30" className="stopwatch-hour-hand" transform={`rotate(${hourAngle} 42 44)`} />
+      <line x1="42" y1="44" x2="42" y2="23" className="stopwatch-minute-hand" transform={`rotate(${minuteAngle} 42 44)`} />
+      <line x1="42" y1="44" x2="42" y2="19" className="stopwatch-second-hand" transform={`rotate(${secondAngle} 42 44)`} />
       <circle cx="42" cy="44" r="2.5" className="stopwatch-pin" />
       <path d="M35 9h14M42 9v4M58 18l4-4" className="stopwatch-crown" />
     </svg>
+  );
+}
+
+function WorkspaceClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 250);
+    return () => window.clearInterval(timer);
+  }, []);
+  const time = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const date = now.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const zone = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(now).find(part => part.type === 'timeZoneName')?.value;
+  return (
+    <span className="workspace-clock">
+      <Clock3 size={14} aria-hidden="true" />
+      <time dateTime={now.toISOString()} className="workspace-clock-time">{time}</time>
+      <span className="workspace-clock-date">{date}</span>
+      {zone && <span className="workspace-clock-zone">{zone}</span>}
+    </span>
   );
 }
 

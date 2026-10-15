@@ -144,6 +144,12 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .page-heading .eyebrow { margin: 1px 0 9px; color: #74766b; }
 .page-heading h1 { margin: 0; color: #262821; font-family: var(--serif); font-size: clamp(30px, 3vw, 39px); font-weight: 450; letter-spacing: -.035em; line-height: 1.06; }
 .page-heading p { margin: 9px 0 0; color: #73746b; font-size: 12px; line-height: 1.65; }
+.page-overview > .page-heading { min-height: 105px; }
+.page-overview .workspace-clock { display: inline-flex; min-height: 29px; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid #e4e4d8; border-radius: 7px; color: #74766b; background: #eeeee6; }
+.workspace-clock > svg { flex: 0 0 auto; color: #789071; }
+.workspace-clock-time { color: #29362d; font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; letter-spacing: .015em; }
+.workspace-clock-date { padding-left: 8px; border-left: 1px solid #d7d9cc; font-size: 9px; }
+.workspace-clock-zone { color: #888b7f; font-family: var(--mono); font-size: 8px; }
 .button {
   display: inline-flex; min-height: 37px; align-items: center; justify-content: center; gap: 8px; padding: 0 13px;
   border: 1px solid var(--line-strong); border-radius: 7px; font-size: 11px; font-weight: 550; white-space: nowrap; cursor: pointer;
@@ -303,8 +309,10 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .uptime-stopwatch { width: 66px; height: 66px; flex: 0 0 66px; overflow: visible; }
 .stopwatch-face { fill: #f6f6ef; stroke: #cfd5c5; stroke-width: 1.5; }
 .stopwatch-tick, .stopwatch-crown { fill: none; stroke: #899584; stroke-linecap: round; stroke-width: 1.5; }
-.stopwatch-hand { stroke: #bf725b; stroke-linecap: round; stroke-width: 2; }
-.stopwatch-pin { fill: #bf725b; }
+.stopwatch-hour-hand { stroke: #435b49; stroke-linecap: round; stroke-width: 2.6; }
+.stopwatch-minute-hand { stroke: #73876c; stroke-linecap: round; stroke-width: 1.8; }
+.stopwatch-second-hand { stroke: #bf725b; stroke-linecap: round; stroke-width: 1; }
+.stopwatch-pin { fill: #bf725b; stroke: #f6f6ef; stroke-width: .7; }
 .memory-card-content { display: flex; min-width: 0; flex: 1; align-items: center; gap: 10px; }
 .memory-donut { width: 54px; height: 54px; flex: 0 0 54px; }
 .memory-donut-track { fill: none; stroke: #ecece3; stroke-width: 7; }
@@ -570,6 +578,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
   .page-heading { min-height: 0; align-items: flex-start; }
   .page-heading h1 { font-size: 31px; }
   .page-heading p { max-width: 320px; font-size: 10px; }
+  .page-overview > .page-heading { min-height: 0; }
+  .page-overview > .page-heading .workspace-clock { display: flex; width: fit-content; max-width: 100%; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .page-overview .workspace-clock-date { padding-left: 6px; }
   .page-heading > .button { min-height: 34px; gap: 5px; padding: 0 9px; font-size: 9px; }
   .overview-banner { min-height: 190px; }
   .banner-copy { max-width: 100%; padding: 23px 19px; }
@@ -699,6 +710,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 :root[data-theme="dark"] .chat-welcome p,
 :root[data-theme="dark"] .eyebrow,
 :root[data-theme="dark"] .subtle-label { color: #a3aa9e; }
+:root[data-theme="dark"] .page-overview .workspace-clock { border-color: #3e4a3f; color: #a6ad9f; background: #232d26; }
+:root[data-theme="dark"] .workspace-clock-time { color: #e2e5d8; }
+:root[data-theme="dark"] .workspace-clock-date { border-color: #465147; }
 :root[data-theme="dark"] .button-secondary { border-color: var(--line-strong); color: #d8dbd0; background: #29332c; }
 :root[data-theme="dark"] .button-secondary:hover:not(:disabled) { border-color: #657364; background: #344239; }
 :root[data-theme="dark"] .text-button { color: #b7c5ad; }
@@ -740,6 +754,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 :root[data-theme="dark"] .stopwatch-face { fill: #29332c; stroke: #596654; }
 :root[data-theme="dark"] .stopwatch-tick,
 :root[data-theme="dark"] .stopwatch-crown { stroke: #a5b19d; }
+:root[data-theme="dark"] .stopwatch-hour-hand { stroke: #c6d5ba; }
+:root[data-theme="dark"] .stopwatch-minute-hand { stroke: #9eb394; }
+:root[data-theme="dark"] .stopwatch-pin { stroke: #29332c; }
 :root[data-theme="dark"] .memory-donut-track { stroke: #3d483e; }
 :root[data-theme="dark"] .metric-plot-grid { stroke: #39443b; }
 :root[data-theme="dark"] .conversation-row,
