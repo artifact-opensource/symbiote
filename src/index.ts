@@ -39,7 +39,7 @@ import { ingestWorkspaceSessions, vdbSearchTool, vdbIngestTool, vdbStatsTool } f
 import { cuaTools } from './tools/builtin/web-browser.js';
 import { combRecallTool, combStageTool, setCombVdbHook } from './tools/builtin/comb.js';
 import { todoTool } from './tools/shared-todo.js';
-import { SessionManager } from './sessions/manager.js';
+import { createWorkspaceSessionManager } from './sessions/manager.js';
 import { SubAgentManager } from './sessions/sub-agent.js';
 import { buildSystemPrompt } from './agent/system-prompt.js';
 import { DEFAULT_MAX_CONTEXT_TOKENS, runAgent } from './agent/runner.js';
@@ -85,6 +85,7 @@ async function main() {
 
   const config = loadConfig(configPath);
   process.env.SYMBIOTE_WORKSPACE ??= config.workspace;
+  const sessionMgr = createWorkspaceSessionManager(config.workspace, config.sessionsDir);
 
   // Mutable provider/model for mid-session switching
   let currentProviderName = providerArg ?? config.defaultProvider;
@@ -142,7 +143,6 @@ async function main() {
   }
 
   // Setup session manager
-  const sessionMgr = new SessionManager(config.sessionsDir ?? '.sessions');
   let session = sessionMgr.load(sessionId) ?? sessionMgr.create(sessionId, {
     provider: currentProviderName,
     model: currentModel,

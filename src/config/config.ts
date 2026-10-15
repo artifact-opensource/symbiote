@@ -134,12 +134,12 @@ const DEFAULT_CONFIG: SymbioteConfig = {
   temperature: 0.7,
   maxIterations: 50,
   workspace: process.cwd(),
-  sessionsDir: '.sessions',
+  sessionsDir: '.session',
   ownerIds: [],
   apiPort: 3006,
   apiHost: '127.0.0.1',
   webPort: 3009,
-  webHost: '127.0.0.1',
+  webHost: '0.0.0.0',
   allowedOrigins: [
     'http://127.0.0.1:3009',
     'http://localhost:3009',
@@ -201,7 +201,7 @@ function resolveEnvKeys(config: SymbioteConfig): SymbioteConfig {
   if (process.env.SYMBIOTE_API_HOST && !config.apiHost) {
     config.apiHost = process.env.SYMBIOTE_API_HOST;
   }
-  if (process.env.SYMBIOTE_WEB_HOST && !config.webHost) {
+  if (process.env.SYMBIOTE_WEB_HOST) {
     config.webHost = process.env.SYMBIOTE_WEB_HOST;
   }
 

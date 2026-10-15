@@ -51,6 +51,8 @@ export interface ChatRequest {
   senderName?: string;
   /** Source identifier (e.g., "gladius-page") */
   source?: string;
+  /** Internal identifier used to cancel one queued or active workspace run. */
+  webRunId?: string;
   /** Verified IPC agent ID (injected by middleware, not from client) */
   verifiedAgentId?: string;
   /** Verified IPC agent name */

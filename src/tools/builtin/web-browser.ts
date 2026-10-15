@@ -3,7 +3,7 @@
 // Browser launches lazily on first call, closes after 5min idle.
 
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ToolDefinition } from '../types.js';
@@ -450,6 +450,30 @@ export const cuaScrollTool: ToolDefinition = {
 export const cuaTools: ToolDefinition[] = [
   cuaScreenshotTool, cuaClickTool, cuaMoveTool, cuaTypeTool, cuaPressTool, cuaScrollTool,
 ];
+
+export async function browserNavigate(url: string): Promise<{ url: string; title: string }> {
+  const result = await rpc('browse', { url });
+  if (!result.success) throw new Error(result.error || 'Browser navigation failed.');
+  return { url: result.url, title: result.title };
+}
+
+export async function browserCapture(): Promise<{ url: string; title: string; viewport: { width: number; height: number }; image: string }> {
+  const result = await rpc('cua_screenshot');
+  if (!result.success) throw new Error(result.error || 'Browser screenshot failed.');
+  const image = readFileSync(result.path).toString('base64');
+  return {
+    url: result.url,
+    title: result.title,
+    viewport: result.viewport,
+    image: `data:image/jpeg;base64,${image}`,
+  };
+}
+
+export async function browserControl(action: 'click' | 'move' | 'type' | 'press' | 'scroll', params: Record<string, unknown>): Promise<void> {
+  const method = `cua_${action}`;
+  const result = await rpc(method, params);
+  if (!result.success) throw new Error(result.error || `Browser ${action} failed.`);
+}
 
 // ── Export all tools ──────────────────────────────────────────────────
 

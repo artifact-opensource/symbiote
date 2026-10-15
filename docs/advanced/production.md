@@ -85,11 +85,15 @@ Build the per-machine Windows MSI from a Windows x64 machine:
 npm run build:msi
 ```
 
-The MSI installs a bundled Node.js runtime and NSSM service wrapper, then configures
+The MSI installs a bundled Node.js runtime, Electron desktop shell, and NSSM service wrapper, then configures
 `SymbioteGateway` to start automatically as LocalSystem. NSSM restarts a failed gateway
 after five seconds; Windows Service Control Manager recovery also restarts a failed
 service wrapper. The installer keeps configuration, credentials, sessions, workspace,
-and logs under `%ProgramData%\Symbiote`; uninstalling the MSI preserves that data.
+and logs under `%ProgramData%\Symbiote`; runtime sessions are stored in
+`%ProgramData%\Symbiote\workspace\.session`. The MSI adds Start Menu and desktop
+shortcuts, launches the desktop app after installation, and adds a Domain/Private
+Windows Firewall rule for the configured web port. Uninstalling the MSI removes that
+firewall rule and preserves data.
 
 To initialize the installed service from a source checkout, pass the checkout as the
 seed directory when installing. The installer copies `symbiote.json` and `.env` into
@@ -107,7 +111,11 @@ competing gateway processes.
 
 If no seed directory is supplied, the service starts with the example configuration.
 Add provider keys and channel credentials to
-`%ProgramData%\Symbiote\.env`, then restart the service from an elevated PowerShell:
+`%ProgramData%\Symbiote\.env`, then restart the service from an elevated PowerShell.
+The installed desktop app opens the running control room; from **Configuration** on
+the host, reveal the LAN access token to connect other devices on the trusted network.
+The token can only be revealed from the local control room. For a fully preconfigured
+install, provide a source checkout as `SYMBIOTE_SEED_DIRECTORY`:
 
 ```powershell
 Restart-Service SymbioteGateway

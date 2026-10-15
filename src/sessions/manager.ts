@@ -7,8 +7,20 @@ import type { Message } from '../providers/types.js';
 import type { SessionRoute } from '../channels/types.js';
 import type { Session, SessionSummary, SessionMetadata } from './types.js';
 
-const DEFAULT_DIR = '.symbiote/sessions';
+const DEFAULT_DIR = '.session';
 const DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+export function resolveSessionDirectory(workspace: string): string {
+  return path.join(path.resolve(workspace), DEFAULT_DIR);
+}
+
+export function createWorkspaceSessionManager(workspace: string, configuredDirectory?: string): SessionManager {
+  const root = resolveSessionDirectory(workspace);
+  return new SessionManager(root, undefined, [
+    configuredDirectory ?? path.join(workspace, '.sessions'),
+    path.join(workspace, '.sessions'),
+  ]);
+}
 
 /**
  * Sanitize message history to remove orphaned tool results/calls.
@@ -103,15 +115,55 @@ export class SessionManager {
   private dir: string;
   private ttl: number;
 
-  constructor(baseDir?: string, ttl?: number) {
-    this.dir = baseDir ?? path.join(os.homedir(), DEFAULT_DIR);
+  constructor(baseDir?: string, ttl?: number, legacyDirs: string[] = []) {
+    this.dir = path.resolve(baseDir ?? path.join(os.homedir(), DEFAULT_DIR));
     this.ttl = ttl ?? DEFAULT_TTL;
+    for (const legacyDir of new Set(legacyDirs.map(directory => path.resolve(directory)))) {
+      this.migrateLegacyDirectory(legacyDir);
+    }
     fs.mkdirSync(this.dir, { recursive: true });
+  }
+
+  get directory(): string {
+    return this.dir;
+  }
+
+  private migrateLegacyDirectory(source: string): void {
+    if (source === this.dir || !fs.existsSync(source)) return;
+    fs.mkdirSync(path.dirname(this.dir), { recursive: true });
+    const moveContents = (from: string, to: string): void => {
+      fs.mkdirSync(to, { recursive: true });
+      for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+        const sourcePath = path.join(from, entry.name);
+        let targetPath = path.join(to, entry.name);
+        if (entry.isDirectory()) {
+          moveContents(sourcePath, targetPath);
+          continue;
+        }
+        if (fs.existsSync(targetPath)) {
+          const conflictDir = path.join(this.dir, 'archive');
+          fs.mkdirSync(conflictDir, { recursive: true });
+          targetPath = path.join(conflictDir, `legacy-${Date.now()}-${entry.name}`);
+        }
+        try {
+          fs.renameSync(sourcePath, targetPath);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+          fs.copyFileSync(sourcePath, targetPath);
+          fs.unlinkSync(sourcePath);
+        }
+      }
+      fs.rmdirSync(from);
+    };
+
+    console.log(`[sessions] Migrating session data from ${source} to ${this.dir}`);
+    moveContents(source, this.dir);
   }
 
   private filePath(id: string): string {
     const safe = id.replace(/[^a-zA-Z0-9_\-:.]/g, '_');
-    return path.join(this.dir, `${safe}.json`);
+    const fileSafe = process.platform === 'win32' ? safe.replace(/:/g, '~3A') : safe;
+    return path.join(this.dir, `${fileSafe}.json`);
   }
 
   private routesFilePath(): string {
@@ -158,7 +210,7 @@ export class SessionManager {
     return { messageCount: 0, tokenUsage: { input: 0, output: 0 }, toolsUsed: {}, depth: 0 };
   }
 
-  create(id: string, opts?: { label?: string; provider?: string; model?: string; parentSessionId?: string; depth?: number }): Session {
+  create(id: string, opts?: { label?: string; provider?: string; model?: string; parentSessionId?: string; depth?: number; sessionKind?: 'conversation' | 'subagent' }): Session {
     const session: Session = {
       id,
       createdAt: Date.now(),
@@ -170,6 +222,7 @@ export class SessionManager {
         provider: opts?.provider,
         model: opts?.model,
         parentSessionId: opts?.parentSessionId,
+        sessionKind: opts?.sessionKind ?? (opts?.parentSessionId ? 'subagent' : (id.startsWith('web-') ? 'conversation' : undefined)),
         depth: opts?.depth ?? 0,
       },
     };
@@ -209,6 +262,17 @@ export class SessionManager {
     try { fs.unlinkSync(this.filePath(id)); return true; } catch { return false; }
   }
 
+  archiveSession(id: string): boolean {
+    const source = this.filePath(id);
+    if (!fs.existsSync(source)) return false;
+    const destination = path.join(this.archiveDir(), path.basename(source));
+    if (fs.existsSync(destination)) {
+      throw new Error(`Cannot archive session ${id}: an archived session with the same id already exists.`);
+    }
+    fs.renameSync(source, destination);
+    return true;
+  }
+
   list(): SessionSummary[] {
     try {
       const summaries: SessionSummary[] = [];
@@ -223,6 +287,8 @@ export class SessionManager {
             messageCount: s.messages.length,
             provider: s.metadata?.provider,
             model: s.metadata?.model,
+            parentSessionId: s.metadata?.parentSessionId,
+            sessionKind: s.metadata?.sessionKind ?? (s.metadata?.parentSessionId ? 'subagent' : undefined),
           });
         } catch { /* skip */ }
       }

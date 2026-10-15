@@ -10,6 +10,7 @@ import { loadConfig } from '../config/config.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const installerHtmlCandidates = [
+  path.resolve(__dirname, '..', 'web', 'installer.html'),
   path.resolve(__dirname, '..', '..', 'web', 'installer.html'),
   path.resolve(process.cwd(), 'web', 'installer.html'),
 ];

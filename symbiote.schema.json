@@ -34,7 +34,7 @@
 
     "apiHost": { "type": "string", "default": "127.0.0.1" },
     "apiPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
-    "webHost": { "type": "string", "default": "127.0.0.1" },
+    "webHost": { "type": "string", "default": "0.0.0.0" },
     "webPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
     "allowedOrigins": { "type": "array", "items": { "type": "string" }, "description": "CORS origins. Wildcards are rejected when the API is not bound to loopback." },
 

@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { scaffoldAgent } from './agent-scaffold.js';
+import { readWorkspaceIdentity } from '../agent/workspace-identity.js';
 import { loadConfig, type SymbioteConfig } from '../config/config.js';
 import { validateConfig } from '../config/validator.js';
 import { APP_VERSION, RELEASE_CODENAME } from '../meta/version.js';
@@ -86,7 +87,7 @@ export function defaultSetupInput(existing?: SymbioteConfig, envPath = path.reso
     provider,
     model: existing?.defaultModel ?? choice.defaultModel,
     workspace,
-    sessionsDir: existing?.sessionsDir ?? template.sessionsDir,
+    sessionsDir: template.sessionsDir,
     temperature: existing?.temperature ?? template.temperature,
     maxTokens: existing?.maxTokens ?? template.maxTokens,
     maxIterations: existing?.maxIterations ?? template.maxIterations,
@@ -107,7 +108,10 @@ export function defaultSetupInput(existing?: SymbioteConfig, envPath = path.reso
       name: existing?.name ?? 'Symbiote',
       emoji: existing?.emoji ?? '🤖',
       personality: 'Calm, precise, production-minded operator',
-      creatorName: process.env.USERNAME ?? process.env.USER ?? 'Operator',
+      creatorName: (() => {
+        const savedName = readWorkspaceIdentity(workspace).ownerName;
+        return savedName !== 'Owner' ? savedName : process.env.USERNAME ?? process.env.USER ?? 'Operator';
+      })(),
     },
   };
 }
@@ -132,7 +136,7 @@ export function buildConfig(input: SetupInput, configDir = process.cwd()): Recor
     whatsapp: { enabled: input.whatsappEnabled, phoneNumber: input.whatsappPhoneNumber || undefined, authDir: toPortablePath(input.whatsappAuthDir) },
   });
   config.workspace = rel === '' ? '.' : rel.startsWith('..') && path.isAbsolute(input.workspace) ? input.workspace : rel;
-  config.sessionsDir = input.sessionsDir;
+  config.sessionsDir = '.session';
   return config;
 }
 
@@ -209,7 +213,7 @@ export function writeSetupFiles(input: SetupInput, configPath = path.resolve('sy
   config.$schema = SCHEMA_REF;
   config.configVersion = CONFIG_VERSION;
 
-  const resolved = { ...config, workspace: input.workspace, sessionsDir: path.resolve(configDir, config.sessionsDir ?? '.sessions') } as unknown as SymbioteConfig;
+  const resolved = { ...config, workspace: input.workspace, sessionsDir: path.join(input.workspace, '.session') } as unknown as SymbioteConfig;
   const issues = validateConfig(resolved);
   const errors = issues.filter(i => i.severity === 'error');
   if (errors.length) throw new Error(`Generated configuration failed validation: ${errors.map(e => `${e.field}: ${e.message}`).join('; ')}`);

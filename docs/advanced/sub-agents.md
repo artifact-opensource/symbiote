@@ -45,11 +45,7 @@ Attempting to spawn beyond depth 3 returns an error.
 
 ### Web UI
 
-The Web UI shows active sub-agents with:
-- Task description
-- Current status (running/completed/failed)
-- Token usage
-- Kill button
+The Web Control Room **Agents** view shows subagent tasks, status, parent session, result, and errors. Active subagents can be stopped or sent steering guidance. Workspace **Runs** shows the associated subagent count for each task.
 
 ### CLI
 

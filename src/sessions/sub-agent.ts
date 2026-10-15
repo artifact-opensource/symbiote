@@ -5,6 +5,7 @@ import type { SubAgentConfig, SubAgentHandle, Session } from './types.js';
 import type { SessionManager } from './manager.js';
 import type { Provider, ProviderConfig, Message } from '../providers/types.js';
 import type { ToolExecutor } from '../agent/runner.js';
+import type { ContextStore } from '../agent/context-store.js';
 import { runAgent } from '../agent/runner.js';
 import { buildSystemPrompt } from '../agent/system-prompt.js';
 import { createSandboxedRegistry, type SessionContext } from '../tools/sandbox.js';
@@ -25,10 +26,16 @@ export class SubAgentManager {
   private runtimes = new Map<string, RuntimeState>();
   private sessionManager: SessionManager;
   private onComplete?: (parentSessionId: string, handle: SubAgentHandle) => void;
+  private getContextStore?: () => ContextStore | undefined;
 
-  constructor(sessionManager: SessionManager, onComplete?: (parentSessionId: string, handle: SubAgentHandle) => void) {
+  constructor(
+    sessionManager: SessionManager,
+    onComplete?: (parentSessionId: string, handle: SubAgentHandle) => void,
+    getContextStore?: () => ContextStore | undefined,
+  ) {
     this.sessionManager = sessionManager;
     this.onComplete = onComplete;
+    this.getContextStore = getContextStore;
   }
 
   getDepth(sessionId: string): number {
@@ -52,13 +59,14 @@ export class SubAgentManager {
       };
     }
 
-    const sessionId = `subagent:${randomUUID().slice(0, 8)}`;
+    const sessionId = `subagent:${randomUUID()}`;
     const session = this.sessionManager.create(sessionId, {
       label: `Sub-agent: ${config.task.slice(0, 50)}`,
       provider: config.provider ?? providerConfig.model,
       model: config.model ?? providerConfig.model,
       parentSessionId: config.parentSessionId,
       depth: config.depth,
+      sessionKind: 'subagent',
     });
 
     const handle: SubAgentHandle = {
@@ -139,6 +147,7 @@ Task: ${config.task}`,
           toolRegistry,
           maxIterations: maxIter,
           sessionId: session.id,
+          contextStore: this.getContextStore?.(),
           todoScope,
           policyEngine,
           abortSignal: runtime.abortController.signal,

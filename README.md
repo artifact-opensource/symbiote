@@ -4,7 +4,10 @@
 
 **Persistent AI agent runtime for any type of workspace.**
 
-v5.3.0 · Node.js 20+ · TypeScript · MIT
+[![Version](https://img.shields.io/badge/version-5.3.0-blue?style=flat-square)](https://github.com/Artifact-Virtual/symbiote/releases)
+[![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-project-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![MIT License](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
 
 [Features](#persistent-intelligent-and-built-for-real-work) · [Quick start](#quick-start) · [Configuration](#configuration) · [Memory](#memory) · [CLI](#cli)
 
@@ -122,7 +125,7 @@ node dist/cli/vdb-maintenance.js stage "Remember this for the next session"
 
 The gateway can connect configured Discord and WhatsApp adapters and expose an HTTP API. Channel access policies and owner IDs are configured in `symbiote.json`.
 
-Built-in tools cover file reading, writing, editing and filesystem management (`fs`), hardware inspection (`hardware`), shell and background process management, web fetching/browsing, native browser CUA (viewport screenshot, coordinate pointer, keyboard, and scroll), image analysis, messaging, sub-agents, speech, persistent memory, and session continuity. Access follows the configured trust and sandbox policy; review [Security](docs/security/README.md) before exposing an instance to other users. On Windows, `exec` runs PowerShell by default and routes POSIX-style commands (`ls -la`, `grep`, `&&`) to Git Bash when installed. Commands start in the configured working directory unless `workdir` is passed; do not assume Linux paths on Windows. Use `shell` to force a shell. The CLI and gateway display the actual number of tools registered for that process; the set can differ when tools or channels are disabled.
+Built-in tools cover file reading, writing, editing and filesystem management (`fs`), hardware inspection (`hardware`), shell and background process management, web fetching/browsing, native browser CUA (viewport screenshot, coordinate pointer, keyboard, and scroll), image analysis, messaging, sub-agents, speech, persistent memory, and session continuity. Access follows the configured trust and sandbox policy; review [Security](docs/advanced/security.md) before exposing an instance to other users. On Windows, `exec` runs PowerShell by default and routes POSIX-style commands (`ls -la`, `grep`, `&&`) to Git Bash when installed. Commands start in the configured working directory unless `workdir` is passed; do not assume Linux paths on Windows. Use `shell` to force a shell. The CLI and gateway display the actual number of tools registered for that process; the set can differ when tools or channels are disabled.
 
 Agent tool calls run with bounded concurrency. Long tasks can continue across iteration budgets, and completion is reviewed before the runner accepts a final answer. Discord input queued during an active turn is processed in order.
 

@@ -11,7 +11,7 @@ import 'dotenv/config';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 // @ts-ignore — no types for qrcode-terminal
 import qrcode from 'qrcode-terminal';
@@ -60,15 +60,17 @@ import { memorySearchTool } from '../tools/builtin/memory.js';
 import { combRecallTool, combStageTool, setCombVdbHook, flushMessages } from '../tools/builtin/comb.js';
 import { personaDigestTool } from '../tools/builtin/consolidate.js';
 import { vdbSearchTool, vdbIngestTool, vdbStatsTool } from '../tools/builtin/memory-vdb.js';
-import { getSharedVectorDB } from '../memory/vdb.js';
+import { getSharedVectorDB, ingestSessions, makeSessionDocumentId } from '../memory/vdb.js';
 import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from '../memory/memograph.js';
 import { importSkillFiles, resolveSkillsDir } from '../memory/skills.js';
-import { webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool, webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool, webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool, cuaTools } from '../tools/builtin/web-browser.js';
+import { browserCapture, browserControl, browserNavigate, webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool, webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool, webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool, cuaTools } from '../tools/builtin/web-browser.js';
 import { createSpawnTool, createSubAgentStatusTool } from '../tools/builtin/spawn.js';
+import { createWorkspaceTaskTool } from '../tools/builtin/workspace-tasks.js';
 import { SubAgentManager } from '../sessions/sub-agent.js';
 import { createMessageTool, createTypingTool, createPresenceTool, createDeleteMessageTool, createMarkReadTool } from '../tools/builtin/message.js';
-import { SessionManager } from '../sessions/manager.js';
+import { createWorkspaceSessionManager, SessionManager } from '../sessions/manager.js';
 import { buildSystemPrompt } from '../agent/system-prompt.js';
+import { readWorkspaceIdentity, updateWorkspaceIdentity } from '../agent/workspace-identity.js';
 import { runAgent } from '../agent/runner.js';
 import { ContextMonitor } from '../agent/context-monitor.js';
 import { ContextStore } from '../agent/context-store.js';
@@ -148,11 +150,25 @@ interface GatewayConfig {
 
 interface ActiveTurn {
   sessionId: string;
+  webRunId?: string;
   abortController: AbortController;
   startedAt: number;
   channelType: string;
   chatId: string;
   adapterId: string;
+}
+
+interface WorkspaceRun {
+  id: string;
+  sessionId: string;
+  name: string;
+  prompt: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  startedAt: number;
+  completedAt?: number;
+  result?: string;
+  error?: string;
+  toolNames?: string[];
 }
 
 import { nvidiaProvider } from '../providers/nvidia.js';
@@ -182,6 +198,7 @@ export class SymbioteGateway {
   private sessionManager: SessionManager;
   private activeTurns = new Map<string, ActiveTurn>();
   private httpSessionLocks = new Map<string, Promise<void>>();
+  private webRuns = new Map<string, WorkspaceRun>();
   private provider: Provider;
   private providerName: string;
   private model: string;
@@ -278,12 +295,12 @@ export class SymbioteGateway {
     });
 
     // Sessions
-    this.sessionManager = new SessionManager(this.config.sessionsDir ?? '.sessions');
-    console.log(`${palette.dim}  [sessions] Store: ${palette.cyan}${this.config.sessionsDir ?? path.join(os.homedir(), '.symbiote', 'sessions')}${palette.reset}`);
+    this.sessionManager = createWorkspaceSessionManager(this.config.workspace, this.config.sessionsDir);
+    console.log(`${palette.dim}  [sessions] Store: ${palette.cyan}${this.sessionManager.directory}${palette.reset}`);
 
     // v2.0 — Metrics collector
     this.metrics = getMetrics({
-      metricsDir: path.join(this.config.sessionsDir ?? '.sessions', 'metrics'),
+      metricsDir: path.join(this.sessionManager.directory, 'metrics'),
       version: APP_VERSION,
     });
 
@@ -292,7 +309,7 @@ export class SymbioteGateway {
 
     // v2.0 — Hot resume manager (session state persistence across restarts)
     this.hotResume = new HotResumeManager({
-      sessionsDir: this.config.sessionsDir ?? '.sessions',
+      sessionsDir: this.sessionManager.directory,
       version: APP_VERSION,
       provider: this.providerName,
       model: this.model,
@@ -306,7 +323,7 @@ export class SymbioteGateway {
       warnThreshold: 0.65,
       compactThreshold: 0.75,
       emergencyThreshold: 0.88,
-      transcriptDir: path.join(ws || '.', '.sessions', 'transcripts'),
+      transcriptDir: path.join(this.sessionManager.directory, 'transcripts'),
       onCombStage: async (content: string) => {
         try {
           if (this.vdbInstance) {
@@ -365,8 +382,8 @@ export class SymbioteGateway {
       }).catch((err) => {
         console.error(`[gateway] Could not deliver Discord skill result to ${destination.chatId}:`, err);
       });
-    });
-    this.pulseBudget = new PulseBudgetManager(this.config.sessionsDir ?? '.sessions');
+    }, () => this.contextStore ?? undefined);
+    this.pulseBudget = new PulseBudgetManager(this.sessionManager.directory);
     const provCfg = (this.config.providers as Record<string, any>)[this.providerName] ?? {};
     const spawnProvConfig = {
       model: this.model,
@@ -380,6 +397,12 @@ export class SymbioteGateway {
         this.subAgentManager, this.provider, spawnProvConfig, this.toolRegistry, this.config.workspace
       ));
       this.toolRegistry.register(createSubAgentStatusTool(this.subAgentManager));
+      this.toolRegistry.register(createWorkspaceTaskTool({
+        listRuns: () => this.listWebRuns(),
+        stopRun: (id) => this.stopWebRun(id),
+        restartRun: (id) => this.restartWebRun(id),
+        guideRun: (id, message) => this.guideWebRun(id, message),
+      }));
     }
 
     // Rebuild system prompt now that all tools are registered
@@ -456,7 +479,7 @@ export class SymbioteGateway {
 
   private restoreHotState(): void {
     try {
-      const state = HotResumeManager.restore(this.config.sessionsDir ?? '.sessions');
+      const state = HotResumeManager.restore(this.sessionManager.directory);
       if (!state) return;
       
       const resumable = this.hotResume.getResumableSessions(state, 60);
@@ -498,7 +521,12 @@ export class SymbioteGateway {
   private async initContextStore(): Promise<void> {
     if (!this.vdbInstance) {
       const { VectorDB } = await import("../memory/vdb.js");
-      this.vdbInstance = getSharedVectorDB(process.env.SYMBIOTE_WORKSPACE ?? process.cwd());
+      this.vdbInstance = getSharedVectorDB(this.config.workspace);
+    }
+    const sessionIngestion = ingestSessions(this.vdbInstance, this.sessionManager.directory, 'session');
+    for (const session of this.sessionManager.list()) this.vdbWatermarks.set(session.id, session.messageCount);
+    if (sessionIngestion.indexed > 0) {
+      console.log(`[vdb] Startup session ingestion: ${sessionIngestion.indexed} documents indexed`);
     }
     const memographImport = importMemoGraphSnapshots(
       this.vdbInstance,
@@ -580,7 +608,7 @@ export class SymbioteGateway {
       // Lazy-init VDB
       if (!this.vdbInstance) {
         const { VectorDB } = await import("../memory/vdb.js");
-        this.vdbInstance = getSharedVectorDB(process.env.SYMBIOTE_WORKSPACE ?? process.cwd());
+        this.vdbInstance = getSharedVectorDB(this.config.workspace);
       }
 
       const sessions = this.sessionManager.list();
@@ -602,7 +630,9 @@ export class SymbioteGateway {
         const newMessages = session.messages.slice(watermark);
         let indexed = 0;
 
-        for (const msg of newMessages) {
+        for (let offset = 0; offset < newMessages.length; offset++) {
+          const msg = newMessages[offset];
+          const messageIndex = watermark + offset;
           if (msg.role === "system") continue;
           if (msg.role === "tool") continue;
           if ((msg as any).tool_calls?.length) continue;
@@ -616,12 +646,13 @@ export class SymbioteGateway {
 
           const indexText = text.length > 2000 ? text.slice(0, 2000) : text;
           const wasIndexed = this.vdbInstance.index({
-            id: "",
+            id: makeSessionDocumentId(indexText, summary.id, messageIndex, msg.role),
             text: indexText,
             source,
             role: msg.role,
-            timestamp: Date.now(),
+            timestamp: session.createdAt + messageIndex * 1000,
             sessionId: summary.id,
+            namespace: `session:${summary.id}`,
           });
           if (wasIndexed) indexed++;
         }
@@ -1008,12 +1039,34 @@ export class SymbioteGateway {
     const webPort = this.gatewayConfig.webPort ?? 3009;
     const webHost = this.gatewayConfig.webHost ?? '127.0.0.1';
     try {
+      this.restoreWebRuns();
+      const tokenPath = path.join(this.sessionManager.directory, 'web-access-token');
+      let webAccessToken = process.env.SYMBIOTE_WEB_TOKEN?.trim();
+      if (webAccessToken && webAccessToken.length < 32) {
+        throw new Error('SYMBIOTE_WEB_TOKEN must contain at least 32 characters.');
+      }
+      if (!webAccessToken) {
+        try {
+          webAccessToken = fs.readFileSync(tokenPath, 'utf8').trim();
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          webAccessToken = randomBytes(32).toString('base64url');
+          fs.writeFileSync(tokenPath, `${webAccessToken}\n`, { flag: 'wx', mode: 0o600 });
+        }
+      }
+      if (!webAccessToken || webAccessToken.length < 32) {
+        throw new Error(`LAN access token at ${tokenPath} is invalid.`);
+      }
+      if (webHost !== '127.0.0.1' && webHost !== 'localhost' && webHost !== '::1') {
+        console.log(`${palette.dim}  [web]${palette.reset} LAN access requires the token stored at ${palette.cyan}${tokenPath}${palette.reset}`);
+      }
       this.webServer = startWebServer(webPort, webHost, {
         getStatus: () => this.status(),
         getConfig: () => ({
           name: this.config.name,
           version: APP_VERSION,
           workspace: this.config.workspace,
+          ...readWorkspaceIdentity(this.config.workspace, this.config.name, this.config.emoji),
           provider: this.providerName,
           model: this.model,
           temperature: this.config.temperature,
@@ -1028,9 +1081,67 @@ export class SymbioteGateway {
           },
         }),
         getSessions: () => this.sessionManager.list(),
+        getMemoryGraph: () => {
+          const database = this.vdbInstance ?? getSharedVectorDB(this.config.workspace);
+          this.vdbInstance = database;
+          const sessionSources = new Set(['session', 'webchat', 'whatsapp', 'discord']);
+          return {
+            stats: database.stats(),
+            nodes: database.listDocuments().map(document => ({
+              id: document.id,
+              label: document.text.replace(/\s+/g, ' ').trim().slice(0, 90) || document.source,
+              excerpt: document.text.replace(/\s+/g, ' ').trim().slice(0, 220),
+              source: document.source,
+              role: document.role,
+              timestamp: document.timestamp,
+              sessionId: document.sessionId,
+              side: document.namespace?.startsWith('session:')
+                || sessionSources.has(document.source)
+                ? 'sessions'
+                : 'documents',
+            })),
+            edges: database.similarityEdges(5, 0.08),
+          };
+        },
+        getMemoryDocument: (id) => {
+          const database = this.vdbInstance ?? getSharedVectorDB(this.config.workspace);
+          this.vdbInstance = database;
+          return database.getDocument(id) ?? null;
+        },
+        browserNavigate,
+        browserCapture,
+        browserControl,
+        getChessState: () => {
+          const filename = path.join(this.sessionManager.directory, 'games', 'chess-state.json');
+          if (!fs.existsSync(filename)) return null;
+          return JSON.parse(fs.readFileSync(filename, 'utf8')) as Record<string, unknown>;
+        },
+        saveChessState: (state) => {
+          const gameDirectory = path.join(this.sessionManager.directory, 'games');
+          const filename = path.join(gameDirectory, 'chess-state.json');
+          const temporary = `${filename}.${process.pid}.${randomUUID()}.tmp`;
+          fs.mkdirSync(gameDirectory, { recursive: true });
+          try {
+            fs.writeFileSync(temporary, `${JSON.stringify(state)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+            fs.renameSync(temporary, filename);
+          } catch (failure) {
+            try { fs.rmSync(temporary, { force: true }); } catch { /* Preserve the original write failure. */ }
+            throw failure;
+          }
+          return state;
+        },
         getSessionMessages: (id) => {
           const session = this.sessionManager.load(id);
           return session?.messages ?? null;
+        },
+        hasSession: (id) => {
+          const session = this.sessionManager.load(id);
+          return !!session && session.metadata.sessionKind !== 'subagent';
+        },
+        archiveSession: (id) => {
+          const session = this.sessionManager.load(id);
+          if (!session || session.metadata.sessionKind === 'subagent' || this.activeTurns.has(id)) return false;
+          return this.sessionManager.archiveSession(id);
         },
         createSession: (name) => {
           const id = `web-${randomUUID()}`;
@@ -1038,6 +1149,7 @@ export class SymbioteGateway {
             label: name?.trim() || 'New conversation',
             provider: this.providerName,
             model: this.model,
+            sessionKind: 'conversation',
           });
           return { id: session.id, name: session.metadata.label, createdAt: session.createdAt };
         },
@@ -1046,7 +1158,36 @@ export class SymbioteGateway {
           description,
           parameters,
         })),
-        chat: (request) => this.handleHttpChat(request),
+        chat: (request, emit) => this.handleHttpChat(request, emit),
+        interruptSession: (id) => {
+          const active = this.activeTurns.get(id);
+          if (!active) return false;
+          active.abortController.abort('web_user_interrupt');
+          return true;
+        },
+        getRuns: () => this.listWebRuns(),
+        startRun: (request) => this.startWebRun(request),
+        stopRun: (id) => this.stopWebRun(id),
+        restartRun: (id) => this.restartWebRun(id),
+        guideRun: (id, message) => this.guideWebRun(id, message),
+        updateIdentity: (identity) => {
+          const updated = updateWorkspaceIdentity(this.config.workspace, identity);
+          this.config.name = updated.agentName;
+          this.config.emoji = updated.agentEmoji;
+          this.systemPrompt = buildSystemPrompt({
+            workspace: this.config.workspace,
+            tools: this.toolRegistry.list().map(tool => tool.name),
+          });
+          return updated;
+        },
+        getAgents: () => this.subAgentManager.list().map(agent => ({
+          ...agent,
+          parentSessionId: this.sessionManager.load(agent.sessionId)?.metadata.parentSessionId,
+        })),
+        controlAgent: (id, action, message) => action === 'stop'
+          ? this.subAgentManager.kill(id)
+          : this.subAgentManager.steer(id, message ?? ''),
+        webAccessToken,
         logPath: path.join(process.cwd(), 'symbiote.log'),
       });
     } catch (err) {
@@ -1054,20 +1195,150 @@ export class SymbioteGateway {
     }
   }
 
+  private restoreWebRuns(): void {
+    for (const summary of this.sessionManager.list()) {
+      try {
+        const session = this.sessionManager.load(summary.id);
+        if (!session) continue;
+        const savedRuns = session.metadata.webRuns ?? (session.metadata.webRun ? [{ ...session.metadata.webRun, sessionId: session.id }] : []);
+        let changed = false;
+        for (const savedRun of savedRuns) {
+          const run: WorkspaceRun = { ...savedRun, sessionId: session.id };
+          if (run.status === 'running') {
+            run.status = 'failed';
+            run.completedAt = Date.now();
+            run.error = 'The gateway restarted before this run completed. Its conversation transcript was preserved.';
+            changed = true;
+          }
+          this.webRuns.set(run.id, run);
+          savedRuns[savedRuns.indexOf(savedRun)] = run;
+        }
+        if (changed) {
+          session.metadata.webRuns = savedRuns;
+          delete session.metadata.webRun;
+          this.sessionManager.save(session);
+        }
+      } catch (failure) {
+        console.error(`[web] Could not restore workspace run from session ${summary.id}:`, failure);
+      }
+    }
+  }
+
+  private listWebRuns(): WorkspaceRun[] {
+    return [...this.webRuns.values()]
+      .sort((left, right) => right.startedAt - left.startedAt)
+      .slice(0, 100);
+  }
+
+  private persistWebRun(run: WorkspaceRun): void {
+    const session = this.sessionManager.load(run.sessionId);
+    if (!session) throw new Error(`Could not persist run ${run.id}: its session was not found.`);
+    const runs = session.metadata.webRuns ?? (session.metadata.webRun ? [{ ...session.metadata.webRun, sessionId: session.id }] : []);
+    const index = runs.findIndex(existing => existing.id === run.id);
+    if (index >= 0) runs[index] = { ...run };
+    else runs.push({ ...run });
+    session.metadata.webRuns = runs;
+    delete session.metadata.webRun;
+    this.sessionManager.save(session);
+  }
+
+  private startWebRun(request: { name?: string; prompt: string; sessionId: string }): WorkspaceRun {
+    const id = randomUUID();
+    const sessionId = request.sessionId;
+    if (!this.sessionManager.load(sessionId)) throw new Error(`Could not start task: conversation ${sessionId} was not found.`);
+    const name = request.name?.trim() || request.prompt.trim().split(/\s+/).slice(0, 8).join(' ').slice(0, 80) || 'Workspace task';
+    const run: WorkspaceRun = {
+      id,
+      sessionId,
+      name,
+      prompt: request.prompt,
+      status: 'running',
+      startedAt: Date.now(),
+    };
+    this.webRuns.set(id, run);
+    this.persistWebRun(run);
+
+    void this.handleHttpChat({
+      text: request.prompt,
+      sessionId,
+      senderId: 'webapp-local',
+      source: 'webapp-task',
+      webRunId: id,
+    }).then(response => {
+      if (run.status === 'cancelled') {
+        this.persistWebRun(run);
+        return;
+      }
+      run.status = 'completed';
+      run.completedAt = Date.now();
+      run.result = response.text;
+      run.toolNames = response.toolCalls?.map(call => call.name);
+      this.persistWebRun(run);
+    }).catch(failure => {
+      if (run.status === 'cancelled') {
+        this.persistWebRun(run);
+        return;
+      }
+      run.status = 'failed';
+      run.completedAt = Date.now();
+      run.error = failure instanceof Error ? failure.message : String(failure);
+      this.persistWebRun(run);
+    }).catch(failure => {
+      console.error(`[web] Could not persist workspace run ${run.id}:`, failure);
+    });
+
+    return { ...run };
+  }
+
+  private stopWebRun(id: string): boolean {
+    const run = this.webRuns.get(id);
+    if (!run || run.status !== 'running') return false;
+    const activeTurn = [...this.activeTurns.values()].find(turn => turn.webRunId === id);
+    run.status = 'cancelled';
+    run.completedAt = Date.now();
+    activeTurn?.abortController.abort('cancelled from workspace');
+    this.persistWebRun(run);
+    return true;
+  }
+
+  private restartWebRun(id: string): WorkspaceRun | null {
+    const previous = this.webRuns.get(id);
+    if (!previous || previous.status === 'running' || !this.sessionManager.load(previous.sessionId)) return null;
+    return this.startWebRun({
+      name: previous.name,
+      prompt: previous.prompt,
+      sessionId: previous.sessionId,
+    });
+  }
+
+  private guideWebRun(id: string, message: string): WorkspaceRun | null {
+    const previous = this.webRuns.get(id);
+    if (!previous || !this.sessionManager.load(previous.sessionId)) return null;
+    return this.startWebRun({
+      name: `${previous.name} · guidance`,
+      prompt: message,
+      sessionId: previous.sessionId,
+    });
+  }
+
   /**
    * Handle an HTTP API chat request by running it through the full agent pipeline.
    * Creates a synthetic BusEnvelope and processes it like any other channel message.
    */
-  private handleHttpChat(request: ChatRequest): Promise<ChatResponse> {
+  private handleHttpChat(request: ChatRequest, emit?: (event: Record<string, unknown>) => void): Promise<ChatResponse> {
     const sessionId = request.sessionId ?? `http-${request.source ?? 'web'}-${request.senderId ?? 'anon'}`;
     const previous = this.httpSessionLocks.get(sessionId) ?? Promise.resolve();
     const run = previous.then(async () => {
       while (this.activeTurns.has(sessionId)) {
         await new Promise(resolve => setTimeout(resolve, 25));
       }
+      if (request.webRunId && this.webRuns.get(request.webRunId)?.status === 'cancelled') {
+        throw new Error(`Workspace run ${request.webRunId} was cancelled before it started.`);
+      }
       const controller = new AbortController();
       const turn: ActiveTurn = {
         sessionId,
+        ...(request.webRunId ? { webRunId: request.webRunId } : {}),
         abortController: controller,
         startedAt: Date.now(),
         channelType: 'http',
@@ -1077,7 +1348,7 @@ export class SymbioteGateway {
       this.activeTurns.set(sessionId, turn);
       this.channelRegistry.setSessionActive(sessionId, true);
       try {
-        return await this.runHttpChat(request, controller);
+        return await this.runHttpChat(request, controller, emit);
       } finally {
         if (this.activeTurns.get(sessionId) === turn) {
           this.activeTurns.delete(sessionId);
@@ -1098,7 +1369,7 @@ export class SymbioteGateway {
     return run;
   }
 
-  private runHttpChat(request: ChatRequest, controller: AbortController): Promise<ChatResponse> {
+  private runHttpChat(request: ChatRequest, controller: AbortController, emit?: (event: Record<string, unknown>) => void): Promise<ChatResponse> {
     return new Promise(async (resolve, reject) => {
       const sessionId = request.sessionId ?? `http-${request.source ?? 'web'}-${request.senderId ?? 'anon'}`;
 
@@ -1210,12 +1481,20 @@ export class SymbioteGateway {
             }
           },
           onEvent: (ev) => {
+            if (ev.type === 'text_delta') emit?.({ type: 'text_delta', text: ev.text });
+            else if (ev.type === 'thinking_delta') emit?.({ type: 'thinking_delta' });
             if (ev.type === 'usage') {
               this.sessionManager.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
             }
           },
-          onToolStart: (name) => console.log(`  ${palette.violet}⚡ ${name}${palette.reset}`),
-          onToolEnd: (name) => console.log(`  ${palette.green}✓ ${name}${palette.reset}`),
+          onToolStart: (name) => {
+            emit?.({ type: 'tool_start', name });
+            console.log(`  ${palette.violet}⚡ ${name}${palette.reset}`);
+          },
+          onToolEnd: (name) => {
+            emit?.({ type: 'tool_end', name });
+            console.log(`  ${palette.green}✓ ${name}${palette.reset}`);
+          },
         });
         const runHttpWithFallback = async () => {
           try {
@@ -1630,7 +1909,7 @@ export class SymbioteGateway {
         try {
           const { getSharedVectorDB, ingestSessions } = await import("../memory/vdb.js");
           const vdb = getSharedVectorDB(process.env.SYMBIOTE_WORKSPACE ?? process.cwd());
-          const archiveDir = path.join(this.config.sessionsDir ?? ".sessions", "archive");
+          const archiveDir = path.join(this.sessionManager.directory, "archive");
           if (fs.existsSync(archiveDir)) {
             const result = ingestSessions(vdb, archiveDir);
             if (result.indexed > 0) console.log(`${palette.dim}  [vdb]${palette.reset} Ingested ${result.indexed} new memories from archive`);
@@ -2287,7 +2566,7 @@ export async function startGateway(configPath?: string): Promise<SymbioteGateway
     apiPort: config.apiPort ?? 3006,
     apiHost: config.apiHost ?? '127.0.0.1',
     webPort: config.webPort ?? 3009,
-    webHost: config.webHost ?? '127.0.0.1',
+    webHost: config.webHost ?? '0.0.0.0',
   };
 
   const gateway = new SymbioteGateway(gatewayConfig);

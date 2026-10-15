@@ -37,7 +37,7 @@ const envRef = (name: string): string => `\${${name}}`;
 /** Build the complete, ordered config with every stub present. */
 export function buildConfigTemplate(input: TemplateInput = {}): Record<string, any> {
   const apiHost = input.apiHost ?? '127.0.0.1';
-  const webHost = input.webHost ?? '127.0.0.1';
+  const webHost = input.webHost ?? '0.0.0.0';
   const apiPort = input.apiPort ?? 3006;
   const webPort = input.webPort ?? 3009;
   const ownerIds = [...new Set((input.ownerIds ?? []).map(String).filter(Boolean))];
@@ -69,7 +69,7 @@ export function buildConfigTemplate(input: TemplateInput = {}): Record<string, a
     adaptiveTemperature: { adaptive: false, default: 0.5, logChanges: false },
 
     workspace: '.',
-    sessionsDir: '.sessions',
+    sessionsDir: '.session',
     ownerIds,
 
     apiHost,

@@ -226,7 +226,7 @@ async function cmdStatus() {
         (cfg.discord?.enabled ?? !!cfg.discord?.token) && 'Discord',
         cfg.whatsapp?.enabled && 'WhatsApp',
       ].filter(Boolean).join(' · ');
-      const sessionsDir = path.resolve(cfg.sessionsDir ?? '.sessions');
+      const sessionsDir = path.join(path.resolve(cfg.workspace), '.session');
       const sessions = fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json')).length : 0;
       rows.push(
         kv('Model', `${palette.cyan}${cfg.defaultProvider}${palette.reset}${palette.dim} / ${palette.reset}${palette.white}${cfg.defaultModel}${palette.reset}`, 11),

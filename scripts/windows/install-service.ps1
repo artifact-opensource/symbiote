@@ -88,14 +88,14 @@ if ($service) {
   throw "Service '$ServiceName' already exists. Stop and remove it before installing a replacement."
 }
 
-New-Item -ItemType Directory -Path $DataDir, $LogDir, (Split-Path -Parent $ConfigPath), (Join-Path $DataDir 'workspace'), (Join-Path $DataDir 'sessions') -Force | Out-Null
+New-Item -ItemType Directory -Path $DataDir, $LogDir, (Split-Path -Parent $ConfigPath), (Join-Path $DataDir 'workspace'), (Join-Path $DataDir 'workspace\.session') -Force | Out-Null
 if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
   $seedConfig = if ($SeedDirectory) { Join-Path $SeedDirectory 'symbiote.json' } else { '' }
   if ($seedConfig) {
     Copy-Item -LiteralPath $seedConfig -Destination $ConfigPath
     $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
     $config.workspace = '.\workspace'
-    $config.sessionsDir = '.\sessions'
+    $config.sessionsDir = '.\workspace\.session'
     $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
   }
   else {
@@ -106,7 +106,7 @@ if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
 
     $config = Get-Content -LiteralPath $examplePath -Raw | ConvertFrom-Json
     $config.workspace = '.\workspace'
-    $config.sessionsDir = '.\sessions'
+    $config.sessionsDir = '.\workspace\.session'
     $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
   }
 }
@@ -116,6 +116,15 @@ else {
     New-Item -ItemType Directory -Path $configDirectory -Force | Out-Null
   }
 }
+
+$config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+$webPort = if ($config.webPort) { [int]$config.webPort } else { 3009 }
+if ($webPort -lt 1 -or $webPort -gt 65535) {
+  throw "Invalid configured web port: $webPort"
+}
+$registryPath = 'HKLM:\Software\Artifact Virtual\Symbiote'
+New-Item -Path $registryPath -Force | Out-Null
+New-ItemProperty -Path $registryPath -Name WebPort -Value $webPort -PropertyType DWord -Force | Out-Null
 
 $configDirectory = Split-Path -Parent $ConfigPath
 $environmentFile = Join-Path $configDirectory '.env'
@@ -163,8 +172,14 @@ try {
   Start-Service -Name $ServiceName
   $service = Get-Service -Name $ServiceName
   $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(30))
+  $firewallRule = Get-NetFirewallRule -DisplayName 'Symbiote Gateway Web UI' -ErrorAction SilentlyContinue
+  if ($firewallRule) {
+    Remove-NetFirewallRule -DisplayName 'Symbiote Gateway Web UI'
+  }
+  New-NetFirewallRule -DisplayName 'Symbiote Gateway Web UI' -Group 'Symbiote' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $webPort -Program $NodePath -Profile Domain,Private | Out-Null
 }
 catch {
+  Remove-NetFirewallRule -DisplayName 'Symbiote Gateway Web UI' -ErrorAction SilentlyContinue
   if ($serviceInstalled) {
     & $NssmPath stop $ServiceName 2>$null | Out-Null
     & $NssmPath remove $ServiceName confirm 2>$null | Out-Null

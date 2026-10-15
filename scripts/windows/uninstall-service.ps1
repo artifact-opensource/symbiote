@@ -14,6 +14,7 @@ if (-not $NssmPath) {
   $NssmPath = Join-Path $PSScriptRoot '..\..\nssm.exe'
 }
 $NssmPath = (Resolve-Path -LiteralPath $NssmPath).Path
+Remove-NetFirewallRule -DisplayName 'Symbiote Gateway Web UI' -ErrorAction SilentlyContinue
 $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if (-not $service) {
   Write-Host "Service '$ServiceName' is already absent."
@@ -34,4 +35,4 @@ if ($service.Status -ne 'Stopped') {
 if ($LASTEXITCODE -ne 0) {
   throw "NSSM could not remove service '$ServiceName' (exit $LASTEXITCODE)."
 }
-Write-Host "Removed '$ServiceName'. Configuration, logs, sessions, and memory under ProgramData were preserved."
+Write-Host "Removed '$ServiceName'. Configuration, logs, .session data, and memory under ProgramData were preserved."

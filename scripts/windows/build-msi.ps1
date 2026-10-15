@@ -68,6 +68,7 @@ try {
 
   $applicationFiles = @(
     'dist',
+    'desktop',
     'package.json',
     'package-lock.json',
     'symbiote.example.json',
@@ -83,6 +84,12 @@ try {
     }
     Copy-Item -LiteralPath $sourcePath -Destination $appSource -Recurse -Force
   }
+
+  $electronDistribution = Join-Path $repositoryRoot 'node_modules\electron\dist'
+  if (-not (Test-Path -LiteralPath (Join-Path $electronDistribution 'electron.exe') -PathType Leaf)) {
+    throw "Electron runtime is missing. Run npm install before building the MSI: $electronDistribution"
+  }
+  Copy-Item -LiteralPath $electronDistribution -Destination (Join-Path $appSource 'electron-runtime') -Recurse -Force
 
   $stagedInstallerDirectory = Join-Path $appSource 'dist\windows-installer'
   if (Test-Path -LiteralPath $stagedInstallerDirectory -PathType Container) {
@@ -143,6 +150,18 @@ try {
   [xml]$harvestedXml = Get-Content -LiteralPath $harvestedFiles -Raw
   foreach ($component in $harvestedXml.SelectNodes('//*[local-name()="Component"]')) {
     $component.SetAttribute('Win64', 'yes')
+  }
+  foreach ($electronExecutableComponent in $harvestedXml.SelectNodes('//*[local-name()="File" and contains(@Source, "electron-runtime\electron.exe")]/..')) {
+    $electronComponentId = $electronExecutableComponent.GetAttribute('Id')
+    $electronExecutableComponent.ParentNode.RemoveChild($electronExecutableComponent) | Out-Null
+    foreach ($componentReference in $harvestedXml.SelectNodes('//*[local-name()="ComponentRef"]')) {
+      if ($componentReference.GetAttribute('Id') -eq $electronComponentId) {
+        $componentReference.ParentNode.RemoveChild($componentReference) | Out-Null
+      }
+    }
+  }
+  foreach ($electronRuntimeDirectory in $harvestedXml.SelectNodes('//*[local-name()="Directory" and @Name="electron-runtime"]')) {
+    $electronRuntimeDirectory.SetAttribute('Id', 'ElectronRuntimeFolder')
   }
   $harvestedXml.Save($harvestedFiles)
 

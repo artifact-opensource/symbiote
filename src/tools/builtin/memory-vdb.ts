@@ -6,9 +6,7 @@
 
 import type { ToolDefinition } from '../types.js';
 import { getSharedVectorDB, ingestSessions, type VectorDB } from '../../memory/vdb.js';
-import { loadConfig } from '../../config/config.js';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 function getWorkspace(): string {
@@ -23,12 +21,9 @@ function getVDB(): VectorDB {
 
 function getSessionDirectories(): string[] {
   const workspace = getWorkspace();
-  const configured = process.env.SYMBIOTE_SESSIONS_DIR
-    ?? loadConfig().sessionsDir
-    ?? path.join(os.homedir(), '.symbiote', 'sessions');
+  const workspaceSessionDir = path.join(workspace, '.session');
   return [...new Set([
-    path.resolve(configured),
-    path.join(workspace, '.sessions'),
+    workspaceSessionDir,
   ])];
 }
 

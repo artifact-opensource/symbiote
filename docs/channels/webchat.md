@@ -1,114 +1,84 @@
-# Web UI (Webchat)
+# Web Control Room
 
-Built-in web interface for interacting with your Symbiote agent directly from a browser. No build step, no frontend framework — one static HTML file.
+Symbiote includes a browser-based control room for working with the configured project workspace, agent conversations, task runs, subagents, and runtime health.
 
 ## Access
 
-```
-http://localhost:3009
-```
+Open `http://localhost:3009` on the machine running the gateway. The web server defaults to listening on all interfaces; `webPort` is configurable in `symbiote.json` (default: `3009`). From another device on the same network, open `http://<gateway-lan-ip>:3009`.
 
-The port is configurable via `webPort` in `symbiote.json` (default: `3009`).
+LAN control requests require a bearer token. On first startup, Symbiote creates a random token at `<workspace>/.session/web-access-token`; open **Configuration → Connect another device** on the gateway host to reveal and copy it. The token is only exposed to same-origin requests from the local control room and is stored in the remote browser tab's session storage. Alternatively, set `SYMBIOTE_WEB_TOKEN` to a secret of at least 32 characters. Do not share the token or expose the service on an untrusted network. The static UI can load without a token, but session, agent, task, configuration, and log APIs remain protected. Local loopback use does not require a token.
 
-## Features
+## Workspace tasks
 
-### Chat Interface
+From **Workspace**, submit a task name and prompt to send it through the selected conversation's existing session and the normal agent pipeline and tool sandbox. Each new conversation gets its own session file. The **Runs** view shows task briefs, lifecycle status, subagent counts, tools used, errors, and transcript links. Active runs can be stopped, restarted, or guided.
 
-- **Dark glass aesthetic** — void-black background with glass-morphism panels and purple accent lighting
-- **Streaming responses** — real-time token streaming via SSE (Server-Sent Events) with animated streaming dots
-- **Markdown rendering** — full markdown support with syntax-highlighted code blocks
-- **Latency badge** — live provider response time displayed per message
-- **Mobile responsive** — adapts to phones and tablets
+Run state is persisted with the conversation. If the gateway restarts while a run is still marked running, startup marks it failed and preserves its transcript; it does not automatically resume an interrupted turn. Archiving a conversation moves its session file into `.session/archive/` rather than deleting it.
 
-### Session Management
+## Subagents
 
-- **Session sidebar** — create, switch, and delete sessions from the left panel
-- **Named sessions** — each session is labeled and persisted
-- **Session history** — conversations are preserved across page reloads
+The **Agents** view lists subagents created by Symbiote's `spawn` tool. Each subagent gets a unique session and the normal AGI system prompt, with its task context added. It displays status, task, parent session, result, and errors. Active agents can be stopped or sent steering guidance, and continue to use the gateway's existing session-scoped sandbox and inherited tool policy.
 
-### Tool Call Visualization
+The Workspace hero visualizes the main agent, web conversations, and their subagents. Select a conversation node to open its transcript or a subagent node to open agent controls.
 
-- **Real-time tool calls** — see which tools the agent is using as they execute
-- **Expandable details** — click to see tool inputs and outputs
-- **Status indicators** — running, completed, or errored tool calls
+## Games
 
-### Configuration Panel
+The **Zen** entry in the sidebar opens the games area. Its game tabs are registered in the web UI so new games can be added alongside Chess. Chess is played against a built-in opponent with five difficulty levels; **Adaptive** selects a level from the player's rating. Legal moves are enforced by `chess.js`. Match results update an Elo rating (K-factor 32), which in turn informs adaptive difficulty. The current position, difficulty, rating, result, and recent match history are persisted by the gateway in `<workspace>/.session/games/chess-state.json`, shared by the web UI and Electron and retained across restarts.
 
-- **Provider switching** — change LLM provider on the fly
-- **Model selection** — switch models without restarting
-- **Temperature control** — adjust creativity in real time
-- **API key management** — enter or update provider keys (redacted display)
+## Conversations and operations
 
-### Sub-Agent Monitor
+- **Conversations** provides the session chat interface and Markdown transcript export.
+- **Browser** provides a Playwright-controlled page with navigation, screenshots, and mouse/keyboard actions.
+- **Session history** searches saved conversations.
+- **Memory** visualizes indexed knowledge and session records on separate sides of the Symbiote node. Similar records are grouped into topical shards without merging the underlying documents; links show sparse lexical-vector similarity, not embedding-based semantic similarity. Select a record for its indexed text, filter or search the map, and export the current view as a PNG.
+- **Operations** shows channel/provider health, whole-host CPU and memory use, network and disk I/O, available temperature sensors, resource warnings, and recent gateway logs. Temperature is reported only when the operating system exposes a sensor; unavailable sensors are not estimated.
+- **Notifications** prioritizes runtime alerts and attention items in the control room. Optional native browser notifications require browser permission and a secure context; this is not an offline Web Push service.
+- **Tool registry** lists tools available to the runtime.
+- **Configuration** displays runtime settings without allowing web-based edits.
+- Light and dark themes are available and persist in the browser.
 
-- **Active sub-agents** — see spawned sub-agents and their status
-- **Progress tracking** — running, completed, or killed states with timestamps
+The Memory map is built from the shared VDB and `.session/` history. At startup, session JSON files are recursively ingested, including archived transcripts; new active-session turns are added by the VDB pulse. Only user and assistant text is indexed from sessions, not system prompts or tool messages. Similarity is calculated from the VDB's sparse term-frequency vectors, so it represents lexical overlap rather than dense-embedding semantics.
 
-## Architecture
+## Session storage
 
-The web UI consists of two parts:
+All runtime session files are stored under `<workspace>/.session/`. Existing configured session directories and `.sessions/` data are migrated there at startup. Archives remain under `.session/archive/`.
 
-1. **Static HTML** (`web/index.html`) — single file containing all HTML, CSS, and JavaScript. No dependencies, no build step.
-2. **Web server** (`src/web/server.ts`) — native Node.js HTTP server with SSE streaming. Proxies chat requests to the agent runner via the HTTP API.
-
-### API Endpoints
+## Control API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Serves the web UI HTML |
-| `/api/sessions` | GET | List all sessions |
-| `/api/sessions` | POST | Create a new session |
-| `/api/sessions/:id` | GET | Get session details |
-| `/api/sessions/:id` | DELETE | Delete a session |
-| `/api/sessions/:id/messages` | POST | Send a message (SSE stream) |
-| `/api/config` | GET | Get current config |
-| `/api/config` | PUT | Update config |
-| `/api/providers` | GET | List available providers |
+| `/api/status` | GET | Runtime and channel health |
+| `/api/config` | GET | Read-only effective configuration |
+| `/api/sessions` | GET | List saved sessions |
+| `/api/sessions` | POST | Create a conversation session |
+| `/api/sessions/:id` | DELETE | Archive a conversation session |
+| `/api/sessions/:id/messages` | GET | Read a saved transcript |
+| `/api/chat` | POST | Send a conversation message |
+| `/api/runs` | GET | List persisted workspace task runs |
+| `/api/runs` | POST | Start a task run |
+| `/api/runs/:id/stop` | POST | Stop an active workspace run |
+| `/api/agents` | GET | List runtime subagents |
+| `/api/agents/:id/action` | POST | Stop or steer an active subagent |
+| `/api/browser/snapshot` | GET | Read the controlled browser page and screenshot |
+| `/api/browser/navigate` | POST | Navigate the controlled browser |
+| `/api/browser/action` | POST | Send a mouse or keyboard action |
+| `/api/games/chess` | GET, PUT | Read or persist shared Chess state |
+| `/api/sessions/:id/interrupt` | POST | Interrupt an active conversation turn |
+| `/api/memory/graph` | GET | Read the indexed memory graph and similarity links |
+| `/api/memory/documents/:id` | GET | Read an indexed memory record |
 | `/api/tools` | GET | List available tools |
-| `/api/stats` | GET | Runtime statistics |
+| `/api/logs` | GET | Read the recent gateway log tail |
+| `/api/access` | GET | Check whether this browser needs LAN authentication |
 
-### SSE Streaming
+## Development
 
-Chat responses use Server-Sent Events for real-time streaming:
-
-```
-event: token
-data: {"text": "Hello"}
-
-event: tool_call
-data: {"name": "read", "input": {"path": "file.ts"}, "status": "running"}
-
-event: tool_result
-data: {"name": "read", "output": "...", "status": "done"}
-
-event: done
-data: {"tokensIn": 150, "tokensOut": 89, "latencyMs": 1230}
+```bash
+npm --prefix webapp run dev
 ```
 
-## Configuration
+The Vite development server proxies `/api` requests to `http://127.0.0.1:3009`; run the gateway locally for API-backed features.
 
-```jsonc
-{
-  "webPort": 3009,           // Web UI port (default: 3009)
-  "apiPort": 3006            // HTTP API port (used internally)
-}
+Build the web UI with:
+
+```bash
+npm --prefix webapp run build
 ```
-
-Agent identity is pulled from `symbiote.json`:
-
-```jsonc
-{
-  "name": "AVA",           // Displayed in the header
-  "emoji": ""              // Optional display emoji
-}
-```
-
-### Security
-
-By default, the web UI binds to `127.0.0.1` (localhost only). To expose it on the network, use a reverse proxy (nginx, Caddy) with authentication for production deployments.
-
-> **Note:** The web UI shares the same session and tool access as other channels. Any tool available to the agent is available through the web UI.
-
----
-
-*Added in v1.7.0*

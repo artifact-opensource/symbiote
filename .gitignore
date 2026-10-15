@@ -31,6 +31,7 @@ whatsapp-auth/
 # ── Runtime state, memory & user data ───────────────────
 .symbiote/
 .sessions/
+.session/
 .vdb/
 .comb/
 .pulse/*.json

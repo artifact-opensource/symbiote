@@ -89,6 +89,10 @@ Captured inline at each `snapshot()` call:
 | `loadAvg` | `[1m, 5m, 15m]` OS load average |
 | `freeMemPct` | Free system RAM as % |
 
+### Host Resource Snapshot
+
+The gateway also samples whole-machine resources for the control room. The host snapshot is exposed as `metrics.system.host` in `/api/status` and includes aggregate CPU utilization and logical core count, total/free/used memory, network receive/transmit rates, disk read/write rates, sensor readings when provided by the operating system, and warnings. Network and disk counters use platform-specific operating-system sources. CPU temperature is not inferred: when no readable temperature sensor is available, the snapshot includes an unavailable reason instead.
+
 ### Top-Level Counters
 
 | Field | Description |

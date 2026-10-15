@@ -23,6 +23,7 @@ export interface SystemPromptParams {
 /** Files loaded in order. Each becomes a labeled section. Missing files are silently skipped. */
 const WORKSPACE_FILES = [
   { path: 'SOUL.md',       label: 'Soul',              required: false },
+  { path: 'AGENT_INSTRUCTIONS.md', label: 'Agent Instructions', required: false },
   { path: 'IDENTITY.md',   label: 'Identity',          required: false },
   { path: 'USER.md',       label: 'About the User',    required: false },
   { path: 'AGENTS.md',     label: 'Operating Protocol', required: false },

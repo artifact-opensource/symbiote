@@ -21,10 +21,15 @@
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="Symbiote" />
       </Directory>
+      <Directory Id="CommonProgramsFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Symbiote" />
+      </Directory>
+      <Directory Id="CommonDesktopFolder" />
       <Directory Id="CommonAppDataFolder">
         <Directory Id="DATAFOLDER" Name="Symbiote">
-          <Directory Id="WORKSPACEFOLDER" Name="workspace" />
-          <Directory Id="SESSIONFOLDER" Name="sessions" />
+          <Directory Id="WORKSPACEFOLDER" Name="workspace">
+            <Directory Id="SESSIONFOLDER" Name=".session" />
+          </Directory>
           <Directory Id="LOGFOLDER" Name="logs" />
         </Directory>
       </Directory>
@@ -37,6 +42,7 @@
       <ComponentRef Id="SessionsDirectory" />
       <ComponentRef Id="LogsDirectory" />
       <ComponentRef Id="GatewayService" />
+      <ComponentRef Id="ElectronExecutableComponent" />
     </Feature>
 
     <DirectoryRef Id="DATAFOLDER">
@@ -53,6 +59,37 @@
                        KeyPath="yes" />
       </Component>
     </DirectoryRef>
+
+    <DirectoryRef Id="ElectronRuntimeFolder">
+      <Component Id="ElectronExecutableComponent" Guid="{A61D76D1-676E-44C5-81A4-24F09F0E93E6}" Win64="yes">
+        <File Id="ElectronExecutable"
+              Name="electron.exe"
+              Source="$(var.AppSource)\electron-runtime\electron.exe"
+              KeyPath="yes" />
+        <Shortcut Id="StartMenuShortcut"
+                  Directory="ApplicationProgramsFolder"
+                  Name="Symbiote"
+                  Target="[INSTALLFOLDER]electron-runtime\electron.exe"
+                  Arguments="&quot;[INSTALLFOLDER]desktop\main.cjs&quot;"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Advertise="no" />
+        <Shortcut Id="DesktopShortcut"
+                  Directory="CommonDesktopFolder"
+                  Name="Symbiote"
+                  Target="[INSTALLFOLDER]electron-runtime\electron.exe"
+                  Arguments="&quot;[INSTALLFOLDER]desktop\main.cjs&quot;"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Advertise="no" />
+        <RemoveFolder Id="RemoveStartMenuFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+      </Component>
+    </DirectoryRef>
+
+    <CustomAction Id="LaunchSymbiote"
+                  FileKey="ElectronExecutable"
+                  ExeCommand="&quot;[INSTALLFOLDER]desktop\main.cjs&quot;"
+                  Execute="immediate"
+                  Impersonate="yes"
+                  Return="asyncNoWait" />
 
     <DirectoryRef Id="WORKSPACEFOLDER">
       <Component Id="WorkspaceDirectory" Guid="{CB4F7E36-3884-4D3F-A1F4-7E90C5D9D9ED}" Permanent="yes" Win64="yes">
@@ -124,6 +161,7 @@
     <InstallExecuteSequence>
       <Custom Action="InstallSymbioteService" After="InstallFiles">NOT Installed</Custom>
       <Custom Action="UninstallSymbioteService" Before="RemoveFiles">REMOVE~=&quot;ALL&quot;</Custom>
+      <Custom Action="LaunchSymbiote" After="InstallFinalize">NOT Installed</Custom>
     </InstallExecuteSequence>
   </Product>
 </Wix>

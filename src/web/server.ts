@@ -64,8 +64,36 @@ export interface WebControlPlane {
   getSessions: () => unknown[];
   getSessionMessages: (id: string) => unknown[] | null;
   createSession: (name?: string) => unknown;
+  hasSession: (id: string) => boolean;
+  archiveSession: (id: string) => boolean;
   getTools: () => unknown[];
-  chat: (request: { text: string; sessionId: string; senderId: string; senderName: string; source: string }) => Promise<unknown>;
+  chat: (
+    request: { text: string; sessionId: string; senderId: string; senderName: string; source: string },
+    emit?: (event: Record<string, unknown>) => void,
+  ) => Promise<unknown>;
+  interruptSession: (id: string) => boolean;
+  getRuns: () => unknown[];
+  startRun: (request: { name?: string; prompt: string; sessionId: string }) => unknown;
+  stopRun: (id: string) => boolean;
+  restartRun: (id: string) => unknown | null;
+  guideRun: (id: string, message: string) => unknown | null;
+  updateIdentity: (identity: {
+    name: string;
+    emoji: string;
+    soulContent: string;
+    agentsContent: string;
+    instructions: string;
+  }) => unknown;
+  getAgents: () => unknown[];
+  controlAgent: (id: string, action: 'stop' | 'steer', message?: string) => boolean;
+  getMemoryGraph: () => unknown;
+  getMemoryDocument: (id: string) => unknown | null;
+  browserNavigate: (url: string) => Promise<unknown>;
+  browserCapture: () => Promise<unknown>;
+  browserControl: (action: 'click' | 'move' | 'type' | 'press' | 'scroll', params: Record<string, unknown>) => Promise<void>;
+  getChessState: () => unknown;
+  saveChessState: (state: Record<string, unknown>) => unknown;
+  webAccessToken?: string;
   logPath: string;
 }
 
@@ -355,6 +383,15 @@ function isLoopbackRequest(req: http.IncomingMessage): boolean {
   return address === '127.0.0.1' || address === '::1' || (address?.startsWith('::ffff:127.') ?? false);
 }
 
+function hasValidAccessToken(req: http.IncomingMessage, expected: string): boolean {
+  const authorization = req.headers.authorization ?? '';
+  const match = /^Bearer\s+(.+)$/i.exec(authorization);
+  if (!match) return false;
+  const provided = Buffer.from(match[1]);
+  const actual = Buffer.from(expected);
+  return provided.length === actual.length && crypto.timingSafeEqual(provided, actual);
+}
+
 function tailFile(filename: string, requestedLines: number): string {
   const lines = Math.min(Math.max(Math.trunc(requestedLines) || 100, 1), 300);
   let fd: number | undefined;
@@ -394,15 +431,33 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     });
     res.end();
     return;
   }
 
+  if (control && method === 'GET' && pathname === '/api/access') {
+    const required = !isLoopbackRequest(req);
+    return json(res, {
+      required,
+      authenticated: !required || (!!control.webAccessToken && hasValidAccessToken(req, control.webAccessToken)),
+    });
+  }
+
+  if (control && method === 'GET' && pathname === '/api/access/token') {
+    const origin = req.headers.origin;
+    const requestOrigin = req.headers.host ? `http://${req.headers.host}` : '';
+    if (!isLoopbackRequest(req) || (origin && origin !== requestOrigin)) {
+      return json(res, { error: 'LAN access tokens can only be viewed from the local control room.' }, 403);
+    }
+    res.setHeader('Cache-Control', 'no-store');
+    return json(res, { token: control.webAccessToken ?? '' });
+  }
+
   if (control && pathname.startsWith('/api/')) {
-    if (!isLoopbackRequest(req)) {
-      return json(res, { error: 'The local control API is available only from this machine.' }, 403);
+    if (!isLoopbackRequest(req) && (!control.webAccessToken || !hasValidAccessToken(req, control.webAccessToken))) {
+      return json(res, { error: 'A valid LAN access token is required.' }, 401);
     }
 
     if (method === 'GET' && pathname === '/api/status') {
@@ -411,11 +466,189 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     if (method === 'GET' && pathname === '/api/config') {
       return json(res, control.getConfig());
     }
+    if (method === 'PUT' && pathname === '/api/identity') {
+      const body = JSON.parse(await readBody(req) || '{}') as {
+        name?: unknown;
+        emoji?: unknown;
+        soulContent?: unknown;
+        agentsContent?: unknown;
+        instructions?: unknown;
+      };
+      if (typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 80) {
+        return json(res, { error: 'Agent name must contain 1–80 characters.' }, 400);
+      }
+      if (typeof body.emoji !== 'string' || !['🤖', '🧠', '🧭', '🌿', '✨'].includes(body.emoji)) {
+        return json(res, { error: 'Choose a supported agent icon.' }, 400);
+      }
+      if (typeof body.soulContent !== 'string' || body.soulContent.length > 100_000) {
+        return json(res, { error: 'SOUL.md content must be 100,000 characters or fewer.' }, 413);
+      }
+      if (typeof body.agentsContent !== 'string' || body.agentsContent.length > 100_000) {
+        return json(res, { error: 'AGENTS.md content must be 100,000 characters or fewer.' }, 413);
+      }
+      if (typeof body.instructions !== 'string' || body.instructions.length > 20_000) {
+        return json(res, { error: 'Agent instructions must be 20,000 characters or fewer.' }, 413);
+      }
+      return json(res, control.updateIdentity({
+        name: body.name.trim(),
+        emoji: body.emoji,
+        soulContent: body.soulContent,
+        agentsContent: body.agentsContent,
+        instructions: body.instructions,
+      }));
+    }
     if (method === 'GET' && pathname === '/api/sessions') {
       return json(res, control.getSessions());
     }
+    if (method === 'GET' && pathname === '/api/memory/graph') {
+      return json(res, control.getMemoryGraph());
+    }
+    const memoryDocument = matchRoute('/api/memory/documents/:id', pathname);
+    if (method === 'GET' && memoryDocument) {
+      const document = control.getMemoryDocument(decodeURIComponent(memoryDocument.id));
+      return document ? json(res, document) : json(res, { error: 'Memory document not found.' }, 404);
+    }
+    const archiveAction = matchRoute('/api/sessions/:id', pathname);
+    if (method === 'DELETE' && archiveAction) {
+      const id = decodeURIComponent(archiveAction.id);
+      return control.archiveSession(id)
+        ? json(res, { archived: true })
+        : json(res, { error: 'Conversation is active, unavailable, or cannot be archived.' }, 409);
+    }
     if (method === 'GET' && pathname === '/api/tools') {
       return json(res, control.getTools());
+    }
+    if (method === 'GET' && pathname === '/api/games/chess') {
+      return json(res, { state: control.getChessState() });
+    }
+    if (method === 'PUT' && pathname === '/api/games/chess') {
+      const body = JSON.parse(await readBody(req) || '{}') as { state?: unknown };
+      const state = body.state;
+      if (!state || typeof state !== 'object' || Array.isArray(state)) return json(res, { error: 'A valid chess state is required.' }, 400);
+      const value = state as Record<string, unknown>;
+      const score = value.score as Record<string, unknown> | null;
+      const result = value.result as Record<string, unknown> | null;
+      const history = value.history;
+      if (value.version !== 1 || !score || typeof score !== 'object' || Array.isArray(score)
+        || !['rating', 'wins', 'losses', 'draws'].every(key => typeof score[key] === 'number' && Number.isSafeInteger(score[key]))
+        || (score.rating as number) < 100 || (score.rating as number) > 100_000
+        || ['wins', 'losses', 'draws'].some(key => (score[key] as number) < 0 || (score[key] as number) > 10_000_000)
+        || !['adaptive', '1', '2', '3', '4', '5'].includes(String(value.difficulty))
+        || typeof value.fen !== 'string' || value.fen.length > 120
+        || typeof value.pgn !== 'string' || value.pgn.length > 30_000
+        || !Array.isArray(history) || history.length > 100
+        || history.some(item => !item || typeof item !== 'object' || Array.isArray(item)
+          || !['win', 'loss', 'draw'].includes(String((item as Record<string, unknown>).outcome))
+          || typeof (item as Record<string, unknown>).delta !== 'number' || !Number.isSafeInteger((item as Record<string, unknown>).delta)
+          || typeof (item as Record<string, unknown>).opponentRating !== 'number' || !Number.isSafeInteger((item as Record<string, unknown>).opponentRating)
+          || typeof (item as Record<string, unknown>).completedAt !== 'number' || !Number.isSafeInteger((item as Record<string, unknown>).completedAt)
+          || typeof (item as Record<string, unknown>).pgn !== 'string' || ((item as Record<string, unknown>).pgn as string).length > 30_000)
+        || typeof value.updatedAt !== 'number' || !Number.isSafeInteger(value.updatedAt)
+        || (result !== null && (!result || typeof result !== 'object' || Array.isArray(result)
+          || !['win', 'loss', 'draw'].includes(String(result.outcome))
+          || typeof result.delta !== 'number' || !Number.isSafeInteger(result.delta)))) {
+        return json(res, { error: 'Chess state fields are invalid or outside supported limits.' }, 400);
+      }
+      return json(res, { state: control.saveChessState(value) });
+    }
+    if (method === 'GET' && pathname === '/api/browser/snapshot') {
+      return json(res, await control.browserCapture());
+    }
+    if (method === 'POST' && pathname === '/api/browser/navigate') {
+      const body = JSON.parse(await readBody(req) || '{}') as { url?: unknown };
+      if (typeof body.url !== 'string' || body.url.length > 4_000) return json(res, { error: 'A valid browser URL is required.' }, 400);
+      let target: URL;
+      try {
+        target = new URL(body.url.includes('://') ? body.url : `https://${body.url}`);
+      } catch {
+        return json(res, { error: 'The browser URL is invalid.' }, 400);
+      }
+      if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) {
+        return json(res, { error: 'Only HTTP and HTTPS browser URLs are supported.' }, 400);
+      }
+      return json(res, await control.browserNavigate(target.toString()));
+    }
+    if (method === 'POST' && pathname === '/api/browser/action') {
+      const body = JSON.parse(await readBody(req) || '{}') as { action?: unknown; x?: unknown; y?: unknown; text?: unknown; key?: unknown; deltaX?: unknown; deltaY?: unknown };
+      if (body.action === 'click' || body.action === 'move') {
+        if (![body.x, body.y].every(value => typeof value === 'number' && Number.isFinite(value))) return json(res, { error: 'Finite browser viewport coordinates are required.' }, 400);
+        await control.browserControl(body.action, { x: body.x, y: body.y });
+      } else if (body.action === 'type') {
+        if (typeof body.text !== 'string' || body.text.length > 8_000) return json(res, { error: 'Browser input must be 8,000 characters or fewer.' }, 400);
+        await control.browserControl('type', { text: body.text });
+      } else if (body.action === 'press') {
+        if (typeof body.key !== 'string' || body.key.length > 80) return json(res, { error: 'A valid keyboard key or chord is required.' }, 400);
+        await control.browserControl('press', { key: body.key });
+      } else if (body.action === 'scroll') {
+        if (![body.x, body.y, body.deltaX, body.deltaY].every(value => typeof value === 'number' && Number.isFinite(value))) return json(res, { error: 'Finite browser scroll coordinates and deltas are required.' }, 400);
+        await control.browserControl('scroll', { x: body.x, y: body.y, delta_x: body.deltaX, delta_y: body.deltaY });
+      } else {
+        return json(res, { error: 'Unsupported browser action.' }, 400);
+      }
+      return json(res, await control.browserCapture());
+    }
+    if (method === 'GET' && pathname === '/api/runs') {
+      return json(res, control.getRuns());
+    }
+    if (method === 'POST' && pathname === '/api/runs') {
+      const body = JSON.parse(await readBody(req) || '{}') as { name?: unknown; prompt?: unknown; sessionId?: unknown };
+      if (typeof body.prompt !== 'string' || !body.prompt.trim()) {
+        return json(res, { error: 'A non-empty task prompt is required.' }, 400);
+      }
+      if (body.prompt.length > 20_000) {
+        return json(res, { error: 'Task prompts must be 20,000 characters or fewer.' }, 413);
+      }
+      if (typeof body.sessionId !== 'string' || !body.sessionId.trim() || body.sessionId.length > 200) {
+        return json(res, { error: 'A valid conversation sessionId is required.' }, 400);
+      }
+      const sessionId = body.sessionId.trim();
+      if (!control.hasSession(sessionId)) return json(res, { error: 'Conversation session was not found.' }, 404);
+      const name = typeof body.name === 'string' ? body.name.trim().slice(0, 120) : undefined;
+      return json(res, control.startRun({ name, prompt: body.prompt.trim(), sessionId }), 201);
+    }
+    const restartRunAction = matchRoute('/api/runs/:id/restart', pathname);
+    if (method === 'POST' && restartRunAction) {
+      const run = control.restartRun(decodeURIComponent(restartRunAction.id));
+      return run ? json(res, run, 201) : json(res, { error: 'Run cannot be restarted because it is missing or still active.' }, 409);
+    }
+    const guideRunAction = matchRoute('/api/runs/:id/guide', pathname);
+    if (method === 'POST' && guideRunAction) {
+      const body = JSON.parse(await readBody(req) || '{}') as { message?: unknown };
+      if (typeof body.message !== 'string' || !body.message.trim()) {
+        return json(res, { error: 'A non-empty guidance message is required.' }, 400);
+      }
+      if (body.message.length > 2_000) {
+        return json(res, { error: 'Guidance messages must be 2,000 characters or fewer.' }, 413);
+      }
+      const run = control.guideRun(decodeURIComponent(guideRunAction.id), body.message.trim());
+      return run ? json(res, run, 202) : json(res, { error: 'Task could not be guided because its run or session is unavailable.' }, 409);
+    }
+    if (method === 'GET' && pathname === '/api/agents') {
+      return json(res, control.getAgents());
+    }
+    const runAction = matchRoute('/api/runs/:id/stop', pathname);
+    if (method === 'POST' && runAction) {
+      const id = decodeURIComponent(runAction.id);
+      return control.stopRun(id)
+        ? json(res, { stopped: true })
+        : json(res, { error: 'Run is no longer active or could not be stopped.' }, 409);
+    }
+    const agentAction = matchRoute('/api/agents/:id/action', pathname);
+    if (method === 'POST' && agentAction) {
+      const id = decodeURIComponent(agentAction.id);
+      const body = JSON.parse(await readBody(req) || '{}') as { action?: unknown; message?: unknown };
+      if (body.action !== 'stop' && body.action !== 'steer') {
+        return json(res, { error: 'Action must be "stop" or "steer".' }, 400);
+      }
+      if (body.action === 'steer' && (typeof body.message !== 'string' || !body.message.trim())) {
+        return json(res, { error: 'A non-empty steering message is required.' }, 400);
+      }
+      if (typeof body.message === 'string' && body.message.length > 2_000) {
+        return json(res, { error: 'Steering messages must be 2,000 characters or fewer.' }, 413);
+      }
+      return control.controlAgent(id, body.action, typeof body.message === 'string' ? body.message.trim() : undefined)
+        ? json(res, { accepted: true })
+        : json(res, { error: 'Agent is no longer active or could not be controlled.' }, 409);
     }
     if (method === 'GET' && pathname === '/api/logs') {
       return json(res, { lines: tailFile(control.logPath, Number(url.searchParams.get('lines'))) });
@@ -434,14 +667,39 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       if (typeof body.text !== 'string' || !body.text.trim() || typeof body.sessionId !== 'string' || !body.sessionId.trim()) {
         return json(res, { error: 'A non-empty text and sessionId are required.' }, 400);
       }
-      const result = await control.chat({
+      const sessionId = body.sessionId.trim();
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.flushHeaders?.();
+      const emit = (event: Record<string, unknown>) => {
+        if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+      try {
+        const result = await control.chat({
         text: body.text,
-        sessionId: body.sessionId,
+        sessionId,
         senderId: 'webapp-local',
         senderName: 'Local operator',
         source: 'webapp',
-      });
-      return json(res, result);
+        }, emit);
+        emit({ type: 'done', result });
+      } catch (failure) {
+        emit({ type: 'error', error: failure instanceof Error ? failure.message : 'The agent turn failed.' });
+      } finally {
+        if (!res.writableEnded) res.end();
+      }
+      return;
+    }
+    const interruptSession = matchRoute('/api/sessions/:id/interrupt', pathname);
+    if (method === 'POST' && interruptSession) {
+      const stopped = control.interruptSession(decodeURIComponent(interruptSession.id));
+      return stopped
+        ? json(res, { interrupted: true })
+        : json(res, { error: 'No active turn was found for this conversation.' }, 409);
     }
   }
 

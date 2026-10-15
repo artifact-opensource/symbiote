@@ -184,6 +184,83 @@ export class VectorDB {
     return added;
   }
 
+  /** Return the complete indexed corpus without exposing internal index fields. */
+  listDocuments(): VDBDocument[] {
+    this.ensureLoaded();
+    this.lastAccess = Date.now();
+    return [...this.docs!.values()].map(({ terms: _terms, tfidf: _tfidf, ...doc }) => doc);
+  }
+
+  /** Return exact cosine-similarity neighbors from the VDB's sparse term vectors. */
+  similarityEdges(neighborsPerDocument = 5, minimumSimilarity = 0.08): Array<{ source: string; target: string; similarity: number }> {
+    this.ensureLoaded();
+    this.lastAccess = Date.now();
+    const docs = [...this.docs!.values()];
+    const vectors: Array<Map<string, number>> = [];
+    const norms: number[] = [];
+    const postings = new Map<string, Array<{ index: number; weight: number }>>();
+
+    for (let index = 0; index < docs.length; index++) {
+      const doc = docs[index];
+      const counts = new Map<string, number>();
+      for (const term of doc.terms) counts.set(term, (counts.get(term) ?? 0) + 1);
+      const vector = new Map<string, number>();
+      let magnitudeSquared = 0;
+      for (const [term, count] of counts) {
+        const weight = count / Math.max(1, doc.terms.length);
+        vector.set(term, weight);
+        magnitudeSquared += weight * weight;
+        const termPostings = postings.get(term) ?? [];
+        termPostings.push({ index, weight });
+        postings.set(term, termPostings);
+      }
+      vectors.push(vector);
+      norms.push(Math.sqrt(magnitudeSquared));
+    }
+
+    const topNeighbors = docs.map(() => [] as Array<{ index: number; similarity: number }>);
+    const keepBest = (list: Array<{ index: number; similarity: number }>, candidate: { index: number; similarity: number }) => {
+      const existing = list.findIndex(item => item.index === candidate.index);
+      if (existing >= 0) {
+        if (list[existing].similarity >= candidate.similarity) return;
+        list.splice(existing, 1);
+      }
+      const insertion = list.findIndex(item => item.similarity < candidate.similarity);
+      list.splice(insertion < 0 ? list.length : insertion, 0, candidate);
+      if (list.length > neighborsPerDocument) list.pop();
+    };
+
+    for (let left = 0; left < docs.length; left++) {
+      if (norms[left] === 0) continue;
+      const dotProducts = new Map<number, number>();
+      for (const [term, weight] of vectors[left]) {
+        for (const posting of postings.get(term) ?? []) {
+          if (posting.index <= left) continue;
+          dotProducts.set(posting.index, (dotProducts.get(posting.index) ?? 0) + weight * posting.weight);
+        }
+      }
+      for (const [right, dot] of dotProducts) {
+        if (norms[right] === 0) continue;
+        const similarity = dot / (norms[left] * norms[right]);
+        if (similarity < minimumSimilarity) continue;
+        keepBest(topNeighbors[left], { index: right, similarity });
+        keepBest(topNeighbors[right], { index: left, similarity });
+      }
+    }
+
+    const edges = new Map<string, { source: string; target: string; similarity: number }>();
+    for (let index = 0; index < topNeighbors.length; index++) {
+      for (const neighbor of topNeighbors[index]) {
+        const leftId = docs[index].id;
+        const rightId = docs[neighbor.index].id;
+        const source = leftId < rightId ? leftId : rightId;
+        const target = leftId < rightId ? rightId : leftId;
+        edges.set(`${source}\0${target}`, { source, target, similarity: neighbor.similarity });
+      }
+    }
+    return [...edges.values()];
+  }
+
   /** Hybrid search: BM25 + TF-IDF cosine. */
   search(query: string, k = 5, filter?: {
     source?: string;
@@ -268,7 +345,11 @@ export class VectorDB {
   stats(): VDBStats {
     this.ensureLoaded();
     const sources: Record<string, number> = {};
-    for (const doc of this.docs!.values()) sources[doc.source] = (sources[doc.source] ?? 0) + 1;
+    let lastIndexed = 0;
+    for (const doc of this.docs!.values()) {
+      sources[doc.source] = (sources[doc.source] ?? 0) + 1;
+      lastIndexed = Math.max(lastIndexed, doc.timestamp);
+    }
 
     let diskBytes = 0;
     try {
@@ -280,7 +361,7 @@ export class VectorDB {
       documentCount: this.docs!.size,
       termCount: this.globalTerms!.size,
       diskBytes,
-      lastIndexed: Math.max(0, ...[...this.docs!.values()].map(d => d.timestamp)),
+      lastIndexed,
       sources,
     };
   }
@@ -389,12 +470,19 @@ export class VectorDB {
       for (const line of lines) {
         try {
           const doc = JSON.parse(line) as StoredDocument;
-          this.docs.set(doc.id, doc);
-          const deduplicationKey = doc.namespace ? `${doc.id}\0${doc.text}` : doc.text;
-          this.seenHashes.add(crypto.createHash('md5').update(deduplicationKey).digest('hex'));
           for (const term of doc.terms) {
             if (!this.globalTerms.has(term)) this.globalTerms.set(term, this.globalTerms.size);
           }
+          const counts = new Map<string, number>();
+          for (const term of doc.terms) counts.set(term, (counts.get(term) ?? 0) + 1);
+          doc.tfidf = [];
+          for (const [term, count] of counts) {
+            const termIndex = this.globalTerms.get(term);
+            if (termIndex !== undefined) doc.tfidf[termIndex] = count / Math.max(1, doc.terms.length);
+          }
+          this.docs.set(doc.id, doc);
+          const deduplicationKey = doc.namespace ? `${doc.id}\0${doc.text}` : doc.text;
+          this.seenHashes.add(crypto.createHash('md5').update(deduplicationKey).digest('hex'));
           this.bm25.N++;
           this.bm25.docLengths.set(doc.id, doc.terms.length);
           const tf = new Map<string, number>();
@@ -453,28 +541,30 @@ export function extractFromSession(sessionPath: string, source = 'whatsapp'): VD
   const docs: VDBDocument[] = [];
   try {
     const raw = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
-    const messages: Array<{ role: string; content: string | any; tool_calls?: any[] }> =
+    const messages: Array<{ role: string; content: string | any; tool_calls?: any[]; timestamp?: number }> =
       raw.messages ?? raw;
     const sessionId = raw.sessionId ?? raw.id ?? path.basename(sessionPath, '.json');
     const baseTimestamp = raw.archivedAt ?? raw.createdAt ?? Date.now();
 
-    const readable = messages.filter(m =>
-      (m.role === 'user' || m.role === 'assistant') &&
-      typeof m.content === 'string' &&
-      m.content.trim().length > 10 &&
-      !m.tool_calls?.length
-    );
-
-    for (let i = 0; i < readable.length; i++) {
-      const msg = readable[i];
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (
+        (msg.role !== 'user' && msg.role !== 'assistant') ||
+        typeof msg.content !== 'string' ||
+        msg.content.trim().length <= 10 ||
+        msg.tool_calls?.length
+      ) continue;
       const text = typeof msg.content === 'string' ? msg.content.trim() : '';
       if (text.length < 15) continue;
       if (text.includes('BLINK APPROACHING') || text.includes('BLINK COMPLETE')) continue;
       const indexText = text.length > 2000 ? text.slice(0, 2000) : text;
+      const timestamp = typeof msg.timestamp === 'number'
+        ? msg.timestamp
+        : baseTimestamp + i * 1000;
       docs.push({
-        id: makeDocId(indexText, baseTimestamp + i, `${source}:${sessionId}`),
+        id: makeSessionDocumentId(indexText, sessionId, i, msg.role),
         text: indexText, source, role: msg.role,
-        timestamp: baseTimestamp + i * 1000, sessionId,
+        timestamp, sessionId, namespace: `session:${sessionId}`,
       });
     }
   } catch { /* corrupt */ }
@@ -486,18 +576,29 @@ export function ingestSessions(
   db: VectorDB, sessionsDir: string, source = 'whatsapp',
 ): { processed: number; indexed: number } {
   let processed = 0, indexed = 0;
-  for (const dir of [sessionsDir, path.join(sessionsDir, 'archive')]) {
-    if (!fs.existsSync(dir)) continue;
-    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.json'))) {
+  const visit = (directory: string): void => {
+    if (!fs.existsSync(directory)) return;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const filePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(filePath);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
       let fileSource = source;
-      if (file.includes('whatsapp')) fileSource = 'whatsapp';
-      else if (file.includes('discord')) fileSource = 'discord';
-      else if (file.includes('http')) fileSource = 'webchat';
-      const docs = extractFromSession(path.join(dir, file), fileSource);
+      if (entry.name.includes('whatsapp')) fileSource = 'whatsapp';
+      else if (entry.name.includes('discord')) fileSource = 'discord';
+      else if (entry.name.includes('http') || entry.name.includes('web')) fileSource = 'webchat';
+      const docs = extractFromSession(filePath, fileSource);
       const added = db.indexBatch(docs);
       processed += docs.length;
       indexed += added;
     }
-  }
+  };
+  visit(sessionsDir);
   return { processed, indexed };
+}
+
+export function makeSessionDocumentId(text: string, sessionId: string, messageIndex: number, role: string): string {
+  return makeDocId(text, messageIndex, `session:${sessionId}:${role}`);
 }

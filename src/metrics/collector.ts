@@ -18,6 +18,7 @@ import { APP_VERSION } from '../meta/version.js';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { SystemResourcesSampler, type HostResourceSnapshot } from './system-resources.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -72,6 +73,7 @@ export interface SystemSnapshot {
   uptime: number;
   loadAvg: [number, number, number];
   freeMemPct: number;
+  host: HostResourceSnapshot;
 }
 
 export interface MetricsSnapshot {
@@ -264,6 +266,7 @@ export class MetricsCollector {
   private lastCpuUsage = process.cpuUsage();
   private lastCpuTime = Date.now();
   private version: string;
+  private hostResources = new SystemResourcesSampler();
 
   constructor(opts: { metricsDir?: string; flushIntervalMs?: number; version?: string } = {}) {
     this.metricsDir = opts.metricsDir ?? path.join(process.cwd(), '.symbiote', 'metrics');
@@ -367,6 +370,7 @@ export class MetricsCollector {
         uptime: process.uptime(),
         loadAvg: os.loadavg() as [number, number, number],
         freeMemPct: Math.round((os.freemem() / totalMem) * 10000) / 100,
+        host: this.hostResources.snapshot(),
       },
       turnCount: this.turnCount,
       blinkCount: this.blinkCount,
@@ -412,6 +416,7 @@ export class MetricsCollector {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
     }
+    this.hostResources.stop();
     // Final flush
     this.flush();
   }
