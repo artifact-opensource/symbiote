@@ -8,6 +8,8 @@ Open `http://localhost:3009` on the machine running the gateway. The web server 
 
 LAN control requests require a bearer token. On first startup, Symbiote creates a random token at `<workspace>/.session/web-access-token`; open **Configuration → Connect another device** on the gateway host to reveal and copy it. The token is only exposed to same-origin requests from the local control room and is stored in the remote browser tab's session storage. Alternatively, set `SYMBIOTE_WEB_TOKEN` to a secret of at least 32 characters. Do not share the token or expose the service on an untrusted network. The static UI can load without a token, but session, agent, task, configuration, and log APIs remain protected. Local loopback use does not require a token.
 
+On Windows, the Electron desktop app asks before adding its optional firewall rule. Approval triggers the Windows elevation prompt and limits inbound access to the configured TCP port from the local subnet on Domain and Private networks. Declining or cancelling elevation leaves the gateway and desktop app usable on the host; LAN access stays blocked by the firewall. The choice can be revisited from **Configuration** in the desktop app.
+
 ## Workspace tasks
 
 From **Workspace**, submit a task name and prompt to send it through the selected conversation's existing session and the normal agent pipeline and tool sandbox. Each new conversation gets its own session file. The **Runs** view shows task briefs, lifecycle status, subagent counts, tools used, errors, and transcript links. Active runs can be stopped, restarted, or guided.

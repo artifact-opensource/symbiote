@@ -100,6 +100,7 @@ try {
   New-Item -ItemType Directory -Path $scriptStage -Force | Out-Null
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install-service.ps1') -Destination $scriptStage
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'uninstall-service.ps1') -Destination $scriptStage
+  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'configure-firewall.ps1') -Destination $scriptStage
 
   Push-Location $repositoryRoot
   try {

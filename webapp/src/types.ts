@@ -80,6 +80,7 @@ export interface ChatMessage {
   streaming?: boolean;
   activeTools?: string[];
   thinking?: boolean;
+  interrupted?: boolean;
 }
 
 export interface ChannelStatus {

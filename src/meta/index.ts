@@ -1,2 +1,3 @@
 // Meta^n — Public API
-export { MetaN, MetaEvaluation, getMeta, startMetaLoop, stopMetaLoop, runMetaCycleNow, feedOutcome } from './meta.js';
+export { MetaN, getMeta, startMetaLoop, stopMetaLoop, runMetaCycleNow, feedOutcome } from './meta.js';
+export type { MetaEvaluation } from './meta.js';

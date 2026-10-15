@@ -172,14 +172,8 @@ try {
   Start-Service -Name $ServiceName
   $service = Get-Service -Name $ServiceName
   $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(30))
-  $firewallRule = Get-NetFirewallRule -DisplayName 'Symbiote Gateway Web UI' -ErrorAction SilentlyContinue
-  if ($firewallRule) {
-    Remove-NetFirewallRule -DisplayName 'Symbiote Gateway Web UI'
-  }
-  New-NetFirewallRule -DisplayName 'Symbiote Gateway Web UI' -Group 'Symbiote' -Direction Inbound -Action Allow -Protocol TCP -LocalPort $webPort -Program $NodePath -Profile Domain,Private | Out-Null
 }
 catch {
-  Remove-NetFirewallRule -DisplayName 'Symbiote Gateway Web UI' -ErrorAction SilentlyContinue
   if ($serviceInstalled) {
     & $NssmPath stop $ServiceName 2>$null | Out-Null
     & $NssmPath remove $ServiceName confirm 2>$null | Out-Null

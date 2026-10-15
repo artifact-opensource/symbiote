@@ -15,6 +15,7 @@ if (-not $NssmPath) {
 }
 $NssmPath = (Resolve-Path -LiteralPath $NssmPath).Path
 Remove-NetFirewallRule -DisplayName 'Symbiote Gateway Web UI' -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -Name 'SymbioteControlRoomWeb' -ErrorAction SilentlyContinue
 $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if (-not $service) {
   Write-Host "Service '$ServiceName' is already absent."

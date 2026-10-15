@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const SAMPLE_INTERVAL_MS = 5_000;
+const SAMPLE_INTERVAL_MS = 3_000;
 
 interface CpuTimes {
   user: number;
@@ -104,6 +104,25 @@ export function parseProcDiskStats(raw: string): { readBytes: number; writtenByt
   return { readBytes: readSectors * 512, writtenBytes: writtenSectors * 512 };
 }
 
+export function parseWindowsThermalCounter(raw: string): HostResourceSnapshot['temperature']['sensors'] {
+  const parsed: unknown = JSON.parse(raw.trim() || '[]');
+  const records = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+  return records.flatMap(item => {
+    if (!item || typeof item !== 'object') return [];
+    const record = item as Record<string, unknown>;
+    const rawTemperature = Number(record.value);
+    const celsius = rawTemperature / 100;
+    if (!Number.isFinite(celsius) || celsius < -40 || celsius > 150) return [];
+    const instance = typeof record.name === 'string' ? record.name : '';
+    const zone = instance.match(/TZ(\d+)$/i)?.[1];
+    return [{
+      name: zone ? `Thermal zone ${zone}` : instance || 'ACPI thermal zone',
+      celsius: Math.round(celsius * 10) / 10,
+      source: 'Windows ACPI thermal-zone performance counter',
+    }];
+  });
+}
+
 function readLinuxTemperatures(): HostResourceSnapshot['temperature'] {
   const sensors: HostResourceSnapshot['temperature']['sensors'] = [];
   const roots = ['/sys/class/hwmon', '/sys/class/thermal'];
@@ -182,35 +201,21 @@ async function readWindowsCounters(): Promise<WindowsCounters> {
 
 async function readWindowsTemperature(): Promise<HostResourceSnapshot['temperature']> {
   try {
-    const script = "$ErrorActionPreference='Stop'; @(Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | ForEach-Object {@{name=[string]$_.InstanceName; celsius=([double]$_.CurrentTemperature / 10) - 273.15}}) | ConvertTo-Json -Compress -Depth 3";
+    const script = "$ErrorActionPreference='Stop'; @(Get-Counter -Counter '\\Thermal Zone Information(*)\\High Precision Temperature' -ErrorAction Stop | Select-Object -ExpandProperty CounterSamples | ForEach-Object {@{name=[string]$_.InstanceName; value=[double]$_.CookedValue}}) | ConvertTo-Json -Compress -Depth 3";
     const { stdout } = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
       timeout: 5_000,
       windowsHide: true,
       maxBuffer: 64 * 1024,
     });
-    const parsed: unknown = JSON.parse(stdout.trim() || '[]');
-    const records = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
-    const sensors = records.flatMap(item => {
-      if (!item || typeof item !== 'object') return [];
-      const sensor = item as Record<string, unknown>;
-      const celsius = Number(sensor.celsius);
-      return Number.isFinite(celsius) && celsius >= -40 && celsius <= 150
-        ? [{ name: typeof sensor.name === 'string' ? sensor.name : 'ACPI thermal zone', celsius: Math.round(celsius * 10) / 10, source: 'Windows ACPI thermal zone · root/wmi' }]
-        : [];
-    });
+    const sensors = parseWindowsThermalCounter(stdout);
     return sensors.length
-      ? { sensors, source: 'Windows ACPI firmware sensors (not a guaranteed CPU-core sensor)' }
-      : { sensors: [], source: 'Windows ACPI firmware sensors · root/wmi', unavailableReason: 'Windows did not return any ACPI thermal-zone readings.' };
-  } catch (failure) {
-    const details = failure && typeof failure === 'object' && 'stderr' in failure
-      ? String(failure.stderr ?? '').trim()
-      : '';
+      ? { sensors, source: 'Windows ACPI thermal-zone counters (not a guaranteed CPU-core sensor)' }
+      : { sensors: [], source: 'Windows hardware temperature sensors', unavailableReason: 'No readable temperature sensor is exposed by Windows on this device.' };
+  } catch {
     return {
       sensors: [],
-      source: 'Windows ACPI firmware sensors · root/wmi',
-      unavailableReason: details
-        ? `Windows did not permit ACPI temperature access: ${details.slice(0, 240)}`
-        : 'Windows did not permit ACPI temperature access; no sensor reading is available.',
+      source: 'Windows hardware temperature sensors',
+      unavailableReason: 'No readable temperature sensor is exposed by Windows on this device.',
     };
   }
 }

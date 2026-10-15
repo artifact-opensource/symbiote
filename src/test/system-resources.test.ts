@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateCpuPercent, parseProcDiskStats, parseProcNetwork } from '../metrics/system-resources.js';
+import { calculateCpuPercent, parseProcDiskStats, parseProcNetwork, parseWindowsThermalCounter } from '../metrics/system-resources.js';
 
 test('host CPU utilization is normalized by aggregate core time and bounded', () => {
   const previous = [
@@ -37,4 +37,17 @@ test('Linux disk I/O aggregates whole disks and excludes partitions', () => {
   ].join('\n');
 
   assert.deepEqual(parseProcDiskStats(sample), { readBytes: 600 * 512, writtenBytes: 800 * 512 });
+});
+
+test('Windows high-precision thermal counters convert hundredths of Celsius and discard invalid readings', () => {
+  const readings = parseWindowsThermalCounter(JSON.stringify([
+    { name: '\\_SB._SAN.TZ01', value: 3226 },
+    { name: '\\_SB._SAN.TZ02', value: 3157 },
+    { name: '\\_SB._SAN.TZ03', value: 99999 },
+  ]));
+
+  assert.deepEqual(readings, [
+    { name: 'Thermal zone 01', celsius: 32.3, source: 'Windows ACPI thermal-zone performance counter' },
+    { name: 'Thermal zone 02', celsius: 31.6, source: 'Windows ACPI thermal-zone performance counter' },
+  ]);
 });

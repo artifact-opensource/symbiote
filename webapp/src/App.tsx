@@ -8,6 +8,9 @@ import {
   Biohazard, Plus, RefreshCw, Search, Send, Server, Settings2, ShieldCheck, Sparkles, Sun, TerminalSquare, Thermometer, Users, Wrench, X,
 } from 'lucide-react';
 import type { ChatMessage, GatewayConfig, GatewayStatus, HostResourceSnapshot, SessionSummary, ToolSummary, ViewId, WorkspaceAgent, WorkspaceRun } from './types';
+
+declare const __SYMBIOTE_VERSION__: string;
+
 const GamesView = lazy(() => import('./components/GamesView'));
 const MemoryMap = lazy(() => import('./components/MemoryMap'));
 
@@ -33,15 +36,6 @@ function createClientId(): string {
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
 }
 
-interface NotificationItem {
-  id: string;
-  title: string;
-  detail: string;
-  timestamp: number;
-  severity: number;
-  destination: ViewId;
-}
-
 declare global {
   interface Window {
     symbioteDesktop?: {
@@ -50,8 +44,36 @@ declare global {
       closeMini(): Promise<void>;
       getOpacity(): Promise<number>;
       setOpacity(opacity: number): Promise<number>;
+      requestLanAccess(): Promise<{ status: string }>;
     };
   }
+}
+
+function ResourceStatusStrip({ host }: { host?: HostResourceSnapshot }) {
+  const warmestSensor = host?.temperature.sensors.reduce((warmest, sensor) =>
+    !warmest || sensor.celsius > warmest.celsius ? sensor : warmest,
+  undefined as HostResourceSnapshot['temperature']['sensors'][number] | undefined);
+  const indicators = [
+    { label: 'CPU', value: host?.cpuPercent, unit: '%', warning: 70, critical: 85 },
+    { label: 'RAM', value: host?.memory.usedPercent, unit: '%', warning: 70, critical: 85 },
+    { label: 'TEMP', value: warmestSensor?.celsius, unit: '°C', warning: 70, critical: 85 },
+  ];
+  return (
+    <footer className="notification-health-strip" aria-label="Live computer resource status">
+      {indicators.map(({ label, value, unit, warning, critical }) => {
+        const level = value === undefined || value === null || !Number.isFinite(value)
+          ? 'unknown'
+          : value >= critical ? 'critical' : value >= warning ? 'warning' : 'healthy';
+        const reading = value === undefined || value === null || !Number.isFinite(value)
+          ? 'Unavailable'
+          : `${value.toFixed(1)}${unit}`;
+        return <div className="notification-health-item" key={label} title={`${label}: ${reading}`}>
+          <span className={`notification-health-light notification-health-${level}`} aria-hidden="true" />
+          <span><strong>{label}</strong><small>{reading}</small></span>
+        </div>;
+      })}
+    </footer>
+  );
 }
 
 function initialTheme(): Theme {
@@ -88,7 +110,7 @@ async function streamApi<T>(
   endpoint: string,
   body: Record<string, unknown>,
   onEvent: (event: Record<string, unknown>) => void,
-): Promise<T> {
+): Promise<{ complete: true; result: T } | { complete: false }> {
   let token = '';
   try {
     token = window.sessionStorage.getItem('symbiote-lan-token') ?? '';
@@ -113,17 +135,29 @@ async function streamApi<T>(
   const decoder = new TextDecoder();
   let buffer = '';
   let finalResult: T | undefined;
-  const consume = (chunk: string) => {
+  const processEvent = (block: string) => {
+    const data = block.split(/\r?\n/)
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice(5).replace(/^ /, ''))
+      .join('\n');
+    if (!data) return;
+    const event = JSON.parse(data) as Record<string, unknown>;
+    if (event.type === 'error') throw new Error(typeof event.error === 'string' ? event.error : 'The agent turn failed.');
+    if (event.type === 'done') finalResult = event.result as T;
+    else onEvent(event);
+  };
+  const consume = (chunk: string, flush = false) => {
     buffer += chunk;
-    const events = buffer.split('\n\n');
-    buffer = events.pop() ?? '';
-    for (const block of events) {
-      const data = block.split('\n').find(line => line.startsWith('data: '))?.slice(6);
-      if (!data) continue;
-      const event = JSON.parse(data) as Record<string, unknown>;
-      if (event.type === 'error') throw new Error(typeof event.error === 'string' ? event.error : 'The agent turn failed.');
-      if (event.type === 'done') finalResult = event.result as T;
-      else onEvent(event);
+    const delimiter = /\r?\n\r?\n/g;
+    let start = 0;
+    for (let match = delimiter.exec(buffer); match; match = delimiter.exec(buffer)) {
+      processEvent(buffer.slice(start, match.index));
+      start = delimiter.lastIndex;
+    }
+    buffer = buffer.slice(start);
+    if (flush && buffer.trim()) {
+      processEvent(buffer);
+      buffer = '';
     }
   };
   try {
@@ -132,12 +166,11 @@ async function streamApi<T>(
       if (done) break;
       consume(decoder.decode(value, { stream: true }));
     }
-    consume(decoder.decode());
+    consume(decoder.decode(), true);
   } finally {
     reader.releaseLock();
   }
-  if (finalResult === undefined) throw new Error('The agent stream ended before a final response arrived.');
-  return finalResult;
+  return finalResult === undefined ? { complete: false } : { complete: true, result: finalResult };
 }
 
 function formatRelative(timestamp?: number): string {
@@ -151,6 +184,15 @@ function formatRelative(timestamp?: number): string {
 
 function notificationTimestamp(timestamp: number): string {
   return formatRelative(timestamp);
+}
+
+function findSavedAssistantResponse(messages: ChatMessage[], userText: string): ChatMessage | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message.role !== 'user' || !(message.content === userText || message.content.endsWith(`] ${userText}`))) continue;
+    return messages.slice(index + 1).find(item => item.role === 'assistant');
+  }
+  return undefined;
 }
 
 function MinimalMode({ theme, onThemeChange }: { theme: Theme; onThemeChange: () => void }) {
@@ -234,22 +276,41 @@ function MinimalMode({ theme, onThemeChange }: { theme: Theme; onThemeChange: ()
     setText('');
     setBusy(true);
     const assistantId = createClientId();
+    let streamedText = '';
     setActiveTurnSessionId(activeSessionId);
     setMessages(current => [...current, { id: `pending-${Date.now()}`, role: 'user', content: message, timestamp: Date.now() }, { id: assistantId, role: 'assistant', content: '', streaming: true, timestamp: Date.now() }]);
     try {
-      const result = await streamApi<{ text: string }>('/api/chat', { text: message, sessionId: activeSessionId }, event => {
+      const outcome = await streamApi<{ text: string }>('/api/chat', { text: message, sessionId: activeSessionId }, event => {
         setMessages(current => current.map(item => item.id === assistantId
           ? event.type === 'text_delta'
             ? { ...item, content: item.content + String(event.text ?? '') }
             : item
           : item));
+        if (event.type === 'text_delta') streamedText += String(event.text ?? '');
       });
+      if (!outcome.complete) {
+        const saved = await api<ChatMessage[]>(`/api/sessions/${encodeURIComponent(activeSessionId)}/messages`);
+        const latestAssistant = findSavedAssistantResponse(saved, message);
+        if (latestAssistant) {
+          setMessages(saved);
+        } else {
+          setMessages(current => current.map(item => item.id === assistantId
+            ? { ...item, content: streamedText, streaming: false, interrupted: true }
+            : item));
+        }
+        return;
+      }
+      const result = outcome.result;
       await refresh();
       const saved = await api<ChatMessage[]>(`/api/sessions/${encodeURIComponent(activeSessionId)}/messages`);
       setMessages(saved.length ? saved : current => current.map(item => item.id === assistantId ? { ...item, content: result.text, streaming: false } : item));
     } catch (failure) {
-      setMessages(current => current.map(item => item.id === assistantId ? { ...item, content: item.content || (failure instanceof Error ? failure.message : 'The agent turn failed.'), streaming: false } : item));
-      setError(failure instanceof Error ? failure.message : 'Message could not be sent.');
+      setMessages(current => current.map(item => item.id === assistantId ? {
+        ...item,
+        content: item.content || streamedText || (failure instanceof Error ? failure.message : 'The agent turn failed.'),
+        streaming: false,
+        interrupted: true,
+      } : item));
     } finally {
       setBusy(false);
       setActiveTurnSessionId('');
@@ -298,7 +359,7 @@ function MinimalMode({ theme, onThemeChange }: { theme: Theme; onThemeChange: ()
           </div>
           <div className="minimal-messages" ref={scrollRef}>
             {messages.length === 0 && <p className="minimal-empty">Start a conversation.</p>}
-            {messages.map(message => <article className={`minimal-message minimal-message-${message.role}`} key={message.id}><span>{message.role === 'user' ? 'You' : 'Agent'}</span><MessageBody content={message.content} /></article>)}
+            {messages.map(message => <article className={`minimal-message minimal-message-${message.role}`} key={message.id}><span>{message.role === 'user' ? 'You' : 'Agent'}</span>{message.content && <MessageBody content={message.content} />}{message.interrupted && <small className="message-interrupted">This reply did not finish. Your message is preserved; you can try again.</small>}</article>)}
           </div>
           <form className="minimal-composer" onSubmit={event => void sendMessage(event)}>
             <textarea value={text} onChange={event => setText(event.target.value)} rows={2} placeholder="Write a message…" aria-label="Message" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
@@ -483,6 +544,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [logLines, setLogLines] = useState('');
   const [memoryHistory, setMemoryHistory] = useState<number[]>([]);
+  const [hostHistory, setHostHistory] = useState<HostResourceSnapshot[]>([]);
   const [gatewayConnected, setGatewayConnected] = useState(false);
   const [accessChecked, setAccessChecked] = useState(false);
   const [accessRequired, setAccessRequired] = useState(false);
@@ -515,18 +577,6 @@ export default function App() {
       return [];
     }
   });
-  const [systemAlertHistory, setSystemAlertHistory] = useState<NotificationItem[]>(() => {
-    try {
-      const stored = window.localStorage.getItem('symbiote-system-alert-history');
-      const parsed: unknown = stored ? JSON.parse(stored) : [];
-      return Array.isArray(parsed) ? parsed.filter((item): item is NotificationItem => !!item && typeof item === 'object'
-        && typeof item.id === 'string' && typeof item.title === 'string' && typeof item.detail === 'string'
-        && typeof item.timestamp === 'number' && typeof item.severity === 'number'
-        && (item.destination === 'workspace' || item.destination === 'operations')) : [];
-    } catch {
-      return [];
-    }
-  });
   const [deviceNotificationPermission, setDeviceNotificationPermission] = useState(() =>
     typeof Notification === 'undefined' || !window.isSecureContext ? 'unsupported' : Notification.permission,
   );
@@ -540,7 +590,6 @@ export default function App() {
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeTurnSessionId = useRef<string | null>(null);
-  const previousHostAlerts = useRef(new Set<string>());
   const nativeNotifiedIds = useRef(new Set<string>());
   const sessionSearchRef = useRef<HTMLInputElement>(null);
   const toolSearchRef = useRef<HTMLInputElement>(null);
@@ -572,14 +621,6 @@ export default function App() {
       // The current notification state remains available for this page lifetime.
     }
   }, [readNotificationIds]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('symbiote-system-alert-history', JSON.stringify(systemAlertHistory.slice(0, 100)));
-    } catch {
-      setError('System alert history could not be saved in this browser.');
-    }
-  }, [systemAlertHistory]);
 
   useEffect(() => {
     try {
@@ -629,7 +670,13 @@ export default function App() {
       const fresh = await api<GatewayStatus>('/api/status');
       setStatus(fresh);
       setGatewayConnected(true);
-      setMemoryHistory(previous => [...previous.slice(-23), fresh.memory?.rss ?? 0]);
+      setMemoryHistory(previous => [...previous.slice(-59), fresh.memory?.rss ?? 0]);
+      const hostSample = fresh.metrics?.system?.host;
+      if (hostSample?.sampledAt) {
+        setHostHistory(previous => previous[previous.length - 1]?.sampledAt === hostSample.sampledAt
+          ? previous
+          : [...previous.slice(-59), hostSample]);
+      }
       setLastUpdated(Date.now());
     } catch (failure) {
       setGatewayConnected(false);
@@ -706,8 +753,10 @@ export default function App() {
 
   useEffect(() => {
     if (!accessGranted) return;
-    const timer = window.setInterval(() => {
+    const statusTimer = window.setInterval(() => {
       void refreshStatus().catch(() => setError('Gateway connection was interrupted. Retrying…'));
+    }, view === 'workspace' ? 3000 : 5000);
+    const activityTimer = window.setInterval(() => {
       if (view === 'workspace' || view === 'runs' || view === 'agents') {
         void refreshWork().catch(failure => setError(failure instanceof Error ? failure.message : 'Could not refresh workspace activity.'));
       }
@@ -717,7 +766,10 @@ export default function App() {
           .catch(() => undefined);
       }
     }, 5000);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearInterval(statusTimer);
+      window.clearInterval(activityTimer);
+    };
   }, [accessGranted, refreshStatus, refreshWork, view]);
 
   useEffect(() => {
@@ -918,6 +970,7 @@ export default function App() {
     if (!text || !activeSessionId || sending) return;
     const userMessage: ChatMessage = { id: createClientId(), role: 'user', content: text, timestamp: Date.now() };
     const assistantId = createClientId();
+    let streamedText = '';
     activeTurnSessionId.current = activeSessionId;
     setMessages(previous => [...previous, userMessage, { id: assistantId, role: 'assistant', content: '', timestamp: Date.now(), streaming: true }]);
     setSending(true);
@@ -928,7 +981,7 @@ export default function App() {
     });
     setError('');
     try {
-      const response = await streamApi<{
+      const outcome = await streamApi<{
         text: string;
         durationMs?: number;
         iterations?: number;
@@ -937,7 +990,9 @@ export default function App() {
         setMessages(previous => previous.map(message => {
           if (message.id !== assistantId) return message;
           if (streamed.type === 'text_delta') {
-            return { ...message, content: message.content + String(streamed.text ?? ''), thinking: false };
+            const delta = String(streamed.text ?? '');
+            streamedText += delta;
+            return { ...message, content: message.content + delta, thinking: false };
           }
           if (streamed.type === 'thinking_delta') return { ...message, thinking: true };
           if (streamed.type === 'tool_start') {
@@ -951,6 +1006,25 @@ export default function App() {
           return message;
         }));
       });
+      if (!outcome.complete) {
+        const saved = await api<ChatMessage[]>(`/api/sessions/${encodeURIComponent(activeSessionId)}/messages`);
+        const latestAssistant = findSavedAssistantResponse(saved, text);
+        if (latestAssistant) {
+          setMessages(saved);
+          void api<SessionSummary[]>('/api/sessions').then(setSessions).catch(() => undefined);
+        } else {
+          setMessages(previous => previous.map(message => message.id === assistantId ? {
+            ...message,
+            content: streamedText,
+            streaming: false,
+            thinking: false,
+            activeTools: [],
+            interrupted: true,
+          } : message));
+        }
+        return;
+      }
+      const response = outcome.result;
       setMessages(previous => previous.map(message => message.id === assistantId ? {
         ...message,
         content: response.text || message.content || 'The turn completed without a text response.',
@@ -967,12 +1041,12 @@ export default function App() {
     } catch (failure) {
       setMessages(previous => previous.map(message => message.id === assistantId ? {
         ...message,
-        content: message.content || (failure instanceof Error ? failure.message : 'The agent turn failed.'),
+        content: message.content || streamedText || (failure instanceof Error ? failure.message : 'The agent turn failed.'),
         streaming: false,
         thinking: false,
         activeTools: [],
+        interrupted: true,
       } : message));
-      setError(failure instanceof Error ? failure.message : 'Message could not be delivered.');
     } finally {
       activeTurnSessionId.current = null;
       setSending(false);
@@ -990,48 +1064,8 @@ export default function App() {
   };
 
   const channelList = status?.channels ?? [];
-  const onlineChannels = channelList.filter(channel => channel.status === 'running' || channel.health?.state === 'connected').length;
   const isOnline = gatewayConnected;
-  const hostResources = status?.metrics?.system?.host;
-  const hostAlertConditions = useMemo(() => {
-    const conditions: Array<{ signature: string; title: string; detail: string; severity: number }> = [];
-    const addThreshold = (key: string, label: string, value: number | null | undefined, warning: number, critical: number, unit = '%') => {
-      if (value === null || value === undefined || !Number.isFinite(value)) return;
-      const severity = value >= critical ? 3 : value >= warning ? 2 : 0;
-      if (severity) conditions.push({
-        signature: `${key}-${severity}`,
-        title: `${label} ${severity === 3 ? 'critical' : 'high'}`,
-        detail: `${value.toFixed(1)}${unit} used; warning ${warning}${unit}, critical ${critical}${unit}.`,
-        severity,
-      });
-    };
-    addThreshold('cpu', 'Host CPU', hostResources?.cpuPercent, 85, 95);
-    addThreshold('memory', 'System memory', hostResources?.memory.usedPercent, 85, 95);
-    for (const sensor of hostResources?.temperature.sensors ?? []) {
-      addThreshold(`temperature-${sensor.name}`, sensor.name, sensor.celsius, 85, 95, '°C');
-    }
-    return conditions;
-  }, [hostResources?.sampledAt]);
-
-  useEffect(() => {
-    const active = new Set(hostAlertConditions.map(condition => condition.signature));
-    const started = hostAlertConditions.filter(condition => !previousHostAlerts.current.has(condition.signature));
-    previousHostAlerts.current = active;
-    if (!started.length) return;
-    const events = started.map(condition => ({
-      id: `host-${condition.signature}-${Date.now()}-${createClientId()}`,
-      title: condition.title,
-      detail: condition.detail,
-      timestamp: Date.now(),
-      severity: condition.severity,
-      destination: 'workspace' as ViewId,
-    }));
-    setSystemAlertHistory(previous => [...events, ...previous].slice(0, 100));
-  }, [hostAlertConditions]);
-
-  const systemAlerts = systemAlertHistory;
   const attentionItems = [
-    ...systemAlerts,
     ...runs.filter(run => run.status === 'failed').map(run => ({
       id: `run-${run.id}-${run.completedAt ?? run.startedAt}`,
       title: run.name,
@@ -1107,12 +1141,12 @@ export default function App() {
   }
 
   return (
-    <div className="control-room" data-theme={theme}>
+    <div className={`control-room${view === 'chat' ? ' control-room-chat' : ''}`} data-theme={theme}>
       <a className="skip-link" href="#main-content">Skip to content</a>
       <aside className={`sidebar${mobileNavOpen ? ' sidebar-open' : ''}`} aria-label="Main navigation">
         <div className="brand-lockup">
-          <div className="brand-mark" aria-hidden="true"><Biohazard size={19} strokeWidth={1.6} /></div>
-          <div className="brand-copy"><span>SYMBIOTE</span><small>SUPER AGENTS</small></div>
+          <Biohazard className="brand-mark" size={17} strokeWidth={1.7} aria-hidden="true" />
+          <div className="brand-copy"><span>SYMBIOTE</span></div>
           <button className="icon-button sidebar-dismiss" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation"><X size={17} /></button>
         </div>
 
@@ -1127,30 +1161,31 @@ export default function App() {
           })()}
         </button>
 
-        {['Work', 'Play', 'Runtime'].map(group => (
-          <div className="nav-group" key={group}>
-            <div className="nav-label">{group}</div>
-            {NAVIGATION.filter(item => item.group === group).map(item => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.id}
-                  className={`nav-item${view === item.id ? ' nav-item-active' : ''}`}
-                  onClick={() => navigate(item.id)}
-                  aria-current={view === item.id ? 'page' : undefined}
-                >
-                  <Icon size={17} strokeWidth={1.8} />
-                  <span>{item.label}</span>
-                  {item.id === 'tools' && <span className="nav-count">{tools.length || '—'}</span>}
-                  {item.id === 'runs' && runs.some(run => run.status === 'running') && <span className="nav-count">{runs.filter(run => run.status === 'running').length}</span>}
-                  {item.id === 'agents' && agents.some(agent => agent.status === 'running') && <span className="nav-count">{agents.filter(agent => agent.status === 'running').length}</span>}
-                </button>
-              );
-            })}
-          </div>
-        ))}
+        <nav className="sidebar-navigation" aria-label="Sections">
+          {['Work', 'Play', 'Runtime'].map(group => (
+            <div className="nav-group" key={group}>
+              <div className="nav-label">{group}</div>
+              {NAVIGATION.filter(item => item.group === group).map(item => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    className={`nav-item${view === item.id ? ' nav-item-active' : ''}`}
+                    onClick={() => navigate(item.id)}
+                    aria-current={view === item.id ? 'page' : undefined}
+                  >
+                    <Icon size={17} strokeWidth={1.8} />
+                    <span>{item.label}</span>
+                    {item.id === 'tools' && <span className="nav-count">{tools.length || '—'}</span>}
+                    {item.id === 'runs' && runs.some(run => run.status === 'running') && <span className="nav-count">{runs.filter(run => run.status === 'running').length}</span>}
+                    {item.id === 'agents' && agents.some(agent => agent.status === 'running') && <span className="nav-count">{agents.filter(agent => agent.status === 'running').length}</span>}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
 
-        <div className="sidebar-spacer" />
         <div className="sidebar-session">
           <div className="sidebar-section-heading"><span>RECENT THREADS</span><button className="icon-button small" onClick={() => void createSession()} aria-label="Start a new conversation"><Plus size={15} /></button></div>
           {sessions.slice(0, 4).map(session => (
@@ -1162,9 +1197,7 @@ export default function App() {
           {sessions.length === 0 && <p className="sidebar-empty">Your conversations will appear here.</p>}
         </div>
         <div className="sidebar-footer">
-          <span className={`connection-orb${isOnline ? ' connection-orb-live' : ''}`} />
-          <span>{isOnline ? 'Runtime connected' : loading ? 'Connecting to runtime' : 'Runtime offline'}</span>
-          <span className="version-label">v{status?.version ?? '—'}</span>
+          <span className="version-label">{__SYMBIOTE_VERSION__}</span>
         </div>
       </aside>
 
@@ -1210,12 +1243,13 @@ export default function App() {
                   <span className="notification-copy"><strong>{item.title}</strong><small>{item.detail}</small><time>{notificationTimestamp(item.timestamp)}</time></span>
                   {!readNotificationIds.includes(item.id) && <span className="notification-unread" aria-label="Unread" />}
                 </button>)}</div> : <p className="notification-empty">Nothing needs your attention.</p>}
-              </section>}
+                  <ResourceStatusStrip host={status?.metrics?.system?.host} />
+                </section>}
             </div>
           </div>
         </header>
 
-        <main id="main-content" className="main-content">
+        <main id="main-content" className={`main-content${view === 'chat' ? ' main-content-chat' : ''}`}>
           {error && (
             <div className="notice notice-error" role="alert">
               <span>{error}</span>
@@ -1236,8 +1270,8 @@ export default function App() {
                   runs={runs}
                   agents={agents}
                   channels={channelList}
-                  onlineChannels={onlineChannels}
                   memoryHistory={memoryHistory}
+                  hostHistory={hostHistory}
                   lastUpdated={lastUpdated}
                   onNavigate={navigate}
                   onStartRun={launchRun}
@@ -1417,8 +1451,8 @@ function OverviewView(props: {
   runs: WorkspaceRun[];
   agents: WorkspaceAgent[];
   channels: GatewayStatus['channels'];
-  onlineChannels: number;
   memoryHistory: number[];
+  hostHistory: HostResourceSnapshot[];
   lastUpdated: number | null;
   onNavigate: (view: ViewId) => void;
   onStartRun: (prompt: string, sessionId: string) => Promise<boolean>;
@@ -1427,7 +1461,7 @@ function OverviewView(props: {
   onOpenSession: (id: string) => void;
   creatingSession: boolean;
 }) {
-  const { status, config, sessions, activeSessionId, runs, agents, channels, onlineChannels, memoryHistory, lastUpdated, onNavigate, onStartRun, startingRun, onNewSession, onOpenSession, creatingSession } = props;
+  const { status, config, sessions, activeSessionId, runs, agents, channels, memoryHistory, hostHistory, lastUpdated, onNavigate, onStartRun, startingRun, onNewSession, onOpenSession, creatingSession } = props;
   const memory = status?.memory;
   const metrics = status?.metrics;
   const host = metrics?.system?.host;
@@ -1478,16 +1512,43 @@ function OverviewView(props: {
       </section>
 
       <section className="metric-grid" aria-label="Runtime summary">
-        <MetricCard icon={Server} label="Uptime" value={status?.uptimeHuman || '—'} detail={`Version ${status?.version ?? 'unknown'}`} tone="neutral" />
-        <MetricCard icon={Network} label="Connected channels" value={`${onlineChannels} / ${channels.length}`} detail={channels.length ? 'Live adapter health' : 'No adapters registered'} tone="green" />
-        <MetricCard icon={Activity} label="Active turns" value={String(status?.activeTurns ?? '—')} detail="Currently processing" tone="orange" />
-        <MetricCard icon={HardDrive} label="Memory in use" value={formatBytes(memory?.rss)} detail={`Heap ${formatBytes(memory?.heap)}`} tone="blue" />
+        <MetricCard icon={Server} label="Uptime" tone="neutral">
+          <div className="uptime-card-main"><strong className="metric-value">{status?.uptimeHuman || '—'}</strong><StopwatchDial seconds={status?.uptime ?? 0} /></div>
+        </MetricCard>
+        <MetricCard icon={MessageSquare} label="Conversations" tone="green">
+          <strong className="metric-value">{status?.sessions ?? sessions.length}</strong>
+          <span className="metric-detail">Saved sessions</span>
+        </MetricCard>
+        <MetricCard icon={Activity} label="Active turns" tone="orange">
+          <strong className="metric-value">{status?.activeTurns ?? '—'}</strong>
+          <span className="metric-detail">Running now</span>
+        </MetricCard>
+        <MemoryInUseCard host={host} processRssMb={memory?.rss} />
       </section>
       <section className="metric-grid system-metric-grid" aria-label="Computer resource usage">
-        <MetricCard icon={Cpu} label="Host CPU" value={host?.cpuPercent === null || host?.cpuPercent === undefined ? '—' : `${host.cpuPercent.toFixed(1)}%`} detail={`${host?.cpuLogicalCores ?? '—'} logical cores · whole computer`} tone="orange" />
-        <MetricCard icon={MemoryStick} label="System RAM" value={host ? `${host.memory.usedPercent.toFixed(1)}%` : '—'} detail={host ? `${formatSystemBytes(host.memory.totalBytes - host.memory.freeBytes)} of ${formatSystemBytes(host.memory.totalBytes)} in use` : 'Waiting for host sample'} tone="blue" />
-        <MetricCard icon={Network} label="Network I/O" value={`↓ ${formatRate(host?.network.receiveBytesPerSecond)} · ↑ ${formatRate(host?.network.transmitBytesPerSecond)}`} detail={host?.network.source ?? 'Host network counters'} tone="green" />
-        <MetricCard icon={HardDrive} label="Disk I/O" value={`Read ${formatRate(host?.disk.readBytesPerSecond)}`} detail={`Write ${formatRate(host?.disk.writeBytesPerSecond)} · ${host?.disk.source ?? 'Host disk counters'}`} tone="neutral" />
+        <MetricCard icon={Cpu} label="Host CPU" tone="orange">
+          <div className="metric-reading"><strong className="metric-value">{host?.cpuPercent === null || host?.cpuPercent === undefined ? '—' : `${host.cpuPercent.toFixed(1)}%`}</strong><span>{host ? `${host.cpuLogicalCores} cores` : 'Waiting for sample'}</span></div>
+          <MetricPlot label="Host CPU utilization over time" series={[{ name: 'CPU', color: '#c8785e', values: hostHistory.map(sample => sample.cpuPercent ?? 0) }]} maxValue={100} />
+        </MetricCard>
+        <MetricCard icon={MemoryStick} label="System RAM" tone="blue">
+          <div className="metric-memory-reading"><strong>{host ? formatSystemBytes(host.memory.totalBytes - host.memory.freeBytes) : '—'}</strong><span>/ {host ? formatSystemBytes(host.memory.totalBytes) : '—'}</span></div>
+          <div className="metric-reading-subtext">{host ? `${host.memory.usedPercent.toFixed(1)}% in use` : 'Waiting for sample'}</div>
+          <MetricPlot label="System RAM use over time" area series={[{ name: 'Used', color: '#7396a0', values: hostHistory.map(sample => sample.memory.totalBytes - sample.memory.freeBytes) }]} maxValue={host?.memory.totalBytes || 1} />
+        </MetricCard>
+        <MetricCard icon={Network} label="Network I/O" tone="green">
+          <div className="metric-dual-reading"><span><b>↓</b> {formatRate(host?.network.receiveBytesPerSecond)}</span><span><b>↑</b> {formatRate(host?.network.transmitBytesPerSecond)}</span></div>
+          <MetricPlot label="Network receive and transmit rates" series={[
+            { name: 'Down', color: '#759b6c', values: hostHistory.map(sample => sample.network.receiveBytesPerSecond ?? 0) },
+            { name: 'Up', color: '#c8785e', values: hostHistory.map(sample => sample.network.transmitBytesPerSecond ?? 0) },
+          ]} />
+        </MetricCard>
+        <MetricCard icon={HardDrive} label="Disk I/O" tone="neutral">
+          <div className="metric-dual-reading"><span>Read {formatRate(host?.disk.readBytesPerSecond)}</span><span>Write {formatRate(host?.disk.writeBytesPerSecond)}</span></div>
+          <MetricPlot label="Disk read and write rates" series={[
+            { name: 'Read', color: '#77949d', values: hostHistory.map(sample => sample.disk.readBytesPerSecond ?? 0) },
+            { name: 'Write', color: '#c8785e', values: hostHistory.map(sample => sample.disk.writeBytesPerSecond ?? 0) },
+          ]} />
+        </MetricCard>
       </section>
 
       <div className="overview-columns">
@@ -1519,7 +1580,7 @@ function OverviewView(props: {
           <div className="runtime-stat">
             <div className="runtime-stat-heading"><span>Process memory</span><strong>{formatBytes(memory?.rss)}</strong></div>
             <Sparkline values={memoryHistory} />
-            <div className="runtime-footnote"><span>Resident set size</span><span>Live · 5 second interval</span></div>
+            <div className="runtime-footnote"><span>Resident set size</span><span>Live · 3 second interval</span></div>
           </div>
           <div className="runtime-divider" />
           <div className="runtime-mini-grid">
@@ -1532,8 +1593,8 @@ function OverviewView(props: {
           <div className="runtime-thermal-row">
             <div className="runtime-thermal-icon"><Thermometer size={15} /></div>
             <div className="runtime-thermal-copy">
-              <strong>{temperatureSensor ? `${temperatureSensor.name} · ${temperatureSensor.celsius.toFixed(1)}°C` : 'Temperature sensor unavailable'}</strong>
-              <small title={host?.temperature.source}>{temperatureSensor?.source ?? host?.temperature.unavailableReason ?? 'Waiting for hardware sensor detection'}</small>
+              <strong>{temperatureSensor ? `${temperatureSensor.name} · ${temperatureSensor.celsius.toFixed(1)}°C` : 'Temperature unavailable'}</strong>
+              <small title={host?.temperature.source}>{temperatureSensor?.source ?? 'No readable temperature sensor exposed by this device'}</small>
             </div>
           </div>
           <div className={`runtime-alert-panel${activeResourceAlerts.length ? ' runtime-alert-active' : ''}`} aria-live="polite">
@@ -1930,18 +1991,102 @@ function AgentCard({ agent, onControl }: {
   );
 }
 
-function MetricCard({ icon: Icon, label, value, detail, tone }: {
+function MetricCard({ icon: Icon, label, tone, children }: {
   icon: typeof Activity;
   label: string;
-  value: string;
-  detail: string;
   tone: 'neutral' | 'green' | 'orange' | 'blue';
+  children: ReactNode;
 }) {
   return (
     <div className="metric-card">
       <div className="metric-card-top"><span className={`metric-icon metric-${tone}`}><Icon size={16} strokeWidth={1.8} /></span><span className="metric-label">{label}</span></div>
-      <strong className="metric-value">{value}</strong>
-      <span className="metric-detail">{detail}</span>
+      <div className="metric-card-content">{children}</div>
+    </div>
+  );
+}
+
+function StopwatchDial({ seconds }: { seconds: number }) {
+  const [elapsed, setElapsed] = useState(seconds);
+  useEffect(() => setElapsed(seconds), [seconds]);
+  useEffect(() => {
+    const timer = window.setInterval(() => setElapsed(value => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <svg className="uptime-stopwatch" viewBox="0 0 84 84" role="img" aria-label="Live uptime stopwatch">
+      <circle cx="42" cy="44" r="31" className="stopwatch-face" />
+      {Array.from({ length: 12 }, (_, index) => <line key={index} x1="42" y1="16" x2="42" y2="20" className="stopwatch-tick" transform={`rotate(${index * 30} 42 44)`} />)}
+      <line x1="42" y1="44" x2="42" y2="21" className="stopwatch-hand" transform={`rotate(${(elapsed % 60) * 6} 42 44)`} />
+      <circle cx="42" cy="44" r="2.5" className="stopwatch-pin" />
+      <path d="M35 9h14M42 9v4M58 18l4-4" className="stopwatch-crown" />
+    </svg>
+  );
+}
+
+function MemoryInUseCard({ host, processRssMb }: { host?: HostResourceSnapshot; processRssMb?: number }) {
+  const total = Math.max(0, host?.memory.totalBytes ?? 0);
+  const used = Math.min(total, Math.max(0, total - (host?.memory.freeBytes ?? 0)));
+  const process = Math.min(used, Math.max(0, (processRssMb ?? 0) * 1024 * 1024));
+  const other = Math.max(0, used - process);
+  const available = Math.max(0, total - used);
+  const circumference = 2 * Math.PI * 22;
+  const segments = [
+    { name: 'Symbiote', value: process, color: '#789771' },
+    { name: 'Other used', value: other, color: '#d18a68' },
+    { name: 'Available', value: available, color: '#c9cabe' },
+  ];
+  let offset = 0;
+  return (
+    <MetricCard icon={HardDrive} label="Memory in use" tone="blue">
+      <div className="memory-card-content">
+        <svg className="memory-donut" viewBox="0 0 56 56" role="img" aria-label={`Memory allocation: ${formatSystemBytes(used)} used of ${formatSystemBytes(total)}`}>
+          <circle cx="28" cy="28" r="22" className="memory-donut-track" />
+          {total > 0 && segments.map(segment => {
+            const length = circumference * segment.value / total;
+            const currentOffset = offset;
+            offset += length;
+            return <circle key={segment.name} cx="28" cy="28" r="22" fill="none" stroke={segment.color} strokeWidth="7" strokeDasharray={`${length} ${circumference - length}`} strokeDashoffset={-currentOffset} transform="rotate(-90 28 28)" />;
+          })}
+        </svg>
+        <div className="memory-card-values">
+          <div className="memory-total"><strong>{host ? formatSystemBytes(used) : '—'}</strong><span>/ {host ? formatSystemBytes(total) : '—'}</span></div>
+          <div className="memory-card-legend">{segments.map(segment => <span key={segment.name}><i style={{ background: segment.color }} />{segment.name} <b>{host ? formatSystemBytes(segment.value) : '—'}</b></span>)}</div>
+        </div>
+      </div>
+    </MetricCard>
+  );
+}
+
+function MetricPlot({ series, maxValue, area, label }: {
+  series: Array<{ name: string; color: string; values: number[] }>;
+  maxValue?: number;
+  area?: boolean;
+  label: string;
+}) {
+  const width = 240;
+  const height = 48;
+  const values = series.flatMap(item => item.values.slice(-60)).filter(Number.isFinite);
+  const maximum = Math.max(1, maxValue ?? Math.max(0, ...values) * 1.1);
+  const pathFor = (samples: number[], closeArea = false) => {
+    const points = samples.slice(-60).map((value, index, all) => {
+      const x = all.length < 2 ? width : index / (all.length - 1) * width;
+      const y = height - Math.max(0, Math.min(1, value / maximum)) * (height - 4) - 2;
+      return [x, y] as const;
+    });
+    if (!points.length) return '';
+    const path = `M ${points.map(([x, y]) => `${x.toFixed(1)} ${y.toFixed(1)}`).join(' L ')}`;
+    return closeArea ? `${path} L ${points[points.length - 1][0].toFixed(1)} ${height} L ${points[0][0].toFixed(1)} ${height} Z` : path;
+  };
+  return (
+    <div className="metric-plot">
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={label}>
+        {[12, 24, 36].map(y => <line key={y} x1="0" y1={y} x2={width} y2={y} className="metric-plot-grid" />)}
+        {series.map((item, index) => <g key={item.name}>
+          {area && index === 0 && <path d={pathFor(item.values, true)} fill={item.color} fillOpacity=".15" />}
+          <path d={pathFor(item.values)} fill="none" stroke={item.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+        </g>)}
+      </svg>
+      {series.length > 1 && <div className="metric-plot-legend">{series.map(item => <span key={item.name}><i style={{ background: item.color }} />{item.name}</span>)}</div>}
     </div>
   );
 }
@@ -2019,6 +2164,7 @@ function ChatView(props: {
               <div className="message-main">
                 <div className="message-meta"><strong>{message.role === 'assistant' ? configLabel() : 'You'}</strong><span>{message.timestamp ? formatRelative(message.timestamp) : ''}</span>{message.role === 'assistant' && message.iterations !== undefined && <span>{message.iterations} {message.iterations === 1 ? 'step' : 'steps'}</span>}</div>
                 {message.content && <MessageBody content={message.content} />}
+                {message.interrupted && <div className="message-interrupted" role="status">This reply did not finish. Your message is preserved; you can try again.</div>}
                 {!!message.toolCalls?.length && (
                   <details className="tool-activity">
                     <summary><Wrench size={14} />{message.toolCalls.length} {message.toolCalls.length === 1 ? 'tool action' : 'tool actions'}<ChevronDown size={14} /></summary>
@@ -2347,6 +2493,30 @@ function SettingsView({ config, status }: { config: GatewayConfig | null; status
   const [lanToken, setLanToken] = useState('');
   const [tokenError, setTokenError] = useState('');
   const [tokenLoading, setTokenLoading] = useState(false);
+  const [firewallStatus, setFirewallStatus] = useState('');
+  const [firewallLoading, setFirewallLoading] = useState(false);
+
+  const configureLanFirewall = async () => {
+    if (!window.symbioteDesktop) return;
+    setFirewallLoading(true);
+    setFirewallStatus('');
+    try {
+      const result = await window.symbioteDesktop.requestLanAccess();
+      setFirewallStatus(result.status === 'configured'
+        ? 'Local-network access is allowed by Windows Firewall.'
+        : result.status === 'declined'
+          ? 'Access remains limited by Windows Firewall; the desktop app still works locally.'
+          : result.status === 'loopback'
+            ? 'The gateway is bound to this computer only; no firewall rule is needed.'
+            : result.status === 'unsupported'
+              ? 'Windows Firewall settings are available only in the Windows desktop app.'
+              : 'The firewall rule was not changed. Local access remains available.');
+    } catch (failure) {
+      setFirewallStatus(failure instanceof Error ? failure.message : 'Could not configure Windows Firewall.');
+    } finally {
+      setFirewallLoading(false);
+    }
+  };
 
   const showLanToken = async () => {
     setTokenLoading(true);
@@ -2406,6 +2576,13 @@ function SettingsView({ config, status }: { config: GatewayConfig | null; status
           <button className="button button-secondary" type="button" disabled={tokenLoading} onClick={() => void showLanToken()}>{tokenLoading ? <LoaderCircle size={14} className="spin" /> : <ShieldCheck size={14} />}{tokenLoading ? 'Loading token' : 'Reveal LAN token'}</button>
         )}
         {tokenError && <p className="settings-token-error" role="alert">{tokenError}</p>}
+        {window.symbioteDesktop && <div className="settings-firewall">
+          <button className="button button-secondary" type="button" disabled={firewallLoading} onClick={() => void configureLanFirewall()}>
+            {firewallLoading ? <LoaderCircle size={14} className="spin" /> : <ShieldCheck size={14} />}
+            {firewallLoading ? 'Waiting for permission' : 'Configure Windows Firewall'}
+          </button>
+          {firewallStatus && <p className="settings-token-error" role="status">{firewallStatus}</p>}
+        </div>}
       </section>
       <div className="notice notice-info"><ShieldCheck size={16} /><span>Credentials are never sent to the browser. For safety, configuration changes are made in your local config file—not through this page.</span></div>
     </div>
