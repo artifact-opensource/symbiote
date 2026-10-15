@@ -4,6 +4,7 @@ param(
   [string]$DataDir = (Join-Path $env:ProgramData 'Symbiote'),
   [string]$NssmPath = '',
   [string]$NodePath = '',
+  [string]$SeedDirectory = '',
   [string]$ServiceName = 'SymbioteGateway'
 )
 
@@ -22,7 +23,36 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
   throw 'Install the Symbiote service from an elevated PowerShell window.'
 }
 
+$installLogDirectory = Join-Path $DataDir 'logs'
+New-Item -ItemType Directory -Path $installLogDirectory -Force | Out-Null
+$script:transcriptStarted = $false
+Start-Transcript -Path (Join-Path $installLogDirectory 'service-install.log') -Append | Out-Null
+$script:transcriptStarted = $true
+trap {
+  if ($script:transcriptStarted) {
+    Stop-Transcript | Out-Null
+    $script:transcriptStarted = $false
+  }
+  throw
+}
+
+$runningGateways = @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'node.exe'" |
+  Where-Object { $_.CommandLine -match 'dist[\\/]+gateway[\\/]+daemon\.js' })
+if ($runningGateways.Count -gt 0) {
+  $processIds = ($runningGateways | ForEach-Object ProcessId) -join ', '
+  throw "Stop existing Symbiote gateway process(es) ($processIds) before installing the service."
+}
+
 $InstallDir = (Resolve-Path -LiteralPath $InstallDir).Path
+if ($SeedDirectory) {
+  if (-not (Test-Path -LiteralPath $SeedDirectory -PathType Container)) {
+    throw "Seed directory not found: $SeedDirectory"
+  }
+  $SeedDirectory = (Resolve-Path -LiteralPath $SeedDirectory).Path
+  if (-not (Test-Path -LiteralPath (Join-Path $SeedDirectory 'symbiote.json') -PathType Leaf)) {
+    throw "Seed directory does not contain symbiote.json: $SeedDirectory"
+  }
+}
 if (-not $ConfigPath) {
   $ConfigPath = Join-Path $DataDir 'symbiote.json'
 }
@@ -60,16 +90,25 @@ if ($service) {
 
 New-Item -ItemType Directory -Path $DataDir, $LogDir, (Split-Path -Parent $ConfigPath), (Join-Path $DataDir 'workspace'), (Join-Path $DataDir 'sessions') -Force | Out-Null
 if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
-  $examplePath = Join-Path $InstallDir 'symbiote.example.json'
-  if (-not (Test-Path -LiteralPath $examplePath -PathType Leaf)) {
-    throw "Neither a config file nor the example config exists: $ConfigPath"
+  $seedConfig = if ($SeedDirectory) { Join-Path $SeedDirectory 'symbiote.json' } else { '' }
+  if ($seedConfig) {
+    Copy-Item -LiteralPath $seedConfig -Destination $ConfigPath
+    $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+    $config.workspace = '.\workspace'
+    $config.sessionsDir = '.\sessions'
+    $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
   }
+  else {
+    $examplePath = Join-Path $InstallDir 'symbiote.example.json'
+    if (-not (Test-Path -LiteralPath $examplePath -PathType Leaf)) {
+      throw "Neither a seed config nor the example config exists: $ConfigPath"
+    }
 
-  $config = Get-Content -LiteralPath $examplePath -Raw | ConvertFrom-Json
-  $config.workspace = '.\workspace'
-  $config.sessionsDir = '.\sessions'
-  New-Item -ItemType Directory -Path (Join-Path $DataDir 'workspace'), (Join-Path $DataDir 'sessions') -Force | Out-Null
-  $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+    $config = Get-Content -LiteralPath $examplePath -Raw | ConvertFrom-Json
+    $config.workspace = '.\workspace'
+    $config.sessionsDir = '.\sessions'
+    $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+  }
 }
 else {
   $configDirectory = Split-Path -Parent $ConfigPath
@@ -80,6 +119,11 @@ else {
 
 $configDirectory = Split-Path -Parent $ConfigPath
 $environmentFile = Join-Path $configDirectory '.env'
+$seedEnvironment = if ($SeedDirectory) { Join-Path $SeedDirectory '.env' } else { '' }
+if (-not (Test-Path -LiteralPath $environmentFile -PathType Leaf) -and
+    $seedEnvironment -and (Test-Path -LiteralPath $seedEnvironment -PathType Leaf)) {
+  Copy-Item -LiteralPath $seedEnvironment -Destination $environmentFile
+}
 if (-not (Test-Path -LiteralPath $environmentFile -PathType Leaf)) {
   [IO.File]::WriteAllText($environmentFile, "# Add provider and channel credentials here.`r`n")
 }
@@ -110,6 +154,12 @@ try {
   Invoke-Nssm @('set', $ServiceName, 'AppRotateBytes', '10485760')
   Invoke-Nssm @('set', $ServiceName, 'AppEnvironmentExtra', 'NODE_ENV=production')
 
+  $serviceControl = Join-Path $env:SystemRoot 'System32\sc.exe'
+  & $serviceControl failure $ServiceName 'reset=' '86400' 'actions=' 'restart/5000/restart/5000/restart/5000' | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Could not configure Windows Service Control Manager recovery for '$ServiceName'."
+  }
+
   Start-Service -Name $ServiceName
   $service = Get-Service -Name $ServiceName
   $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(30))
@@ -126,3 +176,5 @@ Write-Host "Symbiote service '$ServiceName' is running as LocalSystem."
 Write-Host "Config: $ConfigPath"
 Write-Host "Data:   $DataDir"
 Write-Host "Logs:   $LogDir"
+Stop-Transcript | Out-Null
+$script:transcriptStarted = $false

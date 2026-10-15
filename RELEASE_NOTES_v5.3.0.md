@@ -58,6 +58,9 @@ a bundled Node.js runtime and NSSM-managed gateway service with automatic crash 
 Configuration, credentials, workspace, sessions, and rotated logs are kept under
 `%ProgramData%\Symbiote` and are preserved on uninstall. The machine-wide service runs
 as LocalSystem; review the Windows production deployment instructions before installing.
+To initialize it from an existing checkout without bundling credentials into the MSI,
+pass `SYMBIOTE_SEED_DIRECTORY="C:\path\to\symbiote"` to `msiexec`. Existing ProgramData
+configuration is preserved during upgrades.
 
 On Windows, let `exec` start in the configured workspace or pass its `workdir` parameter. When explicitly using Git Bash, use `/c/...` paths rather than Windows backslashes or assumed Linux directories.
 

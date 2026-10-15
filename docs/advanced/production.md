@@ -91,7 +91,22 @@ after five seconds; Windows Service Control Manager recovery also restarts a fai
 service wrapper. The installer keeps configuration, credentials, sessions, workspace,
 and logs under `%ProgramData%\Symbiote`; uninstalling the MSI preserves that data.
 
-The initial `.env` is empty. Add provider keys and channel credentials to
+To initialize the installed service from a source checkout, pass the checkout as the
+seed directory when installing. The installer copies `symbiote.json` and `.env` into
+the protected ProgramData directory; it does not package those files into the MSI.
+Existing ProgramData configuration is preserved on upgrades.
+
+```powershell
+node .\dist\index.js stop
+msiexec /i .\dist\windows-installer\Symbiote-5.3.0-x64.msi SYMBIOTE_SEED_DIRECTORY="C:\workspace\symbiote"
+```
+
+Stop an already-running gateway before installation; the service installer refuses
+to proceed while another Symbiote daemon is active, avoiding a port conflict or two
+competing gateway processes.
+
+If no seed directory is supplied, the service starts with the example configuration.
+Add provider keys and channel credentials to
 `%ProgramData%\Symbiote\.env`, then restart the service from an elevated PowerShell:
 
 ```powershell
@@ -102,7 +117,10 @@ Get-Content "$env:ProgramData\Symbiote\logs\gateway.stdout.log" -Tail 50
 
 Build the MSI with `npm run build:msi`; it downloads pinned WiX, Node.js, and NSSM
 archives and verifies each SHA-256 digest before packaging. The output is written to
-`dist\windows-installer`. To install the current checkout as a service instead, run
+`dist\windows-installer`. This deployment runs the packaged, protected application
+from Program Files; use the source-checkout script below only for a trusted development
+machine, because LocalSystem executes the checkout's code with full machine privileges.
+To install the current checkout as a service instead, run
 `scripts\windows\install-service.ps1` from an elevated PowerShell; remove only the
 service while preserving its state with `scripts\windows\uninstall-service.ps1`.
 

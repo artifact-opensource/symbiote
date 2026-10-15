@@ -1,6 +1,7 @@
 param(
   [string]$OutputDirectory = '',
   [string]$WixDirectory = '',
+  [string]$DependencyCacheDirectory = '',
   [switch]$SkipBuild
 )
 
@@ -12,6 +13,9 @@ if (-not $OutputDirectory) {
   $OutputDirectory = Join-Path $repositoryRoot 'dist\windows-installer'
 }
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+if ($DependencyCacheDirectory) {
+  $DependencyCacheDirectory = (Resolve-Path -LiteralPath $DependencyCacheDirectory).Path
+}
 $workDirectory = Join-Path ([IO.Path]::GetTempPath()) "symbiote-msi-$([Guid]::NewGuid().ToString('N'))"
 
 $nodeVersion = '26.7.0'
@@ -23,10 +27,18 @@ $wixUrl = 'https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix31
 $wixSha256 = '2C1888D5D1DBA377FC7FA14444CF556963747FF9A0A289A3599CF09DA03B9E2E'
 
 function Get-VerifiedArchive([string]$Url, [string]$Destination, [string]$ExpectedSha256) {
-  Write-Host "Downloading $([IO.Path]::GetFileName($Destination))"
-  & curl.exe --retry 5 --retry-all-errors --retry-delay 2 --location --fail --silent --show-error --max-time 300 $Url --output $Destination
-  if ($LASTEXITCODE -ne 0) {
-    throw "Download failed for $Url (curl exit $LASTEXITCODE)."
+  $archiveName = [IO.Path]::GetFileName($Destination)
+  $cachedArchive = if ($DependencyCacheDirectory) { Join-Path $DependencyCacheDirectory $archiveName } else { '' }
+  if ($cachedArchive -and (Test-Path -LiteralPath $cachedArchive -PathType Leaf)) {
+    Write-Host "Using cached $archiveName"
+    Copy-Item -LiteralPath $cachedArchive -Destination $Destination
+  }
+  else {
+    Write-Host "Downloading $archiveName"
+    & curl.exe --retry 5 --retry-all-errors --retry-delay 2 --location --fail --silent --show-error --max-time 300 $Url --output $Destination
+    if ($LASTEXITCODE -ne 0) {
+      throw "Download failed for $Url (curl exit $LASTEXITCODE)."
+    }
   }
 
   $actualSha256 = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
@@ -39,10 +51,9 @@ try {
   New-Item -ItemType Directory -Path $workDirectory -Force | Out-Null
   $downloads = Join-Path $workDirectory 'downloads'
   $appSource = Join-Path $workDirectory 'app'
-  $dataSource = Join-Path $workDirectory 'data'
   $wixSource = Join-Path $workDirectory 'wix'
   $objectDirectory = Join-Path $workDirectory 'obj'
-  New-Item -ItemType Directory -Path $downloads, $appSource, $dataSource, $objectDirectory -Force | Out-Null
+  New-Item -ItemType Directory -Path $downloads, $appSource, $objectDirectory -Force | Out-Null
 
   if (-not $SkipBuild) {
     Push-Location $repositoryRoot
@@ -71,6 +82,11 @@ try {
       throw "Required application input is missing: $sourcePath"
     }
     Copy-Item -LiteralPath $sourcePath -Destination $appSource -Recurse -Force
+  }
+
+  $stagedInstallerDirectory = Join-Path $appSource 'dist\windows-installer'
+  if (Test-Path -LiteralPath $stagedInstallerDirectory -PathType Container) {
+    Remove-Item -LiteralPath $stagedInstallerDirectory -Recurse -Force
   }
 
   $scriptStage = Join-Path $appSource 'scripts\windows'
@@ -117,12 +133,6 @@ try {
     }
   }
 
-  $config = Get-Content -LiteralPath (Join-Path $appSource 'symbiote.example.json') -Raw | ConvertFrom-Json
-  $config.workspace = '.\workspace'
-  $config.sessionsDir = '.\sessions'
-  $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath (Join-Path $dataSource 'symbiote.json') -Encoding UTF8
-  [IO.File]::WriteAllText((Join-Path $dataSource '.env'), "# Add provider and channel credentials here.`r`n")
-
   $package = Get-Content -LiteralPath (Join-Path $repositoryRoot 'package.json') -Raw | ConvertFrom-Json
   $version = [Version]$package.version
   $versionArgument = '{0}.{1}.{2}' -f $version.Major, $version.Minor, $version.Build
@@ -141,7 +151,6 @@ try {
     & (Join-Path $WixDirectory 'candle.exe') -nologo `
       "-dProductVersion=$versionArgument" `
       "-dAppSource=$appSource" `
-      "-dDataSource=$dataSource" `
       "-dNssmSource=$nssmExecutable" `
       -ext (Join-Path $WixDirectory 'WixUtilExtension.dll') `
       -ext (Join-Path $WixDirectory 'WixUIExtension.dll') `
