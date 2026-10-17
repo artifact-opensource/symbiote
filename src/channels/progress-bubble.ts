@@ -73,6 +73,9 @@ export class ToolProgressBubble {
     private done = false;
     private streamedText = '';
     private currentTool = '';
+    private flushPromise: Promise<boolean> | null = null;
+    private flushPending = false;
+    private forcePending = false;
 
     constructor(
         private deps: ProgressDeps,
@@ -117,6 +120,8 @@ export class ToolProgressBubble {
         this.closed = true;
         this.done = true;
         if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+        if (this.flushPromise) await this.flushPromise;
+        if (this.timer) { clearTimeout(this.timer); this.timer = null; }
         const canDeliverFinal = typeof finalText === 'string'
             && finalText.length <= TEXT_BUDGET
             && this.messageId !== null
@@ -148,7 +153,31 @@ export class ToolProgressBubble {
         return header + '\n' + ls.join('\n');
     }
 
-    private async flush(force: boolean): Promise<boolean> {
+    private flush(force: boolean): Promise<boolean> {
+        if (this.flushPromise) {
+            this.flushPending = true;
+            this.forcePending ||= force;
+            return this.flushPromise;
+        }
+
+        this.flushPromise = (async () => {
+            let forceFlush = force;
+            let result = false;
+            do {
+                this.flushPending = false;
+                forceFlush ||= this.forcePending;
+                this.forcePending = false;
+                result = await this.flushOnce(forceFlush);
+                forceFlush = false;
+            } while (this.flushPending);
+            return result;
+        })().finally(() => {
+            this.flushPromise = null;
+        });
+        return this.flushPromise;
+    }
+
+    private async flushOnce(force: boolean): Promise<boolean> {
         if (this.deps.edit === null && this.messageId !== null) return false; // no edit path available
         const now = Date.now();
         if (!force && this.messageId !== null) {
