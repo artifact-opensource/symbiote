@@ -59,7 +59,10 @@ function firewallScriptPath() {
 function installedDataDirectory() {
   if (process.platform !== 'win32') return undefined;
   try {
-    const registry = execFileSync('reg.exe', ['query', 'HKLM\\Software\\Artifact Virtual\\Symbiote', '/v', 'DataDirectory'], { encoding: 'utf8' });
+    const registry = execFileSync('reg.exe', ['query', 'HKLM\\Software\\Artifact Virtual\\Symbiote', '/v', 'DataDirectory'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     return registry.match(/DataDirectory\s+REG_SZ\s+(.+)/i)?.[1]?.trim();
   } catch (error) {
     if (error.status !== 1 && error.code !== 'ENOENT') console.error('Could not read the Symbiote data directory from the registry:', error);
