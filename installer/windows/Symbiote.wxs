@@ -84,9 +84,9 @@
       </Component>
     </DirectoryRef>
 
-    <CustomAction Id="LaunchSymbiote"
-                  FileKey="ElectronExecutable"
-                  ExeCommand="&quot;[INSTALLFOLDER]desktop\main.cjs&quot;"
+    <CustomAction Id="LaunchSymbioteSetup"
+                  Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[INSTALLFOLDER]node.exe&quot; &quot;[INSTALLFOLDER]dist\index.js&quot; init --ui --config-dir=&quot;[DATAFOLDER]&quot;"
                   Execute="immediate"
                   Impersonate="yes"
                   Return="asyncNoWait" />
@@ -161,7 +161,7 @@
     <InstallExecuteSequence>
       <Custom Action="InstallSymbioteService" After="InstallFiles">NOT Installed</Custom>
       <Custom Action="UninstallSymbioteService" Before="RemoveFiles">REMOVE~=&quot;ALL&quot;</Custom>
-      <Custom Action="LaunchSymbiote" After="InstallFinalize">NOT Installed</Custom>
+      <Custom Action="LaunchSymbioteSetup" After="InstallFinalize">NOT Installed</Custom>
     </InstallExecuteSequence>
   </Product>
 </Wix>

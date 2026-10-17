@@ -11,6 +11,13 @@ import { fileURLToPath } from 'node:url';
 import { palette, ok } from '../cli/brand.js';
 import { loadConfig } from '../config/config.js';
 import { APP_VERSION } from '../meta/version.js';
+import type { IntegrationProvider } from '../security/credential-vault.js';
+import { stripBlinkControlMessages } from '../agent/blink.js';
+import type { CronAlert, CronJob, CreateCronJobInput, UpdateCronJobInput } from '../cron/manager.js';
+import type { AgentThread, CreateThreadInput, ThreadContact } from '../threads/manager.js';
+import type { ProjectTask, ProjectTaskPatch } from '../agent/workspace-registry.js';
+import type { AppearanceSettings } from '../appearance/settings.js';
+import type { ReleaseDownloadStatus } from '../updates/release-updater.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -31,6 +38,7 @@ interface Message {
   timestamp: number;
   tokensIn?: number;
   tokensOut?: number;
+  tokenCountsEstimated?: boolean;
   latencyMs?: number;
   toolCalls?: ToolCall[];
   iterations?: number;
@@ -60,20 +68,77 @@ interface SubAgent {
 
 export interface WebControlPlane {
   getStatus: () => Record<string, unknown>;
+  getUpdateDownload?: () => ReleaseDownloadStatus;
+  prepareUpdateDownload?: () => Promise<ReleaseDownloadStatus>;
+  getUpdateInstallerPath?: () => string | undefined;
   getConfig: () => Record<string, unknown>;
+  getAppearanceSettings: () => { settings: AppearanceSettings; initialized: boolean };
+  updateAppearanceSettings: (settings: unknown) => AppearanceSettings;
   getSessions: () => unknown[];
   getSessionMessages: (id: string) => unknown[] | null;
-  createSession: (name?: string) => unknown;
+  createSession: (name?: string, options?: { projectId?: string; agentId?: string }) => unknown;
+  getProjects: (includeArchived?: boolean) => unknown[];
+  archiveProject: (projectId: string) => unknown;
+  restoreProject: (projectId: string) => unknown;
+  updateProject: (projectId: string, patch: { name?: string; scope?: string }) => unknown;
+  deleteArchivedProject: (projectId: string) => boolean;
+  getProjectFiles: (projectId: string) => unknown[];
+  getProjectStorage: (projectId: string) => { fileCount: number; directoryCount: number; bytes: number };
+  readProjectFile: (projectId: string, filePath: string) => unknown;
+  createProjectFile: (projectId: string, filePath: string, content: string) => unknown;
+  createProjectDirectory: (projectId: string, filePath: string) => unknown;
+  moveProjectEntry: (projectId: string, sourcePath: string, destinationPath: string) => unknown;
+  deleteProjectEntry: (projectId: string, filePath: string) => boolean;
+  writeProjectFile: (projectId: string, filePath: string, content: string) => unknown;
+  deleteProjectFile: (projectId: string, filePath: string) => boolean;
+  runProjectCommand: (projectId: string, command: string, timeout: number) => Promise<string>;
+  startProjectTerminal: (projectId: string) => { terminalId: string; pid: number };
+  writeProjectTerminal: (projectId: string, terminalId: string, input: string) => void;
+  pollProjectTerminal: (projectId: string, terminalId: string) => { output: string; running: boolean; exitCode: number | null; truncated: boolean };
+  killProjectTerminal: (projectId: string, terminalId: string) => Promise<boolean>;
+  getProjectTasks: (projectId: string) => ProjectTask[];
+  addProjectTask: (projectId: string, title: string, description?: string, assignedAgentId?: string) => ProjectTask;
+  updateProjectTask: (projectId: string, id: string, patch: ProjectTaskPatch) => ProjectTask;
+  deleteProjectTask: (projectId: string, id: string) => boolean;
+  getWorkspaceAgents: (projectId?: string) => unknown[];
+  createProject: (name: string, scope?: string) => unknown;
+  createWorkspaceAgent: (input: { projectId: string; name: string; emoji: string; instructions: string }) => unknown;
   hasSession: (id: string) => boolean;
   archiveSession: (id: string) => boolean;
   getTools: () => unknown[];
+  getIntegrationStatus: () => Record<IntegrationProvider, boolean>;
+  saveIntegrationCredentials: (provider: IntegrationProvider, credentials: unknown) => void;
+  deleteIntegrationCredentials: (provider: IntegrationProvider) => void;
+  testIntegration: (provider: IntegrationProvider) => Promise<void>;
+  getCronState: () => { jobs: CronJob[]; alerts: CronAlert[]; systemPrompt: string };
+  createCronJob: (input: CreateCronJobInput) => CronJob;
+  updateCronJob: (id: string, patch: UpdateCronJobInput) => CronJob;
+  deleteCronJob: (id: string) => boolean;
+  retryCronAlert: (id: string) => CronAlert;
+  updateDefaultAgentPrompt: (prompt: string) => string;
+  getThreads: (includeArchived?: boolean) => AgentThread[];
+  getUnreadThreadRequests: () => unknown[];
+  createThread: (input: CreateThreadInput) => AgentThread;
+  postThreadMessage: (id: string, body: string, mentions?: string[]) => AgentThread;
+  markThreadRead: (id: string, postId?: string) => AgentThread;
+  reactToThreadPost: (id: string, postId: string, emoji: string) => AgentThread;
+  archiveThread: (id: string) => boolean;
+  createThreadContact: (label: string) => { id: string; label: string; createdAt: number; token: string };
+  getThreadContacts: () => Array<Omit<ThreadContact, 'tokenHash' | 'postTimes'>>;
+  deleteThreadContact: (id: string) => boolean;
+  authenticateThreadContact: (token: string) => { id: string; label: string } | undefined;
+  createExternalThread: (contact: { id: string; label: string }, title: string, body: string) => AgentThread;
+  getExternalThreads: (contactId: string) => AgentThread[];
+  getExternalThread: (contactId: string, threadId: string) => AgentThread | undefined;
+  postExternalThreadMessage: (contact: { id: string; label: string }, threadId: string, body: string) => AgentThread;
+  retryThreadNotification: (id: string) => unknown;
   chat: (
-    request: { text: string; sessionId: string; senderId: string; senderName: string; source: string },
+    request: { text: string; sessionId: string; senderId: string; senderName: string; source: string; googleWorkspaceAccessToken?: string },
     emit?: (event: Record<string, unknown>) => void,
   ) => Promise<unknown>;
   interruptSession: (id: string) => boolean;
   getRuns: () => unknown[];
-  startRun: (request: { name?: string; prompt: string; sessionId: string }) => unknown;
+  startRun: (request: { name?: string; prompt: string; sessionId: string; googleWorkspaceAccessToken?: string }) => unknown;
   stopRun: (id: string) => boolean;
   restartRun: (id: string) => unknown | null;
   guideRun: (id: string, message: string) => unknown | null;
@@ -83,6 +148,7 @@ export interface WebControlPlane {
     soulContent: string;
     agentsContent: string;
     instructions: string;
+    avatarDataUrl?: string | null;
   }) => unknown;
   getAgents: () => unknown[];
   controlAgent: (id: string, action: 'stop' | 'steer', message?: string) => boolean;
@@ -142,11 +208,27 @@ function json(res: http.ServerResponse, data: unknown, status = 200): void {
   res.end(JSON.stringify(data));
 }
 
-function readBody(req: http.IncomingMessage): Promise<string> {
+function readBody(req: http.IncomingMessage, maxBytes = Number.POSITIVE_INFINITY): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (c: Buffer) => chunks.push(c));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString()));
+    let bytes = 0;
+    let settled = false;
+    req.on('data', (c: Buffer) => {
+      bytes += c.length;
+      if (bytes > maxBytes) {
+        if (!settled) {
+          settled = true;
+          chunks.length = 0;
+          reject(new Error('Request body is too large.'));
+          req.resume();
+        }
+        return;
+      }
+      if (!settled) chunks.push(c);
+    });
+    req.on('end', () => {
+      if (!settled) resolve(Buffer.concat(chunks).toString());
+    });
     req.on('error', reject);
   });
 }
@@ -172,6 +254,10 @@ function matchRoute(pattern: string, pathname: string): Record<string, string> |
     }
   }
   return params;
+}
+
+function isIntegrationProvider(value: string): value is IntegrationProvider {
+  return value === 'azure' || value === 'oci' || value === 'n8n' || value === 'kaggle';
 }
 
 // ── Providers (simulated for now — will integrate real APIs) ───────────────
@@ -243,6 +329,7 @@ async function streamChat(
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(payload),
+          'Accept': 'text/event-stream',
           'Authorization': `Bearer ${apiKey}`,
         },
         timeout: 86400000, // 24h timeout for long agent runs
@@ -259,16 +346,16 @@ async function streamChat(
       const errBody = Buffer.concat(chunks).toString();
       let errMsg = 'API error';
       try { errMsg = JSON.parse(errBody).error || errMsg; } catch { /* ignore */ }
-      res.write(`data: ${JSON.stringify({ type: 'text', content: `Error: ${errMsg}`, id: assistantId })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: 'done', message: { latencyMs: Date.now() - startMs } })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'error', error: `API error: ${errMsg}` })}\n\n`);
       res.end();
       return;
     }
 
     // Forward SSE events from real API to webchat client
     let fullContent = '';
-    let doneMeta: { latencyMs?: number; iterations?: number; toolCalls?: ToolCall[]; temperatureHistory?: Array<{ iteration: number; category: string; temperature: number }> } = {};
+    let doneMeta: { latencyMs?: number; iterations?: number; tokensIn?: number; tokensOut?: number; toolCalls?: ToolCall[]; temperatureHistory?: Array<{ iteration: number; category: string; temperature: number }> } = {};
     let buffer = '';
+    let apiError: string | undefined;
 
     apiRes.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
@@ -282,15 +369,18 @@ async function streamChat(
 
         try {
           const data = JSON.parse(dataStr);
-          if (data.type === 'text') {
-            fullContent += data.content;
-            // Forward with our assistant ID
-            res.write(`data: ${JSON.stringify({ type: 'text', content: data.content, id: assistantId })}\n\n`);
+          if (data.type === 'text' || data.type === 'text_delta') {
+            const text = typeof data.text === 'string' ? data.text : String(data.content ?? '');
+            fullContent += text;
+            res.write(`data: ${JSON.stringify({ type: 'text_delta', text, id: assistantId })}\n\n`);
+          } else if (data.type === 'thinking_delta') {
+            res.write(`data: ${JSON.stringify(data)}\n\n`);
           } else if (data.type === 'tool_start' || data.type === 'tool_end') {
-            // Forward tool call events as-is
             res.write(`data: ${JSON.stringify(data)}\n\n`);
           } else if (data.type === 'done') {
-            doneMeta = data.message ?? {};
+            doneMeta = data.message ?? data.result ?? {};
+          } else if (data.type === 'error') {
+            apiError = typeof data.error === 'string' ? data.error : 'The agent turn failed.';
           }
         } catch { /* skip unparseable lines */ }
       }
@@ -300,6 +390,7 @@ async function streamChat(
       apiRes.on('end', resolve);
       apiRes.on('error', () => resolve());
     });
+    if (apiError) throw new Error(apiError);
 
     // Process any remaining buffer
     if (buffer.startsWith('data: ')) {
@@ -307,13 +398,13 @@ async function streamChat(
       if (dataStr) {
         try {
           const data = JSON.parse(dataStr);
-          if (data.type === 'text') fullContent += data.content;
+          if (data.type === 'text' || data.type === 'text_delta') fullContent += typeof data.text === 'string' ? data.text : String(data.content ?? '');
         } catch { /* ignore */ }
       }
     }
 
     const latency = Date.now() - startMs;
-    const tokensOut = Math.ceil(fullContent.length / 4);
+    const tokensOut = typeof doneMeta.tokensOut === 'number' ? doneMeta.tokensOut : Math.ceil(fullContent.length / 4);
     totalTokens += (userMsg.tokensIn ?? 0) + tokensOut;
     session.tokensUsed += (userMsg.tokensIn ?? 0) + tokensOut;
 
@@ -324,6 +415,7 @@ async function streamChat(
       timestamp: Date.now(),
       tokensIn: userMsg.tokensIn,
       tokensOut,
+      tokenCountsEstimated: typeof doneMeta.tokensOut !== 'number',
       latencyMs: doneMeta.latencyMs ?? latency,
       toolCalls: Array.isArray(doneMeta.toolCalls) ? doneMeta.toolCalls : [],
       iterations: typeof doneMeta.iterations === 'number' ? doneMeta.iterations : undefined,
@@ -341,9 +433,7 @@ async function streamChat(
     console.error(`  [symbiote-web] Chat proxy error: ${errMsg}`);
 
     // Send error as assistant message so user sees it
-    const errorContent = `Connection to agent failed: ${errMsg}. Make sure the Symbiote agent is running.`;
-    res.write(`data: ${JSON.stringify({ type: 'text', content: errorContent, id: assistantId })}\n\n`);
-    res.write(`data: ${JSON.stringify({ type: 'done', message: { id: assistantId, role: 'assistant', content: errorContent, timestamp: Date.now(), latencyMs: latency } })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: 'error', error: `Connection to agent failed: ${errMsg}. Make sure the Symbiote agent is running.` })}\n\n`);
     res.end();
   }
 }
@@ -375,12 +465,22 @@ function serveStatic(res: http.ServerResponse, filePath: string): void {
 // ── Router ─────────────────────────────────────────────────────────────────
 
 const SERVER_DIR = path.resolve(import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url)));
-const WEBAPP_DIR = path.resolve(SERVER_DIR, '../../webapp/dist');
+const workspaceWebappDir = path.resolve(SERVER_DIR, '../../webapp/dist');
+const bundledWebappDir = path.resolve(SERVER_DIR, '../webapp/dist');
+const WEBAPP_DIR = fs.existsSync(path.join(workspaceWebappDir, 'index.html'))
+  ? workspaceWebappDir
+  : bundledWebappDir;
 const LEGACY_WEB_DIR = path.resolve(SERVER_DIR, '../../web');
 
 function isLoopbackRequest(req: http.IncomingMessage): boolean {
   const address = req.socket.remoteAddress;
   return address === '127.0.0.1' || address === '::1' || (address?.startsWith('::ffff:127.') ?? false);
+}
+
+function isSameOriginRequest(req: http.IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return isLoopbackRequest(req);
+  return origin === `http://${req.headers.host ?? ''}`;
 }
 
 function hasValidAccessToken(req: http.IncomingMessage, expected: string): boolean {
@@ -430,7 +530,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   if (method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     });
     res.end();
@@ -455,6 +555,57 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     return json(res, { token: control.webAccessToken ?? '' });
   }
 
+  if (control && pathname.startsWith('/api/external/threads')) {
+    const bearer = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? '';
+    const contact = control.authenticateThreadContact(bearer);
+    if (!contact) return json(res, { error: 'A valid external contact token is required.' }, 401);
+    res.setHeader('Cache-Control', 'no-store');
+    if (method === 'GET' && pathname === '/api/external/threads') {
+      return json(res, control.getExternalThreads(contact.id));
+    }
+    if (method === 'POST' && pathname === '/api/external/threads') {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 20_000) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Thread request must be valid JSON.' }, 400);
+      }
+      const value = body as { title?: unknown; body?: unknown };
+      if (!value || typeof value !== 'object' || typeof value.title !== 'string' || typeof value.body !== 'string') {
+        return json(res, { error: 'Thread creation requires title and body strings.' }, 400);
+      }
+      try {
+        return json(res, control.createExternalThread(contact, value.title, value.body), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'External thread could not be created.' }, 400);
+      }
+    }
+    const externalPostRoute = matchRoute('/api/external/threads/:id/posts', pathname);
+    if (method === 'POST' && externalPostRoute) {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 20_000) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Thread post must be valid JSON.' }, 400);
+      }
+      const value = body as { body?: unknown };
+      if (!value || typeof value !== 'object' || typeof value.body !== 'string') {
+        return json(res, { error: 'A body string is required.' }, 400);
+      }
+      try {
+        return json(res, control.postExternalThreadMessage(contact, decodeURIComponent(externalPostRoute.id), value.body), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'External thread post could not be saved.' }, 400);
+      }
+    }
+    const externalGetRoute = matchRoute('/api/external/threads/:id', pathname);
+    if (method === 'GET' && externalGetRoute) {
+      const thread = control.getExternalThread(contact.id, decodeURIComponent(externalGetRoute.id));
+      return thread ? json(res, thread) : json(res, { error: 'Thread is unavailable to this external contact.' }, 404);
+    }
+    return json(res, { error: 'External thread route not found.' }, 404);
+  }
+
   if (control && pathname.startsWith('/api/')) {
     if (!isLoopbackRequest(req) && (!control.webAccessToken || !hasValidAccessToken(req, control.webAccessToken))) {
       return json(res, { error: 'A valid LAN access token is required.' }, 401);
@@ -463,16 +614,325 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     if (method === 'GET' && pathname === '/api/status') {
       return json(res, control.getStatus());
     }
+    if (pathname === '/api/update/download' && method === 'POST') {
+      if (!isSameOriginRequest(req)) return json(res, { error: 'Update downloads must be requested from the Symbiote Control Room.' }, 403);
+      if (!control.prepareUpdateDownload) return json(res, { error: 'Update downloads are unavailable in this runtime.' }, 501);
+      try {
+        return json(res, await control.prepareUpdateDownload(), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'The update could not be prepared.' }, 400);
+      }
+    }
+    if (pathname === '/api/update/installer' && method === 'GET') {
+      if (!isSameOriginRequest(req)) return json(res, { error: 'The installer can only be downloaded from the Symbiote Control Room.' }, 403);
+      const installerPath = control.getUpdateInstallerPath?.();
+      const download = control.getUpdateDownload?.();
+      if (!installerPath || download?.state !== 'ready' || !download.filename) {
+        return json(res, { error: 'No verified update installer is ready to download.' }, 409);
+      }
+      try {
+        const file = fs.createReadStream(installerPath);
+        const size = fs.statSync(installerPath).size;
+        res.writeHead(200, {
+          'Content-Type': 'application/x-msi',
+          'Content-Length': size,
+          'Content-Disposition': `attachment; filename="${download.filename}"`,
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        });
+        file.on('error', error => {
+          console.error('[update] Could not stream verified installer:', error);
+          if (!res.headersSent) json(res, { error: 'The verified installer could not be read.' }, 500);
+          else res.destroy(error);
+        });
+        file.pipe(res);
+        return;
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'The verified installer could not be opened.' }, 500);
+      }
+    }
+    if (method === 'GET' && pathname === '/api/appearance') {
+      res.setHeader('Cache-Control', 'no-store');
+      try {
+        return json(res, control.getAppearanceSettings());
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Appearance settings could not be loaded.' }, 500);
+      }
+    }
+    if (method === 'PUT' && pathname === '/api/appearance') {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 4_096) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Appearance settings must be valid JSON.' }, 400);
+      }
+      try {
+        res.setHeader('Cache-Control', 'no-store');
+        return json(res, { settings: control.updateAppearanceSettings(body), initialized: true });
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Appearance settings could not be saved.' }, 400);
+      }
+    }
     if (method === 'GET' && pathname === '/api/config') {
       return json(res, control.getConfig());
     }
+    if (method === 'GET' && pathname === '/api/integrations') {
+      return json(res, { providers: control.getIntegrationStatus() });
+    }
+    if (method === 'GET' && pathname === '/api/cron') {
+      res.setHeader('Cache-Control', 'no-store');
+      return json(res, control.getCronState());
+    }
+    if (method === 'GET' && pathname === '/api/threads') {
+      res.setHeader('Cache-Control', 'no-store');
+      return json(res, control.getThreads(url.searchParams.get('archived') === 'true'));
+    }
+    if (method === 'GET' && pathname === '/api/threads/requests') {
+      res.setHeader('Cache-Control', 'no-store');
+      return json(res, control.getUnreadThreadRequests());
+    }
+    if (method === 'POST' && pathname === '/api/threads') {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 30_000) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Thread request must be valid JSON.' }, 400);
+      }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return json(res, { error: 'A thread configuration object is required.' }, 400);
+      }
+      try {
+        return json(res, control.createThread(body as CreateThreadInput), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Thread could not be created.' }, 400);
+      }
+    }
+    if (method === 'GET' && pathname === '/api/threads/contacts') {
+      res.setHeader('Cache-Control', 'no-store');
+      return json(res, control.getThreadContacts());
+    }
+    if (method === 'POST' && pathname === '/api/threads/contacts') {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 10_000) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Contact request must be valid JSON.' }, 400);
+      }
+      const value = body as { label?: unknown };
+      if (!value || typeof value !== 'object' || typeof value.label !== 'string') {
+        return json(res, { error: 'A contact label is required.' }, 400);
+      }
+      try {
+        res.setHeader('Cache-Control', 'no-store');
+        return json(res, control.createThreadContact(value.label), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'External contact could not be created.' }, 400);
+      }
+    }
+    const threadContactRoute = matchRoute('/api/threads/contacts/:id', pathname);
+    if (method === 'DELETE' && threadContactRoute) {
+      return control.deleteThreadContact(decodeURIComponent(threadContactRoute.id))
+        ? json(res, { revoked: true })
+        : json(res, { error: 'External contact was not found or is already revoked.' }, 404);
+    }
+    const threadPostRoute = matchRoute('/api/threads/:id/posts', pathname);
+    if (method === 'POST' && threadPostRoute) {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 20_000) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Thread post must be valid JSON.' }, 400);
+      }
+      const value = body as { body?: unknown; mentions?: unknown };
+      if (!value || typeof value !== 'object' || typeof value.body !== 'string'
+        || (value.mentions !== undefined && (!Array.isArray(value.mentions) || value.mentions.some(item => typeof item !== 'string')))) {
+        return json(res, { error: 'A body string and optional agent-ID mentions are required.' }, 400);
+      }
+      try {
+        return json(res, control.postThreadMessage(decodeURIComponent(threadPostRoute.id), value.body, value.mentions as string[] | undefined), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Thread post could not be saved.' }, 400);
+      }
+    }
+    const threadReadRoute = matchRoute('/api/threads/:id/read', pathname);
+    if (method === 'POST' && threadReadRoute) {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 4_096) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Read receipt request must be valid JSON.' }, 400);
+      }
+      const value = body as { postId?: unknown };
+      if (!value || typeof value !== 'object' || (value.postId !== undefined && typeof value.postId !== 'string')) {
+        return json(res, { error: 'An optional postId string is required.' }, 400);
+      }
+      try {
+        return json(res, control.markThreadRead(decodeURIComponent(threadReadRoute.id), value.postId as string | undefined));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Thread read state could not be updated.' }, 404);
+      }
+    }
+    const threadReactionRoute = matchRoute('/api/threads/:id/reactions', pathname);
+    if (method === 'POST' && threadReactionRoute) {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 4_096) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Reaction request must be valid JSON.' }, 400);
+      }
+      const value = body as { postId?: unknown; emoji?: unknown };
+      if (!value || typeof value !== 'object' || typeof value.postId !== 'string' || typeof value.emoji !== 'string') {
+        return json(res, { error: 'A postId and emoji are required.' }, 400);
+      }
+      try {
+        return json(res, control.reactToThreadPost(decodeURIComponent(threadReactionRoute.id), value.postId, value.emoji));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Thread reaction could not be saved.' }, 400);
+      }
+    }
+    const threadRoute = matchRoute('/api/threads/:id', pathname);
+    if (threadRoute && method === 'GET') {
+      const threadId = decodeURIComponent(threadRoute.id);
+      const thread = control.getThreads(true).find(item => item.id === threadId);
+      if (thread && !thread.archivedAt) control.markThreadRead(threadId);
+      return thread ? json(res, thread) : json(res, { error: 'Thread not found.' }, 404);
+    }
+    if (threadRoute && method === 'DELETE') {
+      return control.archiveThread(decodeURIComponent(threadRoute.id))
+        ? json(res, { archived: true })
+        : json(res, { error: 'Thread not found or already archived.' }, 404);
+    }
+    const threadNotificationRoute = matchRoute('/api/threads/notifications/:id/retry', pathname);
+    if (method === 'POST' && threadNotificationRoute) {
+      try {
+        return json(res, control.retryThreadNotification(decodeURIComponent(threadNotificationRoute.id)));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Thread notification could not be retried.' }, 400);
+      }
+    }
+    if (method === 'POST' && pathname === '/api/cron/jobs') {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 30_000) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Cron job payload must be valid JSON.' }, 400);
+      }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return json(res, { error: 'Cron job payload must be a JSON object.' }, 400);
+      }
+      const input = body as Partial<CreateCronJobInput>;
+      if (typeof input.name !== 'string' || typeof input.prompt !== 'string' || !input.schedule) {
+        return json(res, { error: 'A job name, task prompt, and schedule are required.' }, 400);
+      }
+      try {
+        return json(res, control.createCronJob(input as CreateCronJobInput), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Cron job could not be created.' }, 400);
+      }
+    }
+    const cronJobRoute = matchRoute('/api/cron/jobs/:id', pathname);
+    if (cronJobRoute && method === 'PATCH') {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 30_000) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Cron job update must be valid JSON.' }, 400);
+      }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return json(res, { error: 'Cron job update must be a JSON object.' }, 400);
+      }
+      try {
+        return json(res, control.updateCronJob(decodeURIComponent(cronJobRoute.id), body as UpdateCronJobInput));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Cron job could not be updated.' }, 400);
+      }
+    }
+    if (cronJobRoute && method === 'DELETE') {
+      try {
+        return control.deleteCronJob(decodeURIComponent(cronJobRoute.id))
+          ? json(res, { deleted: true })
+          : json(res, { error: 'Cron job not found.' }, 404);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Cron job could not be deleted.' }, 400);
+      }
+    }
+    const cronAlertRoute = matchRoute('/api/cron/alerts/:id/retry', pathname);
+    if (cronAlertRoute && method === 'POST') {
+      try {
+        return json(res, control.retryCronAlert(decodeURIComponent(cronAlertRoute.id)));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Cron alert could not be retried.' }, 400);
+      }
+    }
+    if (method === 'PUT' && pathname === '/api/cron/default-prompt') {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 40_000) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Default agent prompt must be valid JSON.' }, 400);
+      }
+      if (!body || typeof body !== 'object' || Array.isArray(body) || typeof (body as { systemPrompt?: unknown }).systemPrompt !== 'string') {
+        return json(res, { error: 'A systemPrompt string is required.' }, 400);
+      }
+      try {
+        return json(res, { systemPrompt: control.updateDefaultAgentPrompt((body as { systemPrompt: string }).systemPrompt) });
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Default agent prompt could not be saved.' }, 400);
+      }
+    }
+    const integrationRoute = matchRoute('/api/integrations/:provider', pathname);
+    if (integrationRoute && isIntegrationProvider(integrationRoute.provider)) {
+      const provider = integrationRoute.provider;
+      if (method === 'POST') {
+        const rawBody = await readBody(req);
+        if (Buffer.byteLength(rawBody) > 300_000) {
+          return json(res, { error: 'Integration credentials request exceeds the 300 KB limit.' }, 413);
+        }
+        let body: unknown;
+        try {
+          body = JSON.parse(rawBody || '{}');
+        } catch {
+          return json(res, { error: 'Integration credentials must be valid JSON.' }, 400);
+        }
+        try {
+          control.saveIntegrationCredentials(provider, body);
+          res.setHeader('Cache-Control', 'no-store');
+          return json(res, { configured: true });
+        } catch (failure) {
+          return json(res, { error: failure instanceof Error ? failure.message : 'Invalid integration credentials.' }, 400);
+        }
+      }
+      if (method === 'DELETE') {
+        control.deleteIntegrationCredentials(provider);
+        return json(res, { configured: false });
+      }
+      if (method === 'GET') {
+        return json(res, { configured: control.getIntegrationStatus()[provider] });
+      }
+    }
+    const integrationTest = matchRoute('/api/integrations/:provider/test', pathname);
+    if (method === 'POST' && integrationTest && isIntegrationProvider(integrationTest.provider)) {
+      try {
+        await control.testIntegration(integrationTest.provider);
+        return json(res, { ok: true });
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Integration connection test failed.' }, 502);
+      }
+    }
     if (method === 'PUT' && pathname === '/api/identity') {
-      const body = JSON.parse(await readBody(req) || '{}') as {
+      let rawBody: string;
+      try {
+        rawBody = await readBody(req, 3_200_000);
+      } catch {
+        return json(res, { error: 'Identity update payload must be 3 MiB or smaller.' }, 413);
+      }
+      const body = JSON.parse(rawBody || '{}') as {
         name?: unknown;
         emoji?: unknown;
         soulContent?: unknown;
         agentsContent?: unknown;
         instructions?: unknown;
+        avatarDataUrl?: unknown;
       };
       if (typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 80) {
         return json(res, { error: 'Agent name must contain 1–80 characters.' }, 400);
@@ -489,13 +949,25 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       if (typeof body.instructions !== 'string' || body.instructions.length > 20_000) {
         return json(res, { error: 'Agent instructions must be 20,000 characters or fewer.' }, 413);
       }
-      return json(res, control.updateIdentity({
-        name: body.name.trim(),
-        emoji: body.emoji,
-        soulContent: body.soulContent,
-        agentsContent: body.agentsContent,
-        instructions: body.instructions,
-      }));
+      const avatarDataUrl = body.avatarDataUrl;
+      if (avatarDataUrl !== undefined && avatarDataUrl !== null && typeof avatarDataUrl !== 'string') {
+        return json(res, { error: 'Agent avatar must be a supported image of 2 MiB or smaller.' }, 400);
+      }
+      if (typeof avatarDataUrl === 'string' && avatarDataUrl.length > 2_800_000) {
+        return json(res, { error: 'Agent avatar must be a supported image of 2 MiB or smaller.' }, 413);
+      }
+      try {
+        return json(res, control.updateIdentity({
+          name: body.name.trim(),
+          emoji: body.emoji,
+          soulContent: body.soulContent,
+          agentsContent: body.agentsContent,
+          instructions: body.instructions,
+          ...(avatarDataUrl === undefined ? {} : { avatarDataUrl }),
+        }));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Agent identity could not be saved.' }, 400);
+      }
     }
     if (method === 'GET' && pathname === '/api/sessions') {
       return json(res, control.getSessions());
@@ -591,7 +1063,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       return json(res, control.getRuns());
     }
     if (method === 'POST' && pathname === '/api/runs') {
-      const body = JSON.parse(await readBody(req) || '{}') as { name?: unknown; prompt?: unknown; sessionId?: unknown };
+      const body = JSON.parse(await readBody(req) || '{}') as { name?: unknown; prompt?: unknown; sessionId?: unknown; googleWorkspaceAccessToken?: unknown };
       if (typeof body.prompt !== 'string' || !body.prompt.trim()) {
         return json(res, { error: 'A non-empty task prompt is required.' }, 400);
       }
@@ -604,7 +1076,12 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       const sessionId = body.sessionId.trim();
       if (!control.hasSession(sessionId)) return json(res, { error: 'Conversation session was not found.' }, 404);
       const name = typeof body.name === 'string' ? body.name.trim().slice(0, 120) : undefined;
-      return json(res, control.startRun({ name, prompt: body.prompt.trim(), sessionId }), 201);
+      return json(res, control.startRun({
+        name,
+        prompt: body.prompt.trim(),
+        sessionId,
+        ...(typeof body.googleWorkspaceAccessToken === 'string' ? { googleWorkspaceAccessToken: body.googleWorkspaceAccessToken } : {}),
+      }), 201);
     }
     const restartRunAction = matchRoute('/api/runs/:id/restart', pathname);
     if (method === 'POST' && restartRunAction) {
@@ -659,11 +1136,346 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       return messages ? json(res, messages) : json(res, { error: 'Session not found' }, 404);
     }
     if (method === 'POST' && pathname === '/api/sessions') {
-      const body = JSON.parse(await readBody(req) || '{}') as { name?: unknown };
-      return json(res, control.createSession(typeof body.name === 'string' ? body.name : undefined), 201);
+      const body = JSON.parse(await readBody(req) || '{}') as { name?: unknown; projectId?: unknown; agentId?: unknown };
+      if (body.projectId !== undefined && typeof body.projectId !== 'string') return json(res, { error: 'Project ID must be a string.' }, 400);
+      if (body.agentId !== undefined && typeof body.agentId !== 'string') return json(res, { error: 'Agent ID must be a string.' }, 400);
+      return json(res, control.createSession(
+        typeof body.name === 'string' ? body.name : undefined,
+        {
+          ...(typeof body.projectId === 'string' ? { projectId: body.projectId } : {}),
+          ...(typeof body.agentId === 'string' ? { agentId: body.agentId } : {}),
+        },
+      ), 201);
+    }
+    const projectFilesRoute = matchRoute('/api/projects/:id/files', pathname);
+    if (method === 'GET' && projectFilesRoute) {
+      try {
+        res.setHeader('Cache-Control', 'no-store');
+        return json(res, control.getProjectFiles(decodeURIComponent(projectFilesRoute.id)));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project files could not be listed.' }, 400);
+      }
+    }
+    const projectStorageRoute = matchRoute('/api/projects/:id/storage', pathname);
+    if (method === 'GET' && projectStorageRoute) {
+      try {
+        res.setHeader('Cache-Control', 'no-store');
+        return json(res, control.getProjectStorage(decodeURIComponent(projectStorageRoute.id)));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project storage could not be measured.' }, 400);
+      }
+    }
+    const projectTasksRoute = matchRoute('/api/projects/:id/tasks', pathname);
+    if (method === 'GET' && projectTasksRoute) {
+      try {
+        res.setHeader('Cache-Control', 'no-store');
+        return json(res, control.getProjectTasks(decodeURIComponent(projectTasksRoute.id)));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project plan could not be loaded.' }, 400);
+      }
+    }
+    if (method === 'POST' && projectTasksRoute) {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 8_192) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project task must be valid JSON.' }, 400);
+      }
+      const value = body as { title?: unknown; description?: unknown; assignedAgentId?: unknown };
+      if (!value || typeof value !== 'object' || typeof value.title !== 'string'
+        || (value.description !== undefined && typeof value.description !== 'string')
+        || (value.assignedAgentId !== undefined && typeof value.assignedAgentId !== 'string')) {
+        return json(res, { error: 'A task title, optional description, and optional project agent assignment are required.' }, 400);
+      }
+      try {
+        return json(res, control.addProjectTask(
+          decodeURIComponent(projectTasksRoute.id),
+          value.title,
+          typeof value.description === 'string' ? value.description : undefined,
+          typeof value.assignedAgentId === 'string' ? value.assignedAgentId : undefined,
+        ), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project task could not be created.' }, 400);
+      }
+    }
+    const projectTaskRoute = matchRoute('/api/projects/:id/tasks/:taskId', pathname);
+    if (projectTaskRoute && method === 'PATCH') {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 8_192) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project task update must be valid JSON.' }, 400);
+      }
+      const value = body as { title?: unknown; description?: unknown; assignedAgentId?: unknown; status?: unknown };
+      if (!value || typeof value !== 'object'
+        || (value.title !== undefined && typeof value.title !== 'string')
+        || (value.description !== undefined && typeof value.description !== 'string')
+        || (value.assignedAgentId !== undefined && value.assignedAgentId !== null && typeof value.assignedAgentId !== 'string')
+        || (value.status !== undefined && !['pending', 'in_progress', 'completed', 'blocked'].includes(String(value.status)))) {
+        return json(res, { error: 'Task updates may include a title, description, project agent assignment, and valid status.' }, 400);
+      }
+      try {
+        return json(res, control.updateProjectTask(
+          decodeURIComponent(projectTaskRoute.id),
+          decodeURIComponent(projectTaskRoute.taskId),
+          {
+            ...(typeof value.title === 'string' ? { title: value.title } : {}),
+            ...(typeof value.description === 'string' ? { description: value.description } : {}),
+            ...(typeof value.assignedAgentId === 'string' || value.assignedAgentId === null ? { assignedAgentId: value.assignedAgentId } : {}),
+            ...(typeof value.status === 'string' ? { status: value.status as ProjectTask['status'] } : {}),
+          },
+        ));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project task could not be updated.' }, 400);
+      }
+    }
+    if (projectTaskRoute && method === 'DELETE') {
+      try {
+        return control.deleteProjectTask(decodeURIComponent(projectTaskRoute.id), decodeURIComponent(projectTaskRoute.taskId))
+          ? json(res, { deleted: true })
+          : json(res, { error: 'Project task was not found.' }, 404);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project task could not be deleted.' }, 400);
+      }
+    }
+    const projectDirectoriesRoute = matchRoute('/api/projects/:id/directories', pathname);
+    if (method === 'POST' && projectDirectoriesRoute) {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 4_096) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Folder request must be valid JSON.' }, 400);
+      }
+      const value = body as { path?: unknown };
+      if (!value || typeof value !== 'object' || typeof value.path !== 'string') {
+        return json(res, { error: 'A project-relative folder path is required.' }, 400);
+      }
+      try {
+        return json(res, control.createProjectDirectory(decodeURIComponent(projectDirectoriesRoute.id), value.path), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Folder could not be created.' }, 400);
+      }
+    }
+    const projectEntriesRoute = matchRoute('/api/projects/:id/entries', pathname);
+    if ((method === 'PATCH' || method === 'DELETE') && projectEntriesRoute) {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 4_096) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'File operation must be valid JSON.' }, 400);
+      }
+      const value = body as { path?: unknown; destination?: unknown };
+      if (!value || typeof value !== 'object' || typeof value.path !== 'string'
+        || (method === 'PATCH' && typeof value.destination !== 'string')) {
+        return json(res, { error: 'A project-relative path and, for moves, a destination are required.' }, 400);
+      }
+      try {
+        return method === 'PATCH'
+          ? json(res, control.moveProjectEntry(decodeURIComponent(projectEntriesRoute.id), value.path, value.destination as string))
+          : json(res, { deleted: control.deleteProjectEntry(decodeURIComponent(projectEntriesRoute.id), value.path) });
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'File operation could not be completed.' }, 400);
+      }
+    }
+    const projectFileRoute = matchRoute('/api/projects/:id/file', pathname);
+    if (method === 'GET' && projectFileRoute) {
+      const filePath = url.searchParams.get('path');
+      if (!filePath) return json(res, { error: 'A project-relative file path is required.' }, 400);
+      try {
+        res.setHeader('Cache-Control', 'no-store');
+        return json(res, control.readProjectFile(decodeURIComponent(projectFileRoute.id), filePath));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project file could not be opened.' }, 400);
+      }
+    }
+    if ((method === 'POST' || method === 'PUT') && projectFileRoute) {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 1_100_000) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project file request must be valid JSON.' }, 400);
+      }
+      const value = body as { path?: unknown; content?: unknown };
+      if (!value || typeof value !== 'object' || typeof value.path !== 'string' || typeof value.content !== 'string') {
+        return json(res, { error: 'A project-relative path and file content are required.' }, 400);
+      }
+      try {
+        const projectId = decodeURIComponent(projectFileRoute.id);
+        return json(res, method === 'POST'
+          ? control.createProjectFile(projectId, value.path, value.content)
+          : control.writeProjectFile(projectId, value.path, value.content), method === 'POST' ? 201 : 200);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project file could not be saved.' }, 400);
+      }
+    }
+    if (method === 'DELETE' && projectFileRoute) {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 4_096) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project file request must be valid JSON.' }, 400);
+      }
+      const value = body as { path?: unknown };
+      if (!value || typeof value !== 'object' || typeof value.path !== 'string') {
+        return json(res, { error: 'A project-relative path is required.' }, 400);
+      }
+      try {
+        return json(res, { deleted: control.deleteProjectFile(decodeURIComponent(projectFileRoute.id), value.path) });
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project file could not be deleted.' }, 400);
+      }
+    }
+    const projectTerminalRoute = matchRoute('/api/projects/:id/terminal', pathname);
+    if (projectTerminalRoute && method === 'GET') {
+      const terminalId = url.searchParams.get('terminalId') ?? '';
+      if (!terminalId) return json(res, { error: 'A terminalId is required.' }, 400);
+      try {
+        res.setHeader('Cache-Control', 'no-store');
+        return json(res, control.pollProjectTerminal(decodeURIComponent(projectTerminalRoute.id), terminalId));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project terminal could not be read.' }, 404);
+      }
+    }
+    if (projectTerminalRoute && method === 'DELETE') {
+      const terminalId = url.searchParams.get('terminalId') ?? '';
+      if (!terminalId) return json(res, { error: 'A terminalId is required.' }, 400);
+      try {
+        return json(res, { stopped: await control.killProjectTerminal(decodeURIComponent(projectTerminalRoute.id), terminalId) });
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project terminal could not be stopped.' }, 404);
+      }
+    }
+    if (method === 'POST' && projectTerminalRoute) {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 24_000) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Terminal request must be valid JSON.' }, 400);
+      }
+      const value = body as { action?: unknown; command?: unknown; timeout?: unknown; terminalId?: unknown; input?: unknown };
+      if (value?.action === 'start') {
+        try {
+          res.setHeader('Cache-Control', 'no-store');
+          return json(res, control.startProjectTerminal(decodeURIComponent(projectTerminalRoute.id)));
+        } catch (failure) {
+          return json(res, { error: failure instanceof Error ? failure.message : 'Project terminal could not be started.' }, 400);
+        }
+      }
+      if (value?.action === 'input') {
+        if (typeof value.terminalId !== 'string' || typeof value.input !== 'string' || !value.input.trim()) {
+          return json(res, { error: 'Terminal input and terminalId are required.' }, 400);
+        }
+        try {
+          control.writeProjectTerminal(decodeURIComponent(projectTerminalRoute.id), value.terminalId, value.input);
+          return json(res, { sent: true });
+        } catch (failure) {
+          return json(res, { error: failure instanceof Error ? failure.message : 'Project terminal input could not be sent.' }, 400);
+        }
+      }
+      if (!value || typeof value !== 'object' || typeof value.command !== 'string' || !value.command.trim()
+        || value.command.length > 20_000
+        || (value.timeout !== undefined && (!Number.isInteger(value.timeout) || (value.timeout as number) < 1 || (value.timeout as number) > 300))) {
+        return json(res, { error: 'A non-empty command (up to 20,000 characters) and optional timeout from 1–300 seconds are required.' }, 400);
+      }
+      try {
+        res.setHeader('Cache-Control', 'no-store');
+        const output = await control.runProjectCommand(
+          decodeURIComponent(projectTerminalRoute.id),
+          value.command,
+          typeof value.timeout === 'number' ? value.timeout : 120,
+        );
+        return json(res, { output });
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project command failed.' }, 400);
+      }
+    }
+    const permanentProjectRoute = matchRoute('/api/projects/:id/permanent', pathname);
+    if (method === 'DELETE' && permanentProjectRoute) {
+      try {
+        return control.deleteArchivedProject(decodeURIComponent(permanentProjectRoute.id))
+          ? json(res, { deleted: true })
+          : json(res, { error: 'Archived project was not found.' }, 404);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Archived project could not be permanently deleted.' }, 409);
+      }
+    }
+    const projectRoute = matchRoute('/api/projects/:id', pathname);
+    if (method === 'PATCH' && projectRoute) {
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 8_192) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project update must be valid JSON.' }, 400);
+      }
+      const value = body as { name?: unknown; scope?: unknown };
+      if (!value || typeof value !== 'object'
+        || (value.name !== undefined && typeof value.name !== 'string')
+        || (value.scope !== undefined && typeof value.scope !== 'string')
+        || (value.name === undefined && value.scope === undefined)) {
+        return json(res, { error: 'Project updates must include a name or work scope.' }, 400);
+      }
+      try {
+        return json(res, control.updateProject(decodeURIComponent(projectRoute.id), {
+          ...(typeof value.name === 'string' ? { name: value.name } : {}),
+          ...(typeof value.scope === 'string' ? { scope: value.scope } : {}),
+        }));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project could not be updated.' }, 400);
+      }
+    }
+    if (method === 'DELETE' && projectRoute) {
+      try {
+        return json(res, control.archiveProject(decodeURIComponent(projectRoute.id)));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project could not be archived.' }, 409);
+      }
+    }
+    const restoreProjectRoute = matchRoute('/api/projects/:id/restore', pathname);
+    if (method === 'POST' && restoreProjectRoute) {
+      try {
+        return json(res, control.restoreProject(decodeURIComponent(restoreProjectRoute.id)));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project could not be restored.' }, 409);
+      }
+    }
+    if (method === 'GET' && pathname === '/api/projects') {
+      return json(res, control.getProjects(url.searchParams.get('includeArchived') === 'true'));
+    }
+    if (method === 'POST' && pathname === '/api/projects') {
+      const body = JSON.parse(await readBody(req, 16_384) || '{}') as { name?: unknown; scope?: unknown };
+      if (typeof body.name !== 'string' || (body.scope !== undefined && typeof body.scope !== 'string')) {
+        return json(res, { error: 'A project name and optional work scope are required.' }, 400);
+      }
+      try {
+        return json(res, control.createProject(body.name, typeof body.scope === 'string' ? body.scope : undefined), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Project could not be created.' }, 400);
+      }
+    }
+    if (method === 'GET' && pathname === '/api/workspace-agents') {
+      const projectId = url.searchParams.get('projectId') ?? undefined;
+      return json(res, control.getWorkspaceAgents(projectId));
+    }
+    if (method === 'POST' && pathname === '/api/workspace-agents') {
+      const body = JSON.parse(await readBody(req, 30_000) || '{}') as {
+        projectId?: unknown; name?: unknown; emoji?: unknown; instructions?: unknown;
+      };
+      if (typeof body.projectId !== 'string' || typeof body.name !== 'string' || typeof body.emoji !== 'string' || typeof body.instructions !== 'string') {
+        return json(res, { error: 'Project, agent name, icon, and instructions are required.' }, 400);
+      }
+      try {
+        return json(res, control.createWorkspaceAgent({
+          projectId: body.projectId,
+          name: body.name,
+          emoji: body.emoji,
+          instructions: body.instructions,
+        }), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Agent could not be created.' }, 400);
+      }
     }
     if (method === 'POST' && pathname === '/api/chat') {
-      const body = JSON.parse(await readBody(req) || '{}') as { text?: unknown; sessionId?: unknown };
+      const body = JSON.parse(await readBody(req) || '{}') as { text?: unknown; sessionId?: unknown; googleWorkspaceAccessToken?: unknown };
       if (typeof body.text !== 'string' || !body.text.trim() || typeof body.sessionId !== 'string' || !body.sessionId.trim()) {
         return json(res, { error: 'A non-empty text and sessionId are required.' }, 400);
       }
@@ -685,6 +1497,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         senderId: 'webapp-local',
         senderName: 'Local operator',
         source: 'webapp',
+        ...(typeof body.googleWorkspaceAccessToken === 'string' ? { googleWorkspaceAccessToken: body.googleWorkspaceAccessToken } : {}),
         }, emit);
         emit({ type: 'done', result });
       } catch (failure) {
@@ -810,7 +1623,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   if (method === 'GET' && params) {
     const session = sessions.get(params.id);
     if (!session) return json(res, { error: 'Not found' }, 404);
-    return json(res, session.messages);
+    return json(res, stripBlinkControlMessages(session.messages));
   }
 
   // POST /api/chat

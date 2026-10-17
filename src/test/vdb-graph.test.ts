@@ -33,6 +33,61 @@ test('similarity graph returns accurate neighbors and remains stable after reloa
   }
 });
 
+test('namespace synchronization refreshes changed project documents and removes stale files', () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-vdb-namespace-'));
+  try {
+    const db = new VectorDB(workspace);
+    const overview = {
+      id: 'project:one:overview',
+      text: 'Project scope includes a semantic memory index.',
+      source: 'project',
+      role: 'context',
+      timestamp: 1,
+      namespace: 'project:one',
+    };
+    const oldFile = {
+      id: 'project:one:file:old.md',
+      text: 'The legacy project file is obsolete.',
+      source: 'project-file',
+      role: 'context',
+      timestamp: 2,
+      namespace: 'project:one',
+    };
+    const unrelated = {
+      id: 'project:two:overview',
+      text: 'Another project tracks deployment health.',
+      source: 'project',
+      role: 'context',
+      timestamp: 3,
+      namespace: 'project:two',
+    };
+    db.syncNamespace('project:one', [overview, oldFile]);
+    db.syncNamespace('project:two', [unrelated]);
+    assert.deepEqual(db.syncNamespace('project:one', [overview, {
+      ...oldFile,
+      id: 'project:one:file:new.md',
+      text: 'The current project file describes semantic retrieval.',
+      timestamp: 4,
+    }]), { added: 1, removed: 1, unchanged: false });
+    assert.deepEqual(db.syncNamespace('project:one', [overview, {
+      ...oldFile,
+      id: 'project:one:file:new.md',
+      text: 'The current project file describes semantic retrieval.',
+      timestamp: 4,
+    }]), { added: 0, removed: 0, unchanged: true });
+
+    const documents = db.listDocuments();
+    assert.equal(documents.length, 3);
+    assert.ok(!documents.some(document => document.id === oldFile.id));
+    assert.ok(documents.some(document => document.id === unrelated.id));
+    assert.ok(new VectorDB(workspace).listDocuments().some(document => document.id === 'project:one:file:new.md'));
+    assert.throws(() => db.syncNamespace('project:one', [{ ...overview, namespace: 'project:other' }]), /belong to the requested namespace/);
+    assert.throws(() => db.syncNamespace('project:one', [overview, overview]), /Duplicate vector document ID/);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('session ingestion includes nested archives and deduplicates stable session turns', () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-session-ingest-'));
   try {

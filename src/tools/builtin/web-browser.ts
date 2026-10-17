@@ -19,6 +19,7 @@ let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let requestId = 0;
 const pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>();
 let buffer = '';
+export const DEFAULT_BROWSER_HOMEPAGE = 'https://symbiote.artifactvirtual.com';
 
 function ensureSidecar(): ChildProcess {
   if (sidecar && !sidecar.killed) {
@@ -43,15 +44,16 @@ function ensureSidecar(): ChildProcess {
   }
 
   const python = pythonCommand(sidecarPath);
-  sidecar = spawn(python.file, python.args, {
+  const proc = spawn(python.file, python.args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       ...process.env,
       SYMBIOTE_HOME: process.env.SYMBIOTE_HOME ?? appHomeDir(),
     },
   });
+  sidecar = proc;
 
-  sidecar.stdout!.on('data', (chunk: Buffer) => {
+  proc.stdout!.on('data', (chunk: Buffer) => {
     buffer += chunk.toString();
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';
@@ -69,22 +71,30 @@ function ensureSidecar(): ChildProcess {
     }
   });
 
-  sidecar.stderr!.on('data', (chunk: Buffer) => {
+  proc.stderr!.on('data', (chunk: Buffer) => {
     const text = chunk.toString().trim();
     if (text) console.error('[symbiote:web] ' + text);
   });
 
-  sidecar.on('exit', (code) => {
+  proc.on('exit', (code) => {
     console.log('[symbiote:web] sidecar exited (code ' + code + ')');
-    sidecar = null;
+    if (sidecar === proc) sidecar = null;
     for (const [id, p] of pending) {
       p.reject(new Error('Sidecar process exited'));
       pending.delete(id);
     }
   });
+  proc.on('error', (error) => {
+    console.error('[symbiote:web] sidecar process error:', error);
+    if (sidecar === proc) sidecar = null;
+    for (const [id, request] of pending) {
+      request.reject(error);
+      pending.delete(id);
+    }
+  });
 
   resetIdle();
-  return sidecar;
+  return proc;
 }
 
 function resetIdle() {
@@ -99,6 +109,7 @@ function resetIdle() {
 }
 
 function rpc(method: string, params: Record<string, any> = {}): Promise<any> {
+  const proc = ensureSidecar();
   return new Promise((resolve, reject) => {
     const id = ++requestId;
     const timeout = setTimeout(() => {
@@ -111,10 +122,22 @@ function rpc(method: string, params: Record<string, any> = {}): Promise<any> {
       reject: (e: any) => { clearTimeout(timeout); reject(e); },
     });
 
-    const proc = ensureSidecar();
     const msg = JSON.stringify({ id, method, params }) + '\n';
-    proc.stdin!.write(msg);
+    proc.stdin!.write(msg, error => {
+      if (!error) return;
+      pending.delete(id);
+      clearTimeout(timeout);
+      reject(error);
+    });
   });
+}
+
+function normalizeBrowserUrl(value: string): string {
+  const url = new URL(value.includes('://') ? value : `https://${value}`);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+    throw new Error('Only HTTP and HTTPS browser URLs without embedded credentials are supported.');
+  }
+  return url.toString();
 }
 
 process.on('SIGTERM', () => { if (sidecar && !sidecar.killed) sidecar.kill(); });
@@ -134,7 +157,7 @@ export const webBrowseTool: ToolDefinition = {
     required: ['url'],
   },
   async execute(input) {
-    const result = await rpc('browse', { url: input.url as string, profile: input.profile as string });
+    const result = await rpc('browse', { url: normalizeBrowserUrl(input.url as string), profile: input.profile as string, timeout: 30_000 });
     return '**' + result.title + '**\n' + result.url + '\n\n' + result.text;
   },
 };
@@ -452,14 +475,22 @@ export const cuaTools: ToolDefinition[] = [
 ];
 
 export async function browserNavigate(url: string): Promise<{ url: string; title: string }> {
-  const result = await rpc('browse', { url });
+  const result = await rpc('browse', { url: normalizeBrowserUrl(url), timeout: 30_000 });
   if (!result.success) throw new Error(result.error || 'Browser navigation failed.');
   return { url: result.url, title: result.title };
 }
 
 export async function browserCapture(): Promise<{ url: string; title: string; viewport: { width: number; height: number }; image: string }> {
+  const tabs = await rpc('tabs');
+  const activeTab = Array.isArray(tabs.tabs) ? tabs.tabs.find((tab: { active?: boolean }) => tab.active) : undefined;
+  if (!activeTab || !activeTab.url || activeTab.url === 'about:blank') {
+    await browserNavigate(DEFAULT_BROWSER_HOMEPAGE);
+  }
   const result = await rpc('cua_screenshot');
   if (!result.success) throw new Error(result.error || 'Browser screenshot failed.');
+  if (typeof result.path !== 'string' || result.path.startsWith('error:')) {
+    throw new Error(typeof result.path === 'string' ? result.path.slice(6) : 'Browser screenshot did not return a file path.');
+  }
   const image = readFileSync(result.path).toString('base64');
   return {
     url: result.url,

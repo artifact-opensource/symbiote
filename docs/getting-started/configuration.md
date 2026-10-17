@@ -97,11 +97,8 @@ COPILOT_GITHUB_TOKEN=
 DISCORD_BOT_TOKEN=
 DISCORD_CLIENT_ID=
 
-# HTTP API: required when binding the API beyond loopback
+# HTTP API: set this key to enable the authenticated HTTP API
 SYMBIOTE_API_KEY=
-SYMBIOTE_API_PORT=3006
-SYMBIOTE_API_HOST=127.0.0.1
-SYMBIOTE_PORT=3009
 SYMBIOTE_WEB_HOST=0.0.0.0
 SYMBIOTE_WEB_TOKEN=
 
@@ -119,14 +116,16 @@ SYMBIOTE_WEB_TOKEN=
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `defaultProvider` | string | `"groq"` | Active LLM provider |
-| `defaultModel` | string | `"llama-3.3-70b-versatile"` | Active model |
+| `defaultProvider` | string | `"openrouter"` | Active LLM provider |
+| `defaultModel` | string | `"openrouter/free"` | Active model |
 | `maxTokens` | number | `8192` | Max tokens per response |
 | `maxIterations` | number | `50` | Max tool-call loops per turn |
-| `temperature` | number | `0.3` | Response temperature (0.0–1.2) |
+| `temperature` | number | `0.7` | Response temperature (0.0–1.2) |
 | `workspace` | string | `cwd()` | Agent's file system root |
 | `sessionsDir` | string | `".session"` | Session persistence directory; runtime session files are kept in `<workspace>/.session` |
+| `apiHost` | string | `"127.0.0.1"` | HTTP API bind host |
 | `apiPort` | number | `3006` | HTTP API port |
+| `webHost` | string | `"0.0.0.0"` | Web Control Room bind host |
 | `webPort` | number | `3009` | Web UI port |
 
 ## Web UI Configuration
@@ -140,7 +139,7 @@ The Web UI runs on a separate port from the HTTP API:
 }
 ```
 
-The web UI listens on all interfaces by default and protects LAN control requests with a generated token stored at `<workspace>/.session/web-access-token`. Set `SYMBIOTE_WEB_TOKEN` to provide a custom token. See [Web UI](../channels/webchat.md) for details.
+The web UI listens on all interfaces by default and protects LAN control requests with a generated token stored at `<workspace>/.session/web-access-token`. Set `SYMBIOTE_WEB_TOKEN` to provide a custom token. Configure `webHost`, `webPort`, `apiHost`, and `apiPort` in `symbiote.json`; the HTTP API and Control Room use separate endpoints. See [Web UI](../channels/webchat.md) for details.
 
 ## VDB And Memograph
 

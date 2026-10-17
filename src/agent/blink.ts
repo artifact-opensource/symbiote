@@ -5,12 +5,9 @@
 // When an agent loop approaches its iteration budget, BLINK ensures continuity.
 // Instead of dying with "[Max iterations reached]", the agent:
 //
-// 1. Gets a gentle nudge at BLINK_PREPARE iterations remaining
-//    → "Summarize your state. You're about to blink."
-// 2. Flushes state (COMB stage via tool call)
-// 3. Returns a blink signal to the daemon
-// 4. Daemon spawns a FRESH agent turn on the same session
-// 5. New turn reads session history + COMB → picks up seamlessly
+// 1. Records continuation state before the iteration budget is exhausted
+// 2. Returns a blink signal to the daemon
+// 3. Daemon starts a fresh agent turn with the saved session history
 // 6. The user never sees the wall
 //
 // Ported from Singularity's cortex/blink.py — same philosophy, TypeScript runtime.
@@ -23,9 +20,9 @@
 export interface BlinkConfig {
   enabled: boolean;
   maxDepth: number;        // Max consecutive blinks per conversation (default: 5)
-  prepareAt: number;       // Inject preparation message at N iterations remaining (default: 3)
+  prepareAt: number;       // Mark continuation state at N iterations remaining (default: 3)
   cooldownMs: number;      // Delay between blink and resume (default: 1000)
-  checkpointInterval: number;  // Inject checkpoint nudge every N iterations (default: 25, 0 = disabled)
+  checkpointInterval: number;  // Record a runtime checkpoint every N iterations (default: 25, 0 = disabled)
 }
 
 export const DEFAULT_BLINK_CONFIG: BlinkConfig = {
@@ -44,8 +41,8 @@ export interface BlinkState {
   totalIterations: number;     // Sum across all blinks
   totalToolCalls: number;
   blinkTimestamps: number[];
-  prepared: boolean;           // Whether prepare message was injected this cycle
-  lastCheckpointAt: number;    // Iteration when last checkpoint was injected
+  prepared: boolean;           // Whether continuation state was marked this cycle
+  lastCheckpointAt: number;    // Iteration of the last runtime checkpoint
   capExpansions: number;       // How many times PULSE expanded the cap
 }
 
@@ -62,33 +59,20 @@ function freshState(): BlinkState {
   };
 }
 
-export const BLINK_PREPARE_MESSAGE = `⚡ BLINK APPROACHING — You are about to seamlessly continue into a fresh iteration budget.
+export function isBlinkControlMessage(content: unknown): boolean {
+  return typeof content === 'string'
+    && (/^\s*(?:⚡ BLINK APPROACHING —|🔖 CHECKPOINT —|⚡ BLINK COMPLETE —|⚠️ SYSTEM WARNING:)/.test(content)
+      || /^\s*Internal completion review:\s*/i.test(content));
+}
 
-**What to do NOW:**
-1. If you have work in progress, keep going — you will NOT be interrupted
-2. Your conversation history and context will carry over automatically
-3. Do NOT write "[Budget exhausted]" or any termination message
-4. Do NOT say goodbye or wrap up — just keep working
-5. If you're mid-task, continue exactly where you are
-
-You will blink and resume with full budget. The user sees nothing. Continuity is automatic.`;
-
-export const BLINK_CHECKPOINT_MESSAGE = `🔖 CHECKPOINT — You have been running for a while. This is a periodic safety save.
-
-**What to do NOW (in this order):**
-1. If you have critical work-in-progress state, call \`comb_stage\` with a brief summary of what you're doing and where you are
-2. Then continue working normally — this is NOT a shutdown, just a save point
-3. If you have nothing critical to save, ignore this and keep working
-
-This checkpoint exists so that if the session is interrupted externally, your progress is recoverable.`;
-
-export const BLINK_RESUME_MESSAGE = (depth: number, maxDepth: number, totalIterations: number) =>
-  `⚡ BLINK COMPLETE — You are continuing from where you left off.
-
-**Context:** You blinked (seamless budget refresh). Your previous conversation history is fully intact above. Pick up EXACTLY where you left off. Do not re-introduce yourself, re-read files you already read, or repeat work. Continue the task in progress.
-
-**Blink depth:** ${depth}/${maxDepth}
-**Total iterations so far:** ${totalIterations}`;
+export function stripBlinkControlMessages<T extends { role: string; content: unknown }>(messages: T[]): T[] {
+  const visible: T[] = [];
+  for (const message of messages) {
+    if (message.role === 'user' && isBlinkControlMessage(message.content)) continue;
+    visible.push(message);
+  }
+  return visible;
+}
 
 
 export class BlinkController {
@@ -121,7 +105,7 @@ export class BlinkController {
     return true;
   }
 
-  /** Should we inject the preparation message?
+  /** Should we mark continuation state?
    *  Called by runner at each iteration.
    *  @param remaining - iterations remaining before budget exhaustion
    */
@@ -131,7 +115,7 @@ export class BlinkController {
     return remaining <= this.config.prepareAt;
   }
 
-  /** Should we inject a periodic checkpoint message?
+  /** Should we record a periodic checkpoint?
    *  Called by runner at each iteration — separate from prepare.
    *  Checkpoints ensure state is saved regularly during long runs,
    *  so external kills (SIGTERM, OOM, crash) don't lose everything.
@@ -142,17 +126,16 @@ export class BlinkController {
     if (this.config.checkpointInterval <= 0) return false;
     // Don't checkpoint in the first few iterations (bootup)
     if (currentIteration < this.config.checkpointInterval) return false;
-    // Don't checkpoint if we just prepared (avoid double-messaging)
+    // Don't checkpoint if we just prepared.
     if (this.state.prepared) return false;
     // Check if we've passed the next checkpoint boundary
     const itersSinceCheckpoint = currentIteration - this.state.lastCheckpointAt;
     return itersSinceCheckpoint >= this.config.checkpointInterval;
   }
 
-  /** Get the checkpoint message and record that we checkpointed */
-  getCheckpointMessage(currentIteration: number): string {
+  /** Record a checkpoint without injecting a user-visible chat message. */
+  recordCheckpoint(currentIteration: number): void {
     this.state.lastCheckpointAt = currentIteration;
-    return BLINK_CHECKPOINT_MESSAGE;
   }
 
   /** Notify that PULSE expanded the iteration cap.
@@ -169,17 +152,10 @@ export class BlinkController {
     );
   }
 
-  /** Get the preparation system message to inject into context */
-  getPrepareMessage(): string {
+  /** Mark that the current budget is approaching its continuation boundary. */
+  markPrepared(): void {
     this.state.prepared = true;
     this.state.phase = 'prepare';
-    return BLINK_PREPARE_MESSAGE;
-  }
-
-  /** Get the resume system message for the new turn after blink */
-  getResumeMessage(): string {
-    this.state.phase = 'resumed';
-    return BLINK_RESUME_MESSAGE(this.state.depth, this.config.maxDepth, this.state.totalIterations);
   }
 
   /** Record a blink event (agent hit budget, about to spawn fresh turn) */

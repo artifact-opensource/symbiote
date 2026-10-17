@@ -202,6 +202,8 @@ async function main() {
         }
       : provConfig;
     activity.start();
+    let streamedText = '';
+    let streamingOutput = false;
     try {
       const result = await runAgent(msgs, {
         provider: routeChoice.provider,
@@ -217,8 +219,21 @@ async function main() {
           if (ev.type === 'usage') {
             sessionMgr.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
           }
+          if (ev.type === 'text_delta') {
+            streamedText += ev.text;
+            if (!streamingOutput) {
+              activity.stop();
+              process.stdout.write(`\n${palette.violet}◈${palette.reset} `);
+              streamingOutput = true;
+            }
+            process.stdout.write(ev.text);
+          }
         },
         onToolStart(name, input) {
+          if (streamingOutput) {
+            process.stdout.write('\n');
+            streamingOutput = false;
+          }
           sessionMgr.trackToolCall(session, name);
           toolStarts.push({ name, at: Date.now(), detail: describeCall(input) });
           activity.start(name);
@@ -235,7 +250,11 @@ async function main() {
         },
       });
       activity.stop();
-      if (result.text) process.stdout.write(`\n${palette.violet}◈${palette.reset} ${result.text}`);
+      if (result.text && streamedText === result.text) {
+        process.stdout.write('\n\n');
+      } else if (result.text) {
+        process.stdout.write(`\n${palette.violet}◈${palette.reset} ${result.text}`);
+      }
       return result;
     } catch (err) {
       activity.stop();

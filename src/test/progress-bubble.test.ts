@@ -30,3 +30,57 @@ test('progress bubble stays within Discord message limits and redacts sensitive 
   assert.ok(messages.every(message => !message.includes('discord-secret-value')));
   assert.match(edits.at(-1) ?? '', /Done — 101 tool calls/);
 });
+
+test('streamed channel reply is edited into the final response without a duplicate send', async () => {
+  const sent: string[] = [];
+  const edits: string[] = [];
+  const bubble = new ToolProgressBubble({
+    enabled: true,
+    send: async (_adapterId, _chatId, content) => {
+      sent.push(content);
+      return { messageId: 'live-reply' };
+    },
+    edit: async (_adapterId, _chatId, _messageId, content) => {
+      edits.push(content);
+    },
+  }, 'discord-main', 'channel');
+
+  await bubble.streamText('I found ');
+  await bubble.toolLine('web_browse', { url: 'https://example.test' });
+  await bubble.toolDone('web_browse');
+  await bubble.streamText('the answer.');
+
+  assert.equal(await bubble.finalize('<@user> I found the answer.'), true);
+  assert.equal(sent.length, 1);
+  assert.equal(edits.at(-1), '<@user> I found the answer.');
+});
+
+test('streaming stays disabled for adapters that cannot edit messages', async () => {
+  const sent: string[] = [];
+  const bubble = new ToolProgressBubble({
+    enabled: true,
+    send: async (_adapterId, _chatId, content) => {
+      sent.push(content);
+      return null;
+    },
+    edit: null,
+  }, 'read-only-adapter', 'channel');
+
+  await bubble.streamText('This should use the normal delivery path.');
+  assert.equal(await bubble.finalize('This should use the normal delivery path.'), false);
+  assert.deepEqual(sent, []);
+});
+
+test('long final responses fall back instead of truncating the channel reply', async () => {
+  const edits: string[] = [];
+  const bubble = new ToolProgressBubble({
+    enabled: true,
+    send: async () => ({ messageId: 'long-reply' }),
+    edit: async (_adapterId, _chatId, _messageId, content) => { edits.push(content); },
+  }, 'discord-main', 'channel');
+
+  await bubble.streamText('Partial streamed content');
+  assert.equal(await bubble.finalize('x'.repeat(1950)), false);
+  assert.match(edits.at(-1) ?? '', /Done — 0 tool calls/);
+  assert.ok(!(edits.at(-1) ?? '').includes('Partial streamed content'));
+});

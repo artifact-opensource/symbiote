@@ -1,14 +1,15 @@
-export type ViewId = 'workspace' | 'runs' | 'agents' | 'chat' | 'browser' | 'memory' | 'sessions' | 'games' | 'operations' | 'tools' | 'settings';
+export type ViewId = 'workspace' | 'ide' | 'runs' | 'agents' | 'chat' | 'browser' | 'memory' | 'sessions' | 'games' | 'integrations' | 'operations' | 'tools' | 'settings';
 
 export interface MemoryGraphNode {
   id: string;
   label: string;
   excerpt: string;
   source: string;
+  storage?: string;
   role: string;
   timestamp: number;
   sessionId?: string;
-  side: 'documents' | 'sessions';
+  side: 'documents' | 'sessions' | 'projects';
 }
 
 export interface MemoryGraphEdge {
@@ -18,6 +19,7 @@ export interface MemoryGraphEdge {
 }
 
 export interface MemoryGraphData {
+  storage?: string;
   stats: {
     documentCount: number;
     termCount: number;
@@ -57,6 +59,8 @@ export interface WorkspaceAgent {
   result?: string;
   error?: string;
   parentSessionId?: string;
+  projectId?: string;
+  agentId?: string;
 }
 
 export interface SessionSummary {
@@ -67,6 +71,53 @@ export interface SessionSummary {
   createdAt: number;
   parentSessionId?: string;
   sessionKind?: 'conversation' | 'subagent';
+  projectId?: string;
+  agentId?: string;
+}
+
+export interface WorkspaceProject {
+  id: string;
+  name: string;
+  workspace: string;
+  scope?: string;
+  createdAt: number;
+  archivedAt?: number;
+}
+
+export interface ProjectTask {
+  id: string;
+  title: string;
+  description: string;
+  assignedAgentId?: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked';
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkspaceFile {
+  path: string;
+  type: 'file' | 'directory';
+  size: number;
+  modifiedAt: number;
+}
+
+export interface ThreadUserHelpRequest {
+  id: string;
+  threadId: string;
+  postId: string;
+  title: string;
+  body: string;
+  createdAt: number;
+}
+
+export interface AgentProfile {
+  id: string;
+  projectId: string;
+  name: string;
+  emoji: string;
+  instructions: string;
+  workspace: string;
+  createdAt: number;
 }
 
 export interface ChatMessage {
@@ -75,10 +126,15 @@ export interface ChatMessage {
   content: string;
   timestamp?: number;
   durationMs?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  tokenCountsEstimated?: boolean;
   iterations?: number;
   toolCalls?: Array<{ name: string; input: Record<string, unknown>; result: string }>;
   streaming?: boolean;
   activeTools?: string[];
+  activeTool?: string;
+  toolActivity?: Array<{ name: string; status: 'running' | 'done' }>;
   thinking?: boolean;
   interrupted?: boolean;
 }
@@ -94,6 +150,7 @@ export interface HostResourceSnapshot {
   sampledAt: number;
   cpuPercent: number | null;
   cpuLogicalCores: number;
+  cpuCorePercents?: Array<number | null>;
   memory: { totalBytes: number; freeBytes: number; usedPercent: number };
   network: { receiveBytesPerSecond: number | null; transmitBytesPerSecond: number | null; source: string };
   disk: { readBytesPerSecond: number | null; writeBytesPerSecond: number | null; source: string };
@@ -107,6 +164,22 @@ export interface HostResourceSnapshot {
 
 export interface GatewayStatus {
   version?: string;
+  update?: {
+    state: 'unknown' | 'current' | 'available' | 'error';
+    currentVersion: string;
+    latestVersion?: string;
+    releaseUrl?: string;
+    publishedAt?: string;
+    checkedAt?: number;
+    error?: string;
+    download?: {
+      state: 'idle' | 'downloading' | 'ready' | 'error';
+      version?: string;
+      filename?: string;
+      sha256?: string;
+      error?: string;
+    };
+  };
   uptime?: number;
   uptimeHuman?: string;
   provider?: string;
@@ -129,6 +202,7 @@ export interface GatewayConfig {
   name?: string;
   agentName?: string;
   agentEmoji?: string;
+  agentAvatarDataUrl?: string;
   ownerName?: string;
   soulContent?: string;
   agentsContent?: string;

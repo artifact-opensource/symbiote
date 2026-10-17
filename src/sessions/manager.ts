@@ -6,6 +6,8 @@ import path from 'node:path';
 import type { Message } from '../providers/types.js';
 import type { SessionRoute } from '../channels/types.js';
 import type { Session, SessionSummary, SessionMetadata } from './types.js';
+import { stripBlinkControlMessages } from '../agent/blink.js';
+import { deriveConversationTitle } from './title.js';
 
 const DEFAULT_DIR = '.session';
 const DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -163,7 +165,44 @@ export class SessionManager {
   private filePath(id: string): string {
     const safe = id.replace(/[^a-zA-Z0-9_\-:.]/g, '_');
     const fileSafe = process.platform === 'win32' ? safe.replace(/:/g, '~3A') : safe;
+    const scopedAgent = /^agent-([a-f0-9-]{36})-([a-f0-9-]{36})-/i.exec(id);
+    if (scopedAgent) {
+      return path.join(path.dirname(this.dir), '.agents', 'projects', scopedAgent[1], 'agents', scopedAgent[2], '.session', `${fileSafe}.json`);
+    }
+    const scopedProject = /^project-([a-f0-9-]{36})-/i.exec(id);
+    if (scopedProject) {
+      return path.join(path.dirname(this.dir), '.agents', 'projects', scopedProject[1], '.session', `${fileSafe}.json`);
+    }
     return path.join(this.dir, `${fileSafe}.json`);
+  }
+
+  private sessionDirectories(): string[] {
+    const directories = [this.dir];
+    const projectsDirectory = path.join(path.dirname(this.dir), '.agents', 'projects');
+    let projects: fs.Dirent[];
+    try {
+      projects = fs.readdirSync(projectsDirectory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return directories;
+      throw error;
+    }
+    for (const project of projects) {
+      if (!project.isDirectory()) continue;
+      const projectDirectory = path.join(projectsDirectory, project.name);
+      directories.push(path.join(projectDirectory, '.session'));
+      const agentsDirectory = path.join(projectDirectory, 'agents');
+      let agents: fs.Dirent[];
+      try {
+        agents = fs.readdirSync(agentsDirectory, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      for (const agent of agents) {
+        if (agent.isDirectory()) directories.push(path.join(agentsDirectory, agent.name, '.session'));
+      }
+    }
+    return directories;
   }
 
   private routesFilePath(): string {
@@ -210,7 +249,7 @@ export class SessionManager {
     return { messageCount: 0, tokenUsage: { input: 0, output: 0 }, toolsUsed: {}, depth: 0 };
   }
 
-  create(id: string, opts?: { label?: string; provider?: string; model?: string; parentSessionId?: string; depth?: number; sessionKind?: 'conversation' | 'subagent' }): Session {
+  create(id: string, opts?: { label?: string; provider?: string; model?: string; parentSessionId?: string; depth?: number; sessionKind?: 'conversation' | 'subagent'; projectId?: string; agentId?: string }): Session {
     const session: Session = {
       id,
       createdAt: Date.now(),
@@ -222,6 +261,8 @@ export class SessionManager {
         provider: opts?.provider,
         model: opts?.model,
         parentSessionId: opts?.parentSessionId,
+        projectId: opts?.projectId,
+        agentId: opts?.agentId,
         sessionKind: opts?.sessionKind ?? (opts?.parentSessionId ? 'subagent' : (id.startsWith('web-') ? 'conversation' : undefined)),
         depth: opts?.depth ?? 0,
       },
@@ -244,16 +285,22 @@ export class SessionManager {
     }
     // Sanitize tool pairs — persist cleanup so stale results are not dropped on every load.
     const originalMessages = JSON.stringify(data.messages);
-    data.messages = sanitizeToolPairs(data.messages);
-    if (JSON.stringify(data.messages) !== originalMessages) this.save(data);
+    const originalLabel = data.metadata.label;
+    data.messages = sanitizeToolPairs(stripBlinkControlMessages(data.messages));
+    const title = deriveConversationTitle(data.messages);
+    if (title) data.metadata.label = title;
+    if (JSON.stringify(data.messages) !== originalMessages || (title && originalLabel !== title)) this.save(data);
     return data;
   }
 
   save(session: Session): void {
     session.updatedAt = Date.now();
     session.metadata.messageCount = session.messages.length;
+    const title = deriveConversationTitle(session.messages);
+    if (title) session.metadata.label = title;
     const destination = this.filePath(session.id);
     const temporary = `${destination}.tmp`;
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
     fs.writeFileSync(temporary, JSON.stringify(session, null, 2));
     fs.renameSync(temporary, destination);
   }
@@ -265,32 +312,88 @@ export class SessionManager {
   archiveSession(id: string): boolean {
     const source = this.filePath(id);
     if (!fs.existsSync(source)) return false;
-    const destination = path.join(this.archiveDir(), path.basename(source));
+    const destination = path.join(path.dirname(source), 'archive', path.basename(source));
     if (fs.existsSync(destination)) {
       throw new Error(`Cannot archive session ${id}: an archived session with the same id already exists.`);
     }
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
     fs.renameSync(source, destination);
     return true;
+  }
+
+  restoreProjectSessions(projectId: string): number {
+    if (!/^[a-f0-9-]{36}$/i.test(projectId)) throw new Error('Project ID is invalid.');
+    const projectDirectory = path.join(path.dirname(this.dir), '.agents', 'projects', projectId);
+    const sessionRoots = [path.join(projectDirectory, '.session')];
+    const agentsDirectory = path.join(projectDirectory, 'agents');
+    try {
+      for (const entry of fs.readdirSync(agentsDirectory, { withFileTypes: true })) {
+        if (entry.isDirectory() && !entry.isSymbolicLink()) sessionRoots.push(path.join(agentsDirectory, entry.name, '.session'));
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+
+    const sessions: Array<{ id: string; source: string; destination: string }> = [];
+    for (const root of sessionRoots) {
+      const archiveDirectory = path.join(root, 'archive');
+      let files: string[];
+      try {
+        files = fs.readdirSync(archiveDirectory).filter(file => file.endsWith('.json'));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      for (const file of files) {
+        const source = path.join(archiveDirectory, file);
+        const parsed: unknown = JSON.parse(fs.readFileSync(source, 'utf8'));
+        if (!parsed || typeof parsed !== 'object' || !('id' in parsed) || typeof parsed.id !== 'string'
+          || !('metadata' in parsed) || !parsed.metadata || typeof parsed.metadata !== 'object'
+          || !('projectId' in parsed.metadata) || parsed.metadata.projectId !== projectId) continue;
+        const destination = this.filePath(parsed.id);
+        if (path.resolve(source) !== path.resolve(path.join(path.dirname(destination), 'archive', path.basename(destination)))) continue;
+        if (fs.existsSync(destination)) throw new Error(`Cannot restore project session ${parsed.id}: an active session with the same id already exists.`);
+        sessions.push({ id: parsed.id, source, destination });
+      }
+    }
+    for (const session of sessions) {
+      fs.mkdirSync(path.dirname(session.destination), { recursive: true });
+      fs.renameSync(session.source, session.destination);
+    }
+    return sessions.length;
   }
 
   list(): SessionSummary[] {
     try {
       const summaries: SessionSummary[] = [];
-      for (const f of fs.readdirSync(this.dir).filter(f => f.endsWith('.json'))) {
+      for (const directory of this.sessionDirectories()) {
+        let files: string[];
         try {
-          const s = JSON.parse(fs.readFileSync(path.join(this.dir, f), 'utf-8')) as Session;
-          summaries.push({
-            id: s.id,
-            label: s.metadata?.label,
-            createdAt: s.createdAt,
-            updatedAt: s.updatedAt,
-            messageCount: s.messages.length,
-            provider: s.metadata?.provider,
-            model: s.metadata?.model,
-            parentSessionId: s.metadata?.parentSessionId,
-            sessionKind: s.metadata?.sessionKind ?? (s.metadata?.parentSessionId ? 'subagent' : undefined),
-          });
-        } catch { /* skip */ }
+          files = fs.readdirSync(directory).filter(file => file.endsWith('.json'));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw error;
+        }
+        for (const file of files) {
+          try {
+            const parsed = JSON.parse(fs.readFileSync(path.join(directory, file), 'utf-8')) as Session;
+            const s = this.load(parsed.id) ?? parsed;
+            const title = deriveConversationTitle(s.messages);
+            summaries.push({
+              id: s.id,
+              label: title ?? s.metadata?.label,
+              createdAt: s.createdAt,
+              updatedAt: s.updatedAt,
+              messageCount: s.messages.length,
+              provider: s.metadata?.provider,
+              model: s.metadata?.model,
+              parentSessionId: s.metadata?.parentSessionId,
+              sessionKind: s.metadata?.sessionKind ?? (s.metadata?.parentSessionId ? 'subagent' : undefined),
+              projectId: s.metadata?.projectId,
+              agentId: s.metadata?.agentId,
+            });
+          } catch { /* skip */ }
+        }
       }
       return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
     } catch {
@@ -314,16 +417,28 @@ export class SessionManager {
     const now = Date.now();
     let cleaned = 0;
     try {
-      for (const f of fs.readdirSync(this.dir).filter(f => f.endsWith('.json'))) {
+      for (const directory of this.sessionDirectories()) {
+        let files: string[];
         try {
-          const s = JSON.parse(fs.readFileSync(path.join(this.dir, f), 'utf-8')) as Session;
-          if (now - s.updatedAt > this.ttl) {
-            fs.unlinkSync(path.join(this.dir, f));
-            cleaned++;
-          }
-        } catch { /* skip corrupt files */ }
+          files = fs.readdirSync(directory).filter(file => file.endsWith('.json'));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw error;
+        }
+        for (const file of files) {
+          try {
+            const source = path.join(directory, file);
+            const s = JSON.parse(fs.readFileSync(source, 'utf-8')) as Session;
+            if (now - s.updatedAt > this.ttl) {
+              fs.unlinkSync(source);
+              cleaned++;
+            }
+          } catch { /* skip corrupt files */ }
+        }
       }
-    } catch { /* dir doesn't exist */ }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
     return cleaned;
   }
 
@@ -337,12 +452,6 @@ export class SessionManager {
   }
 
   // ── Session Archival ─────────────────────────────────────────────────────
-
-  private archiveDir(): string {
-    const dir = path.join(this.dir, 'archive');
-    fs.mkdirSync(dir, { recursive: true });
-    return dir;
-  }
 
   /**
    * Archive a session: move old messages to an archive file, keep only
@@ -365,7 +474,9 @@ export class SessionManager {
     const toArchive = convMsgs.slice(0, boundary);
     const toKeep = convMsgs.slice(boundary);
 
-    const archiveFile = path.join(this.archiveDir(), `${id.replace(/[^a-zA-Z0-9_\-:.]/g, '_')}-${Date.now()}.json`);
+    const archiveDirectory = path.join(path.dirname(this.filePath(id)), 'archive');
+    fs.mkdirSync(archiveDirectory, { recursive: true });
+    const archiveFile = path.join(archiveDirectory, `${id.replace(/[^a-zA-Z0-9_\-:.]/g, '_')}-${Date.now()}.json`);
     const archiveData = {
       sessionId: id,
       archivedAt: Date.now(),

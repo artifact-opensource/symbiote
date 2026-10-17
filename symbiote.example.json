@@ -29,6 +29,12 @@
   "tools": {
     "enabled": true
   },
+  "sandbox": {
+    "enabled": true,
+    "ownerAccess": true,
+    "internalTier": "standard",
+    "nonOwnerTier": "restricted"
+  },
   "timeouts": {
     "llmRequestMs": 900000
   },

@@ -26,8 +26,16 @@ All environment variables used by Symbiote. Set these in `.env` (auto-loaded at 
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `SYMBIOTE_API_KEY` | If using HTTP API | Bearer token for API authentication |
-| `SYMBIOTE_PORT` | No | HTTP API port (default: `3006`) |
+| `SYMBIOTE_API_KEY` | If using HTTP API | API key for HTTP API authentication |
+
+## Web Control Room
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SYMBIOTE_WEB_HOST` | No | Control Room bind host (default: `0.0.0.0`) |
+| `SYMBIOTE_WEB_TOKEN` | No | Custom bearer token for LAN Control Room requests; use a secret of at least 32 characters |
+
+Set HTTP API and Control Room ports in `symbiote.json` (`apiPort` and `webPort`). The current runtime does not apply `SYMBIOTE_API_HOST`, `SYMBIOTE_API_PORT`, or `SYMBIOTE_PORT` over its default configuration.
 
 ## Workspace
 

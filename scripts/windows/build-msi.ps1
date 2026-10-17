@@ -85,6 +85,10 @@ try {
     Copy-Item -LiteralPath $sourcePath -Destination $appSource -Recurse -Force
   }
 
+  $installerWebDirectory = Join-Path $appSource 'dist\web'
+  New-Item -ItemType Directory -Path $installerWebDirectory -Force | Out-Null
+  Copy-Item -LiteralPath (Join-Path $repositoryRoot 'web\installer.html') -Destination $installerWebDirectory
+
   $electronDistribution = Join-Path $repositoryRoot 'node_modules\electron\dist'
   if (-not (Test-Path -LiteralPath (Join-Path $electronDistribution 'electron.exe') -PathType Leaf)) {
     throw "Electron runtime is missing. Run npm install before building the MSI: $electronDistribution"
@@ -115,9 +119,16 @@ try {
   Get-VerifiedArchive $nodeUrl $nodeArchive $nodeSha256
   $nodeExtract = Join-Path $workDirectory 'node'
   Expand-Archive -LiteralPath $nodeArchive -DestinationPath $nodeExtract
-  $nodeRoot = Join-Path $nodeExtract "node-v$nodeVersion-win-x64"
-  Copy-Item -LiteralPath (Join-Path $nodeRoot 'node.exe') -Destination (Join-Path $appSource 'node.exe')
-  Copy-Item -LiteralPath (Join-Path $nodeRoot 'LICENSE') -Destination (Join-Path $appSource 'NODE-LICENSE.txt')
+  $nodeExecutable = Get-ChildItem -LiteralPath $nodeExtract -Filter 'node.exe' -File -Recurse | Select-Object -First 1
+  if (-not $nodeExecutable) {
+    throw "The verified Node.js archive did not contain node.exe: $nodeArchive"
+  }
+  $nodeLicense = Join-Path $nodeExecutable.DirectoryName 'LICENSE'
+  if (-not (Test-Path -LiteralPath $nodeLicense -PathType Leaf)) {
+    throw "The verified Node.js archive did not contain the runtime license beside node.exe: $nodeLicense"
+  }
+  Copy-Item -LiteralPath $nodeExecutable.FullName -Destination (Join-Path $appSource 'node.exe')
+  Copy-Item -LiteralPath $nodeLicense -Destination (Join-Path $appSource 'NODE-LICENSE.txt')
 
   $nssmArchive = Join-Path $downloads 'nssm-2.24-103-gdee49fc.zip'
   Get-VerifiedArchive $nssmUrl $nssmArchive $nssmSha256

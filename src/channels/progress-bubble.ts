@@ -71,6 +71,8 @@ export class ToolProgressBubble {
     private closed = false;
     private totalCount = 0;
     private done = false;
+    private streamedText = '';
+    private currentTool = '';
 
     constructor(
         private deps: ProgressDeps,
@@ -85,6 +87,7 @@ export class ToolProgressBubble {
             const emoji = EMOJI[name] || '⚙️';
             const prev = previewOf(name, args);
             this.totalCount++;
+            this.currentTool = name;
             this.lines.push(prev ? `${emoji} **${name}** \`${prev}\`` : `${emoji} **${name}**`);
             if (this.lines.length > 40) this.lines.splice(0, this.lines.length - 40);
             await this.flush(false);
@@ -92,19 +95,49 @@ export class ToolProgressBubble {
         catch { /* never break an agent turn over cosmetics */ }
     }
 
-    /** Force a final edit (turn finished). */
-    async finalize(): Promise<void> {
-        if (this.closed) return;
+    async toolDone(name: string): Promise<void> {
+        if (this.closed || this.currentTool !== name) return;
+        this.currentTool = '';
+        try { await this.flush(false); } catch { /* cosmetic only */ }
+    }
+
+    /** Stream assistant text into the same editable channel message. */
+    async streamText(delta: string): Promise<void> {
+        if (this.closed || !delta || !this.deps.edit) return;
+        this.streamedText += delta;
+        try { await this.flush(false); } catch { /* never break an agent turn over cosmetics */ }
+    }
+
+    /** Force a final edit (turn finished). Returns true when finalText was delivered in-place. */
+    async finalize(finalText?: string): Promise<boolean> {
+        if (this.closed) return false;
         // Never posted a message and no tool lines — don't create a stray
         // "Working…" bubble for tool-less turns.
-        if (this.messageId === null && this.lines.length === 0) { this.closed = true; return; }
+        if (this.messageId === null && this.lines.length === 0 && !this.streamedText) { this.closed = true; return false; }
         this.closed = true;
         this.done = true;
         if (this.timer) { clearTimeout(this.timer); this.timer = null; }
-        try { await this.flush(true); } catch { /* ignore */ }
+        const canDeliverFinal = typeof finalText === 'string'
+            && finalText.length <= TEXT_BUDGET
+            && this.messageId !== null
+            && this.messageId !== ''
+            && this.deps.edit !== null;
+        if (canDeliverFinal) this.streamedText = finalText;
+        else if (typeof finalText === 'string' && finalText.length > TEXT_BUDGET) this.streamedText = '';
+        try {
+            const flushed = await this.flush(true);
+            return canDeliverFinal && flushed;
+        } catch { /* fall back to the regular channel send */ }
+        return false;
     }
 
     private render(): string {
+        if (this.streamedText) {
+            let text = this.streamedText;
+            if (text.length > TEXT_BUDGET) text = '…' + text.slice(-(TEXT_BUDGET - 1));
+            const activity = !this.done && this.currentTool ? `\n\n⚙️ **Using ${this.currentTool}…**` : '';
+            return text + activity;
+        }
         const header = this.done
             ? `✅ **Done — ${this.totalCount} tool call${this.totalCount === 1 ? '' : 's'}**`
             : '⚙️ **Working…**';
@@ -115,8 +148,8 @@ export class ToolProgressBubble {
         return header + '\n' + ls.join('\n');
     }
 
-    private async flush(force: boolean): Promise<void> {
-        if (this.deps.edit === null && this.messageId !== null) return; // no edit path available
+    private async flush(force: boolean): Promise<boolean> {
+        if (this.deps.edit === null && this.messageId !== null) return false; // no edit path available
         const now = Date.now();
         if (!force && this.messageId !== null) {
             const wait = EDIT_THROTTLE_MS - (now - this.lastEdit);
@@ -124,7 +157,7 @@ export class ToolProgressBubble {
                 if (!this.timer) {
                     this.timer = setTimeout(() => { this.timer = null; void this.flush(true).catch(() => { }); }, wait);
                 }
-                return;
+                return false;
             }
         }
         const text = this.render();
@@ -136,10 +169,12 @@ export class ToolProgressBubble {
                 if (this.deps.edit === null) this.closed = false;
             }
             else if (this.messageId !== '' && this.deps.edit) {
-                await this.deps.edit(this.adapterId, this.chatId, this.messageId, text);
+                const edited = await this.deps.edit(this.adapterId, this.chatId, this.messageId, text);
+                if (edited === null) return false;
             }
             this.lastEdit = Date.now();
+            return this.messageId !== '';
         }
-        catch { /* ignore */ }
+        catch { return false; }
     }
 }

@@ -1,5 +1,8 @@
 const { app, BrowserWindow, dialog, ipcMain, nativeTheme } = require('electron');
-const { execFile, execFileSync } = require('node:child_process');
+const { execFile, execFileSync, spawn } = require('node:child_process');
+const crypto = require('node:crypto');
+const http = require('node:http');
+const net = require('node:net');
 const { promisify } = require('node:util');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -10,7 +13,23 @@ let mainWindow;
 let miniWindow;
 let overlayOpacity = 0.88;
 let declinedFirewallPort;
+let desktopTheme;
 const preferencesPath = path.join(app.getPath('userData'), 'desktop-preferences.json');
+const gatewayProcessPath = path.join(app.getPath('userData'), 'gateway-process.json');
+let gatewayStartup;
+let updateInstallArmed = false;
+let updateInstallTimer;
+let resolveUpdateInstall;
+
+function finishUpdateInstall(started) {
+  if (updateInstallTimer) clearTimeout(updateInstallTimer);
+  updateInstallTimer = undefined;
+  updateInstallArmed = false;
+  const resolve = resolveUpdateInstall;
+  resolveUpdateInstall = undefined;
+  resolve?.(started);
+}
+const ownsSingleInstanceLock = app.requestSingleInstanceLock();
 
 try {
   const preferences = JSON.parse(fs.readFileSync(preferencesPath, 'utf8'));
@@ -18,38 +37,14 @@ try {
     overlayOpacity = preferences.overlayOpacity;
   }
   if (Number.isInteger(preferences.declinedFirewallPort)) declinedFirewallPort = preferences.declinedFirewallPort;
+  if (preferences.desktopTheme === 'dark' || preferences.desktopTheme === 'light') desktopTheme = preferences.desktopTheme;
 } catch (error) {
   if (error.code !== 'ENOENT') console.error('Could not read desktop preferences:', error);
 }
 
 function readGatewaySettings() {
-  const candidates = [path.join(process.cwd(), 'symbiote.json')];
-  if (process.platform === 'win32') {
-    try {
-      const registry = execFileSync('reg.exe', ['query', 'HKLM\\Software\\Artifact Virtual\\Symbiote', '/v', 'DataDirectory'], { encoding: 'utf8' });
-      const dataDirectory = registry.match(/DataDirectory\s+REG_SZ\s+(.+)/i)?.[1]?.trim();
-      if (dataDirectory) candidates.push(path.join(dataDirectory, 'symbiote.json'));
-    } catch (error) {
-      if (error.status !== 1 && error.code !== 'ENOENT') console.error('Could not read the Symbiote data directory from the registry:', error);
-    }
-  }
-  for (const file of candidates) {
-    try {
-      const config = JSON.parse(fs.readFileSync(file, 'utf8'));
-      const envFile = path.join(path.dirname(file), '.env');
-      let configuredHost = '';
-      try {
-        const match = fs.readFileSync(envFile, 'utf8').match(/^\s*SYMBIOTE_WEB_HOST\s*=\s*["']?([^"'#\r\n]+)["']?\s*$/m);
-        configuredHost = match?.[1]?.trim() ?? '';
-      } catch (error) {
-        if (error.code !== 'ENOENT') console.error(`Could not read desktop gateway environment ${envFile}:`, error);
-      }
-      return { host: process.env.SYMBIOTE_WEB_HOST || configuredHost || config.webHost || '0.0.0.0', port: Number(config.webPort) || 3009 };
-    } catch (error) {
-      if (error.code !== 'ENOENT') console.error(`Could not read desktop gateway config ${file}:`, error);
-    }
-  }
-  return { host: process.env.SYMBIOTE_WEB_HOST || '0.0.0.0', port: 3009 };
+  const gateway = readGatewayConfig();
+  return { host: gateway.bindHost, port: gateway.port };
 }
 
 function isLoopbackHost(host) {
@@ -59,6 +54,288 @@ function isLoopbackHost(host) {
 
 function firewallScriptPath() {
   return path.join(__dirname, '..', 'scripts', 'windows', 'configure-firewall.ps1');
+}
+
+function installedDataDirectory() {
+  if (process.platform !== 'win32') return undefined;
+  try {
+    const registry = execFileSync('reg.exe', ['query', 'HKLM\\Software\\Artifact Virtual\\Symbiote', '/v', 'DataDirectory'], { encoding: 'utf8' });
+    return registry.match(/DataDirectory\s+REG_SZ\s+(.+)/i)?.[1]?.trim();
+  } catch (error) {
+    if (error.status !== 1 && error.code !== 'ENOENT') console.error('Could not read the Symbiote data directory from the registry:', error);
+    return undefined;
+  }
+}
+
+function readGatewayConfig() {
+  const dataDirectory = installedDataDirectory();
+  const candidates = [
+    process.env.SYMBIOTE_CONFIG,
+    ...(app.isPackaged && dataDirectory ? [path.join(dataDirectory, 'symbiote.json')] : []),
+    path.join(process.cwd(), 'symbiote.json'),
+    ...(!app.isPackaged && dataDirectory ? [path.join(dataDirectory, 'symbiote.json')] : []),
+  ].filter(Boolean);
+  for (const candidate of [...new Set(candidates)]) {
+    const configPath = path.resolve(candidate);
+    if (!fs.existsSync(configPath)) continue;
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const port = config.webPort === undefined ? 3009 : Number(config.webPort);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      throw new RangeError(`Invalid configured web port in ${configPath}: ${config.webPort}`);
+    }
+    const environmentPath = path.join(path.dirname(configPath), '.env');
+    let environmentHost = '';
+    try {
+      environmentHost = fs.readFileSync(environmentPath, 'utf8')
+        .match(/^\s*SYMBIOTE_WEB_HOST\s*=\s*["']?([^"'#\r\n]+)["']?\s*$/m)?.[1]?.trim() ?? '';
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    const configuredHost = process.env.SYMBIOTE_WEB_HOST || environmentHost || config.webHost || '127.0.0.1';
+    const host = configuredHost === '0.0.0.0' || configuredHost === '::' ? '127.0.0.1' : configuredHost;
+    const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+    return {
+      configPath,
+      configDirectory: path.dirname(configPath),
+      daemonPath: path.join(__dirname, '..', 'dist', 'gateway', 'daemon.js'),
+      bindHost: configuredHost,
+      port,
+      url: `http://${formattedHost}:${port}`,
+    };
+  }
+  throw new Error(`Could not find symbiote.json. Checked: ${candidates.map(file => path.resolve(file)).join(', ')}`);
+}
+
+function gatewayHealthCheck(gateway) {
+  return new Promise(resolve => {
+    const request = http.get(`${gateway.url}/api/status`, { timeout: 2000 }, response => {
+      response.resume();
+      resolve(response.statusCode === 200);
+    });
+    request.once('timeout', () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.once('error', () => resolve(false));
+  });
+}
+
+function gatewayPortInUse(gateway) {
+  const url = new URL(gateway.url);
+  return new Promise(resolve => {
+    const socket = net.connect({ host: url.hostname.replace(/^\[|\]$/g, ''), port: gateway.port });
+    socket.setTimeout(1500);
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.once('error', () => resolve(false));
+  });
+}
+
+function serviceState() {
+  if (process.platform !== 'win32') return undefined;
+  try {
+    const output = execFileSync('sc.exe', ['query', 'SymbioteGateway'], { encoding: 'utf8', windowsHide: true });
+    return output.match(/STATE\s*:\s*\d+\s+([A-Z_]+)/i)?.[1]?.toUpperCase() ?? 'UNKNOWN';
+  } catch (error) {
+    const details = `${error.stdout ?? ''}${error.stderr ?? ''}${error.message ?? ''}`;
+    if (/1060|does not exist as an installed service/i.test(details)) return undefined;
+    throw new Error(`Could not inspect the SymbioteGateway service: ${details.trim()}`);
+  }
+}
+
+function runServiceCommand(action) {
+  execFileSync('sc.exe', [action, 'SymbioteGateway'], { encoding: 'utf8', windowsHide: true, stdio: 'pipe' });
+}
+
+async function waitForServiceState(expected, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (serviceState() === expected) return true;
+    await new Promise(resolve => setTimeout(resolve, 400));
+  }
+  return serviceState() === expected;
+}
+
+async function waitForGateway(gateway, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await gatewayHealthCheck(gateway)) return true;
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  return gatewayHealthCheck(gateway);
+}
+
+function managedGatewayProcess(pid, gateway) {
+  if (!Number.isInteger(pid) || pid < 1) return false;
+  if (process.platform === 'win32') {
+    const script = '$p=Get-CimInstance Win32_Process -Filter "ProcessId = $env:SYMBIOTE_GATEWAY_PID"; if ($p -and $p.CommandLine -and $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_SCRIPT,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_CONFIG,[StringComparison]::OrdinalIgnoreCase) -ge 0) { exit 0 }; exit 1';
+    try {
+      execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+        encoding: 'utf8',
+        windowsHide: true,
+        env: {
+          ...process.env,
+          SYMBIOTE_GATEWAY_PID: String(pid),
+          SYMBIOTE_GATEWAY_SCRIPT: gateway.daemonPath,
+          SYMBIOTE_GATEWAY_CONFIG: gateway.configPath,
+        },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    const commandLine = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+    return commandLine.includes(gateway.daemonPath) && commandLine.includes(gateway.configPath);
+  } catch {
+    return false;
+  }
+}
+
+async function stopStaleManagedGateway(gateway) {
+  let previous;
+  try {
+    previous = JSON.parse(fs.readFileSync(gatewayProcessPath, 'utf8'));
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.error('Could not read the previous Electron-managed Gateway process record:', error);
+      return;
+    }
+  }
+  if (!previous) return;
+  if (!managedGatewayProcess(previous.pid, gateway)) {
+    fs.rmSync(gatewayProcessPath, { force: true });
+    return;
+  }
+  try {
+    process.kill(previous.pid, 'SIGTERM');
+  } catch (error) {
+    if (error.code !== 'ESRCH') throw error;
+  }
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline && managedGatewayProcess(previous.pid, gateway)) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  if (managedGatewayProcess(previous.pid, gateway)) {
+    process.kill(previous.pid, 'SIGKILL');
+    const killDeadline = Date.now() + 3000;
+    while (Date.now() < killDeadline && managedGatewayProcess(previous.pid, gateway)) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  fs.rmSync(gatewayProcessPath, { force: true });
+}
+
+function resolveNodeExecutable() {
+  if (process.env.SYMBIOTE_NODE) return process.env.SYMBIOTE_NODE;
+  const bundledNode = path.join(__dirname, '..', 'node.exe');
+  if (fs.existsSync(bundledNode)) return bundledNode;
+  if (process.platform === 'win32') {
+    try {
+      const candidates = execFileSync('where.exe', ['node.exe'], { encoding: 'utf8', windowsHide: true })
+        .split(/\r?\n/)
+        .map(candidate => candidate.trim())
+        .filter(candidate => candidate && path.resolve(candidate).toLowerCase() !== path.resolve(process.execPath).toLowerCase());
+      if (candidates.length) return candidates[0];
+    } catch (error) {
+      if (error.status !== 1 && error.code !== 'ENOENT') console.error('Could not locate a standalone Node.js runtime:', error);
+    }
+  } else {
+    for (const directory of (process.env.PATH || '').split(path.delimiter)) {
+      const candidate = path.join(directory, 'node');
+      if (fs.existsSync(candidate) && path.resolve(candidate) !== path.resolve(process.execPath)) return candidate;
+    }
+  }
+  return process.execPath;
+}
+
+function launchGateway(gateway) {
+  if (!fs.existsSync(gateway.daemonPath)) {
+    throw new Error(`Built Gateway entry point is missing: ${gateway.daemonPath}. Rebuild the application before launching Electron.`);
+  }
+  const executable = resolveNodeExecutable();
+  const logDirectory = path.join(app.getPath('userData'), 'logs');
+  fs.mkdirSync(logDirectory, { recursive: true });
+  const logHandle = fs.openSync(path.join(logDirectory, 'gateway.log'), 'a');
+  const child = spawn(executable, [gateway.daemonPath, `--config=${gateway.configPath}`], {
+    cwd: gateway.configDirectory,
+    detached: true,
+    windowsHide: true,
+    stdio: ['ignore', logHandle, logHandle],
+    env: {
+      ...process.env,
+      ...(executable === process.execPath && !process.env.SYMBIOTE_NODE ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+    },
+  });
+  fs.closeSync(logHandle);
+  child.once('error', error => console.error('Could not start the Symbiote Gateway:', error));
+  child.once('spawn', () => {
+    fs.writeFileSync(gatewayProcessPath, JSON.stringify({
+      pid: child.pid,
+      daemonPath: gateway.daemonPath,
+      configPath: gateway.configPath,
+    }), 'utf8');
+    child.unref();
+  });
+  child.once('exit', () => {
+    try {
+      const recorded = JSON.parse(fs.readFileSync(gatewayProcessPath, 'utf8'));
+      if (recorded.pid === child.pid) fs.rmSync(gatewayProcessPath, { force: true });
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.error('Could not clear the exited Gateway process record:', error);
+    }
+  });
+  return child;
+}
+
+async function ensureGateway() {
+  if (gatewayStartup) return gatewayStartup;
+  gatewayStartup = (async () => {
+    const gateway = readGatewayConfig();
+    if (await gatewayHealthCheck(gateway)) return gateway;
+
+    const installedServiceState = serviceState();
+    if (installedServiceState) {
+      try {
+        if (installedServiceState !== 'STOPPED') {
+          runServiceCommand('stop');
+          if (!await waitForServiceState('STOPPED')) {
+            throw new Error('The SymbioteGateway service did not stop cleanly.');
+          }
+        }
+        runServiceCommand('start');
+      } catch (error) {
+        throw new Error(`The SymbioteGateway service is not healthy and could not be restarted: ${error.message}`);
+      }
+      if (!await waitForGateway(gateway)) {
+        throw new Error(`The SymbioteGateway service started but did not become healthy at ${gateway.url}/api/status.`);
+      }
+      return gateway;
+    }
+
+    await stopStaleManagedGateway(gateway);
+    if (await gatewayPortInUse(gateway)) {
+      throw new Error(`Port ${gateway.port} is occupied by a process that is not a healthy Gateway managed by Electron. It was left untouched to avoid terminating an unrelated process.`);
+    }
+    const child = launchGateway(gateway);
+    if (!await waitForGateway(gateway)) {
+      if (child.pid && child.exitCode === null) child.kill();
+      throw new Error(`The Gateway process did not become healthy at ${gateway.url}/api/status. See ${path.join(app.getPath('userData'), 'logs', 'gateway.log')}.`);
+    }
+    return gateway;
+  })();
+  try {
+    return await gatewayStartup;
+  } finally {
+    gatewayStartup = undefined;
+  }
 }
 
 function hasFirewallRule(port) {
@@ -78,6 +355,7 @@ function saveDesktopPreferences() {
   try {
     fs.writeFileSync(preferencesPath, JSON.stringify({
       overlayOpacity,
+      ...(desktopTheme ? { desktopTheme } : {}),
       ...(declinedFirewallPort ? { declinedFirewallPort } : {}),
     }), 'utf8');
   } catch (error) {
@@ -139,27 +417,7 @@ async function configureLanAccess(forcePrompt = false) {
 
 function getGatewayUrl() {
   if (isDesktopDev) return isDesktopDev.replace(/\/$/, '');
-  const candidates = [path.join(process.cwd(), 'symbiote.json')];
-  for (const file of candidates) {
-    try {
-      const config = JSON.parse(fs.readFileSync(file, 'utf8'));
-      const host = config.webHost === '0.0.0.0' || config.webHost === '::' ? '127.0.0.1' : (config.webHost || '127.0.0.1');
-      const port = Number(config.webPort) || 3009;
-      return `http://${host}:${port}`;
-    } catch (error) {
-      if (error.code !== 'ENOENT') console.error(`Could not read desktop gateway config ${file}:`, error);
-    }
-  }
-  try {
-    const registry = execFileSync('reg.exe', ['query', 'HKLM\\Software\\Artifact Virtual\\Symbiote', '/v', 'WebPort'], { encoding: 'utf8' });
-    const portMatch = registry.match(/WebPort\s+REG_DWORD\s+0x([0-9a-f]+)/i);
-    const port = portMatch ? Number.parseInt(portMatch[1], 16) : 3009;
-    if (port < 1 || port > 65535) throw new RangeError(`Invalid configured web port: ${port}`);
-    return `http://127.0.0.1:${port}`;
-  } catch (error) {
-    if (error.status !== 1 && error.code !== 'ENOENT') console.error('Could not read the Symbiote web port from the registry:', error);
-    return 'http://127.0.0.1:3009';
-  }
+  return readGatewayConfig().url;
 }
 
 function rendererUrl(minimal) {
@@ -169,6 +427,45 @@ function rendererUrl(minimal) {
   return url.toString();
 }
 
+function loadGatewayWithRetry(target, minimal) {
+  const gatewayUrl = rendererUrl(minimal);
+  let attempt = 0;
+  let retryTimer;
+  let closed = false;
+  const scheduleRetry = () => {
+    if (closed || target.isDestroyed() || retryTimer) return;
+    const delay = Math.min(1000 * (2 ** Math.min(attempt, 4)), 15000);
+    attempt++;
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      load();
+    }, delay);
+  };
+  const load = () => {
+    if (closed || target.isDestroyed()) return;
+    void target.loadURL(gatewayUrl).catch(error => {
+      console.error('Could not load the Symbiote Gateway UI; retrying:', error);
+      scheduleRetry();
+    });
+  };
+  target.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return;
+    console.error(`Symbiote Gateway page load failed (${errorCode}): ${errorDescription}`);
+    scheduleRetry();
+  });
+  target.webContents.on('did-finish-load', () => {
+    if (target.webContents.getURL() !== gatewayUrl) return;
+    attempt = 0;
+    clearTimeout(retryTimer);
+    retryTimer = undefined;
+  });
+  target.once('closed', () => {
+    closed = true;
+    clearTimeout(retryTimer);
+  });
+  load();
+}
+
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -176,7 +473,7 @@ function createMainWindow() {
     minWidth: 900,
     minHeight: 640,
     show: false,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#111318' : '#f4f5f7',
+    backgroundColor: desktopTheme === 'dark' ? '#000000' : desktopTheme === 'light' ? '#ffffff' : nativeTheme.shouldUseDarkColors ? '#000000' : '#ffffff',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -188,11 +485,102 @@ function createMainWindow() {
     mainWindow.show();
     if (process.platform === 'win32') void configureLanAccess();
   });
+  mainWindow.webContents.session.on('will-download', (event, item) => {
+    if (!updateInstallArmed) return;
+    const downloadUrl = new URL(item.getURL());
+    const gatewayUrl = new URL(getGatewayUrl());
+    const filename = item.getFilename();
+    if (updateInstallTimer) clearTimeout(updateInstallTimer);
+    updateInstallTimer = undefined;
+    if (downloadUrl.origin !== gatewayUrl.origin || downloadUrl.pathname !== '/api/update/installer'
+      || !/^Symbiote-\d+\.\d+\.\d+-x64\.msi$/.test(filename)) {
+      item.cancel();
+      finishUpdateInstall(false);
+      console.error('Rejected an unexpected download while an update install was armed.');
+      return;
+    }
+    const installerPath = path.join(app.getPath('temp'), `symbiote-update-${Date.now()}-${filename}`);
+    item.setSavePath(installerPath);
+    item.once('done', async (_downloadEvent, state) => {
+      if (state !== 'completed') {
+        fs.rmSync(installerPath, { force: true });
+        finishUpdateInstall(false);
+        if (state !== 'cancelled') console.error(`Symbiote update download ended with state: ${state}`);
+        return;
+      }
+      try {
+        const status = await new Promise((resolve, reject) => {
+          http.get(`${getGatewayUrl()}/api/status`, response => {
+            let body = '';
+            response.setEncoding('utf8');
+            response.on('data', chunk => { body += chunk; });
+            response.on('end', () => {
+              try {
+                if (response.statusCode !== 200) throw new Error(`Gateway update status returned HTTP ${response.statusCode}.`);
+                resolve(JSON.parse(body));
+              } catch (error) {
+                reject(error);
+              }
+            });
+          }).once('error', reject);
+        });
+        const expected = status.update?.download;
+        if (expected?.state !== 'ready' || expected.filename !== filename || !/^[a-f0-9]{64}$/.test(expected.sha256 || '')) {
+          throw new Error('Gateway no longer has the matching verified update package staged.');
+        }
+        const actualHash = await new Promise((resolve, reject) => {
+          const hash = crypto.createHash('sha256');
+          const stream = fs.createReadStream(installerPath);
+          stream.on('error', reject);
+          stream.on('data', chunk => hash.update(chunk));
+          stream.on('end', () => resolve(hash.digest('hex')));
+        });
+        if (!crypto.timingSafeEqual(Buffer.from(actualHash, 'hex'), Buffer.from(expected.sha256, 'hex'))) {
+          throw new Error('The downloaded installer failed its SHA-256 verification.');
+        }
+        const answer = await dialog.showMessageBox(mainWindow, {
+          type: 'question',
+          title: 'Install Symbiote update?',
+          message: `Install Symbiote ${expected.version}?`,
+          detail: 'The verified Windows installer will open. Windows may request administrator approval, and the Gateway may be unavailable briefly during the update.',
+          buttons: ['Install update', 'Cancel'],
+          defaultId: 0,
+          cancelId: 1,
+          noLink: true,
+        });
+        if (answer.response !== 0) {
+          fs.rmSync(installerPath, { force: true });
+          finishUpdateInstall(false);
+          return;
+        }
+        const installer = spawn('msiexec.exe', ['/i', installerPath], {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: false,
+        });
+        installer.once('error', error => {
+          finishUpdateInstall(false);
+          console.error('Could not launch the Symbiote update installer:', error);
+          dialog.showErrorBox('Update installer could not start', error.message);
+        });
+        installer.once('spawn', () => {
+          installer.unref();
+          finishUpdateInstall(true);
+          app.quit();
+        });
+      } catch (error) {
+        fs.rmSync(installerPath, { force: true });
+        finishUpdateInstall(false);
+        console.error('Could not verify the downloaded Symbiote update:', error);
+        dialog.showErrorBox('Symbiote update failed', error.message);
+      }
+    });
+  });
   mainWindow.on('closed', () => {
     mainWindow = null;
     if (!miniWindow) app.quit();
   });
-  void mainWindow.loadURL(rendererUrl(false));
+  loadGatewayWithRetry(mainWindow, false);
 }
 
 function createMiniWindow() {
@@ -228,7 +616,7 @@ function createMiniWindow() {
     if (mainWindow) mainWindow.show();
     else app.quit();
   });
-  void miniWindow.loadURL(rendererUrl(true));
+  loadGatewayWithRetry(miniWindow, true);
 }
 
 ipcMain.handle('desktop:open-mini', () => {
@@ -248,22 +636,73 @@ ipcMain.handle('desktop:set-opacity', (_event, value) => {
   }
   overlayOpacity = opacity;
   saveDesktopPreferences();
-  miniWindow?.setOpacity(1);
+  miniWindow?.setOpacity(overlayOpacity);
   return opacity;
 });
+ipcMain.handle('desktop:set-theme', (_event, theme) => {
+  if (theme !== 'dark' && theme !== 'light') throw new TypeError('Desktop theme must be "dark" or "light".');
+  desktopTheme = theme;
+  nativeTheme.themeSource = theme;
+  mainWindow?.setBackgroundColor(theme === 'dark' ? '#000000' : '#ffffff');
+  saveDesktopPreferences();
+  return desktopTheme;
+});
 ipcMain.handle('desktop:request-lan-access', () => configureLanAccess(true));
+ipcMain.handle('desktop:install-update', () => {
+  if (process.platform !== 'win32') throw new Error('In-app installation is currently supported only by the Windows desktop app.');
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('The Symbiote Control Room is not open.');
+  if (updateInstallArmed) throw new Error('An update download is already in progress.');
+  return new Promise(resolve => {
+    updateInstallArmed = true;
+    resolveUpdateInstall = resolve;
+    updateInstallTimer = setTimeout(() => finishUpdateInstall(false), 30_000);
+    updateInstallTimer.unref();
+    try {
+      mainWindow.webContents.downloadURL(`${getGatewayUrl()}/api/update/installer`);
+    } catch (error) {
+      finishUpdateInstall(false);
+      throw error;
+    }
+  });
+});
 ipcMain.handle('desktop:close-mini', () => miniWindow?.close());
 ipcMain.on('desktop:hover', (event, hovering) => {
   if (miniWindow && event.sender === miniWindow.webContents) miniWindow.setOpacity(hovering ? 1 : overlayOpacity);
 });
 
 app.whenReady().then(() => {
-  nativeTheme.themeSource = 'system';
-  createMainWindow();
+  if (!ownsSingleInstanceLock) return;
+  nativeTheme.themeSource = desktopTheme || 'system';
+  void ensureGateway().then(createMainWindow).catch(error => {
+    console.error('Electron cannot start without a healthy Symbiote Gateway:', error);
+    dialog.showErrorBox('Symbiote Gateway unavailable', error.message);
+    app.quit();
+  });
 });
 app.on('activate', () => {
-  if (!mainWindow && !miniWindow) createMainWindow();
+  if (!ownsSingleInstanceLock || mainWindow || miniWindow) return;
+  void ensureGateway().then(createMainWindow).catch(error => {
+    console.error('Electron cannot start without a healthy Symbiote Gateway:', error);
+    dialog.showErrorBox('Symbiote Gateway unavailable', error.message);
+  });
 });
+if (ownsSingleInstanceLock) {
+  app.on('second-instance', () => {
+    const window = mainWindow || miniWindow;
+    if (window) {
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+      return;
+    }
+    void ensureGateway().then(createMainWindow).catch(error => {
+      console.error('Electron cannot start without a healthy Symbiote Gateway:', error);
+      dialog.showErrorBox('Symbiote Gateway unavailable', error.message);
+    });
+  });
+} else {
+  app.quit();
+}
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });

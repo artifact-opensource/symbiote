@@ -2,7 +2,7 @@
 
 # Symbiote Documentation
 
-**Persistent AI agent runtime · v5.3.0**
+**Persistent AI agent runtime · v5.5.0**
 
 [Quick Start](getting-started/quick-start.md) · [Configuration](getting-started/configuration.md) · [CLI](reference/cli.md) · [Tools](tools/built-in.md)
 
@@ -14,11 +14,16 @@
 
 - [Quick Start](getting-started/quick-start.md)
 - [Configuration](getting-started/configuration.md)
+- [Setup Flow](getting-started/wizard.md)
+- [Web Control Room](channels/webchat.md)
 - [Boot Sequence](core/boot-sequence.md)
 - [COMB and VDB Memory](core/comb.md)
 - [Memograph Integration](core/memograph.md)
 - [Built-in Tools](tools/built-in.md)
 - [Provider Overview](providers/overview.md)
+- [Cloud Integrations](cloud-integrations.md)
+- [Google Workspace](google-workspace.md)
+- [Production Deployment and Installers](advanced/production.md)
 - [CLI Reference](reference/cli.md)
 - [Environment Variables](reference/environment.md)
 - [Documentation Map](SUMMARY.md)

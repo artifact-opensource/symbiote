@@ -16,6 +16,11 @@ playwright-report/
 .env
 .env.*
 !.env.example
+webapp/src/lib/firebase-applet-config.json
+webapp/src/lib/googleWorkspace.js
+webapp/src/lib/googleWorkspace.js.map
+webapp/src/lib/googleWorkspace.d.ts
+webapp/src/lib/googleWorkspace.d.ts.map
 symbiote.json
 !symbiote.example.json
 *.key
@@ -30,8 +35,10 @@ whatsapp-auth/
 
 # ── Runtime state, memory & user data ───────────────────
 .symbiote/
+.agents/
 .sessions/
 .session/
+.threads/
 .vdb/
 .comb/
 .pulse/*.json
@@ -57,7 +64,9 @@ whatsapp-auth/
 /TOOLS.md
 /BOOTSTRAP.md
 /MEMORY.md
-/skills/
+/skills/*
+!/skills/cron-autonomy/
+!/skills/cron-autonomy/SKILL.md
 /.index/
 
 # ── Logs ────────────────────────────────────────────────

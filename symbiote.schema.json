@@ -40,6 +40,17 @@
 
     "toolProgress": { "type": "boolean", "description": "Show live tool progress in chat channels." },
     "tools": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+    "sandbox": {
+      "type": "object",
+      "description": "Central policy for tool access across gateway and sub-agent sessions. Defaults to enabled.",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "ownerAccess": { "type": "boolean", "default": true, "description": "Allow configured owner sessions the admin tier." },
+        "internalTier": { "enum": ["standard", "restricted"], "default": "standard" },
+        "nonOwnerTier": { "enum": ["standard", "restricted"], "default": "restricted" }
+      },
+      "additionalProperties": false
+    },
     "timeouts": { "type": "object", "properties": { "llmRequestMs": { "type": "integer", "minimum": 1000 } }, "additionalProperties": { "type": "integer", "minimum": 1000 } },
     "heartbeat": {
       "type": "object",

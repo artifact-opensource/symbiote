@@ -11,7 +11,7 @@ export function createSpawnTool(
   provider: Provider,
   providerConfig: ProviderConfig,
   toolRegistry: ToolExecutor,
-  workspace: string,
+  workspace: string | ((sessionId: string) => { path: string; projectId?: string; agentId?: string }),
 ): ToolDefinition {
   return {
     name: 'spawn',
@@ -29,19 +29,23 @@ export function createSpawnTool(
       const maxIterations = Number(input.maxIterations ?? 25);
       const parentSessionId = opts?.sessionId ?? 'unknown';
       const parentDepth = subAgentManager.getDepth(parentSessionId);
+      const scopedWorkspace = typeof workspace === 'string' ? { path: workspace } : workspace(parentSessionId);
 
       try {
         const handle = await subAgentManager.spawn(
           {
             task,
             parentSessionId,
+            projectId: scopedWorkspace.projectId,
+            agentId: scopedWorkspace.agentId,
             depth: parentDepth + 1,
             maxIterations,
+            ...(opts?.googleWorkspaceAccessToken ? { googleWorkspaceAccessToken: opts.googleWorkspaceAccessToken } : {}),
           },
           provider,
           providerConfig,
           toolRegistry,
-          workspace,
+          scopedWorkspace.path,
         );
 
         return JSON.stringify({

@@ -127,16 +127,70 @@ export class VectorDB {
   index(doc: VDBDocument): boolean {
     this.ensureLoaded();
 
+    const stored = this.addDocument(doc);
+    if (!stored) return false;
+    this.appendDoc(stored);
+    return true;
+  }
+
+  /** Replace a namespace atomically in the in-memory index and compact it to disk. */
+  syncNamespace(namespace: string, documents: VDBDocument[]): { added: number; removed: number; unchanged: boolean } {
+    this.ensureLoaded();
+    if (!namespace.trim()) throw new Error('A namespace is required to synchronize vector documents.');
+    if (documents.some(document => document.namespace !== namespace)) {
+      throw new Error('Every synchronized document must belong to the requested namespace.');
+    }
+    const ids = new Set<string>();
+    for (const document of documents) {
+      if (!document.id) throw new Error('Synchronized vector documents must have stable IDs.');
+      if (ids.has(document.id)) throw new Error(`Duplicate vector document ID in namespace "${namespace}": ${document.id}`);
+      ids.add(document.id);
+    }
+    const previous = [...this.docs!.values()].filter(document => document.namespace === namespace);
+    const incomingById = new Map(documents.map(document => [document.id, document]));
+    const sameDocument = (left: VDBDocument, right: VDBDocument) =>
+      left.id === right.id && left.text === right.text && left.source === right.source
+      && left.role === right.role && left.timestamp === right.timestamp && left.namespace === right.namespace
+      && left.sessionId === right.sessionId && JSON.stringify(left.metadata ?? {}) === JSON.stringify(right.metadata ?? {});
+    const priorById = new Map(previous.map(document => [document.id, document]));
+    const unchanged = previous.length === incomingById.size
+      && [...incomingById].every(([id, document]) => {
+        const prior = priorById.get(id);
+        return prior !== undefined && sameDocument(prior, document);
+      });
+    if (unchanged) return { added: 0, removed: 0, unchanged: true };
+
+    const preserved = [...this.docs!.values()]
+      .filter(document => document.namespace !== namespace)
+      .map(({ terms: _terms, tfidf: _tfidf, ...document }) => document);
+    const replacements = [...incomingById.values()];
+    const allDocuments = [...preserved, ...replacements];
+    this.docs = new Map();
+    this.globalTerms = new Map();
+    this.bm25 = { postings: new Map(), docLengths: new Map(), avgDl: 0, N: 0 };
+    this.seenHashes.clear();
+    this.dirty = false;
+    for (const document of allDocuments) this.addDocument(document);
+    this.writeDocuments();
+    this.saveIndex();
+    return {
+      added: replacements.filter(document => !priorById.has(document.id)).length,
+      removed: previous.filter(document => !incomingById.has(document.id)).length,
+      unchanged: false,
+    };
+  }
+
+  private addDocument(doc: VDBDocument): StoredDocument | undefined {
     const id = doc.id || makeDocId(doc.text, doc.timestamp, `${doc.namespace ?? ''}:${doc.source}:${doc.sessionId ?? ''}`);
     const deduplicationKey = doc.namespace ? `${id}\0${doc.text}` : doc.text;
     const hash = crypto.createHash('md5').update(deduplicationKey).digest('hex');
-    if (this.seenHashes.has(hash)) return false;
+    if (this.seenHashes.has(hash)) return undefined;
     this.seenHashes.add(hash);
 
-    if (this.docs!.has(id)) return false;
+    if (this.docs!.has(id)) return undefined;
 
     const terms = tokenize(doc.text);
-    if (terms.length === 0) return false;
+    if (terms.length === 0) return undefined;
 
     // Register new terms
     for (const term of terms) {
@@ -172,8 +226,7 @@ export class VectorDB {
 
     this.dirty = true;
     this.lastAccess = Date.now();
-    this.appendDoc(stored);
-    return true;
+    return stored;
   }
 
   /** Batch index. Returns count of new documents. */
@@ -503,12 +556,18 @@ export class VectorDB {
   }
 
   private appendDoc(doc: StoredDocument): void {
-    const line = JSON.stringify({
-      id: doc.id, text: doc.text, source: doc.source, role: doc.role,
-      timestamp: doc.timestamp, namespace: doc.namespace, sessionId: doc.sessionId, metadata: doc.metadata,
-      terms: doc.terms, tfidf: doc.tfidf.filter(v => v !== undefined),
-    });
-    fs.appendFileSync(this.docsFile, line + '\n');
+    fs.appendFileSync(this.docsFile, `${JSON.stringify(this.serializeDocument(doc))}\n`);
+  }
+
+  private serializeDocument(doc: StoredDocument): StoredDocument {
+    return { ...doc, tfidf: doc.tfidf.filter(value => value !== undefined) };
+  }
+
+  private writeDocuments(): void {
+    const lines = [...this.docs!.values()].map(document => JSON.stringify(this.serializeDocument(document)));
+    const temporary = `${this.docsFile}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, `${lines.join('\n')}\n`);
+    fs.renameSync(temporary, this.docsFile);
   }
 
   private saveIndex(): void {
