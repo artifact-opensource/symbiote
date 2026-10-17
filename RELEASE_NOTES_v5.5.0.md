@@ -1,41 +1,77 @@
 # Symbiote v5.5.0 — Apex
 
 **Release date:** October 17, 2026
+**Compare:** [v5.3.0...v5.5.0](https://github.com/artifact-opensource/symbiote/compare/v5.3.0...v5.5.0)
 
-Symbiote 5.5 brings project work into the agent workflow, makes workspace memory relationships easier to understand, and improves visibility into the host running the Gateway. Appearance controls now carry through the hero and main page accents, while Discord streaming and Windows telemetry receive additional reliability safeguards.
+Symbiote 5.5 is a major workspace and runtime release. It rebuilds the Control Room and Electron desktop experience around live agent operations, adds project-aware work and memory, expands the agent's integrations and tools, and delivers a Windows service installer. It also improves host telemetry, memory visualization, Discord streaming, and recovery across the desktop and gateway.
 
 ## Highlights
 
-### Project-centered agent operations
+### Rebuilt Control Room and desktop app
 
-- Track project scope, tasks, progress, and agent assignments in the project workspace.
-- Edit and archive projects, and choose from available projects directly in the Agent IDE.
-- Index project files as a distinct project-memory collection alongside knowledge and session history.
+- Reworked the web Control Room and Electron desktop shell into a live workspace for monitoring and operating the Symbiote runtime.
+- Added a live workspace clock and uptime dial, runtime health and setup surfaces, and clearer desktop-to-Gateway lifecycle handling.
+- Added dedicated views for projects, the agent IDE, integrations, scheduled work, conversation threads, games, and memory.
+- Improved the shared visual system, responsive layouts, and appearance controls so the selected brightness and primary color carry through the application.
 
-### More useful system telemetry
+### Project-aware agent work
 
-- Replace the dashboard's process-memory card with GPU adapter load and memory metrics when supported by the operating system.
-- Show CPU utilization by logical core over time, in addition to total CPU usage.
-- Report GPU telemetry as unavailable when no supported adapter or operating-system counters are exposed.
-- Bound Windows counter queries, prevent overlapping GPU refreshes, and retry transient failures without waiting through an extended backoff.
+- Added project workspaces with project identity, scoped context, editable project details, and project task tracking.
+- Track scope, task status and progress, agent assignment, and work remaining from the project workspace.
+- Select projects from the Agent IDE and run project-scoped work, including terminal tasks, without globally activating a project just to inspect it.
+- Index project files as a distinct memory collection and connect projects into workspace and memory visualizations.
 
-### Clearer workspace and memory maps
+### Expanded agent tools and integrations
 
-- Arrange the hero graph outward from the main agent through conversations, projects, agents, and subagents; project relationships remain connected to their parent.
-- Rank sparse-vector memory neighbors using inverse-document-frequency-weighted cosine similarity.
-- Keep graph links bounded and symmetric, and visually distinguish knowledge, session, project, and vector-store sources.
-- Apply the selected primary hue to the hero and page headings in both light and dark appearance modes.
+- Added scheduled and recurring work through the cron manager and its Control Room panel.
+- Added persistent conversation threads and workspace task operations.
+- Added speech-to-text, image-generation, Google Workspace, and cloud-integration tools and supporting setup surfaces.
+- Added an ArtifactEngine provider configuration option and improved OpenRouter setup guidance.
+- Restored Discord slash commands and skill handlers; improved browser interaction and Windows Git Bash path handling.
 
-### More reliable integrations
+### Windows deployment and portable runtime
 
-- Serialize Discord streaming edits to prevent duplicate or out-of-order progress messages.
-- Avoid noisy expected registry errors while resolving Node on Windows.
+- Added a Windows x64 MSI installer for deploying Symbiote Gateway as a Windows service, with install, firewall, and uninstall scripts.
+- Improved runtime setup and service lifecycle handling for the desktop app and Gateway, including recovery of Discord credentials from configured sources.
+- Added release workflows for build/test validation and platform release artifacts.
+- Kept Linux and macOS source installation available through the npm package and source archives; the GitHub release provides source `.tar.gz` and `.zip` archives.
 
-## Upgrade
+### Memory, visualization, and host telemetry
 
-No configuration migration is required. For a source checkout, install dependencies and rebuild:
+- Added per-logical-core CPU history and GPU adapter load/memory metrics; GPU is reported as unavailable when the host exposes no supported telemetry.
+- Improved Windows counter collection with bounded queries, non-overlapping GPU refreshes, and recovery from transient sampling failures.
+- Rebuilt the workspace hero visualization around connected routes from the main agent through conversations/projects to agents and subagents.
+- Added project nodes to the memory map and clarified the knowledge, sessions, projects, and vector-store source families.
+- Improved sparse-vector neighbor ranking with inverse-document-frequency-weighted cosine similarity and bounded, symmetric graph links.
 
-```powershell
+### Reliability and hardening
+
+- Serialize Discord streaming edits to prevent duplicate, stale, or out-of-order progress messages.
+- Hardened long-running agent and workspace recovery, project IDE behavior, and credential handling.
+- Improved SVG safety and input sanitization, and tightened runtime/tool handling.
+- Avoid expected Windows registry lookup noise when resolving Node.
+
+## Downloads
+
+- **Windows x64:** [Symbiote-5.5.0-x64.msi](https://github.com/artifact-opensource/symbiote/releases/download/v5.5.0/Symbiote-5.5.0-x64.msi)
+- **MSI SHA-256:** `DC15DC3B92EC1BE53719EE0AFDF57353CAA89B753369CDBA83F97C6D9EFA91DF`
+- **Source archive (tar.gz):** [v5.5.0 source](https://github.com/artifact-opensource/symbiote/archive/refs/tags/v5.5.0.tar.gz)
+- **Source archive (zip):** [v5.5.0 source](https://github.com/artifact-opensource/symbiote/archive/refs/tags/v5.5.0.zip)
+- **Linux and macOS:** build from either source archive. See the installation instructions below.
+
+## Upgrade and installation
+
+No configuration migration is required. Symbiote requires Node.js 20 or newer.
+
+Build from a source checkout or extracted source archive:
+
+```bash
 npm ci
 npm run build
 ```
+
+On Windows, run the x64 MSI to install the Gateway service. On Linux and macOS, follow the source installation and daemon instructions in the [installation guide](https://github.com/artifact-opensource/symbiote/blob/master/docs/getting-started/installation.md) and [production deployment guide](https://github.com/artifact-opensource/symbiote/blob/master/docs/advanced/production.md).
+
+## Release artifacts
+
+The release page includes the Windows MSI and GitHub-generated source archives (`.tar.gz` and `.zip`). Linux and macOS do not require a separate installer package; install from source.

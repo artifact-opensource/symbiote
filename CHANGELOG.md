@@ -5,7 +5,10 @@
 Full release notes: [RELEASE_NOTES_v5.5.0.md](RELEASE_NOTES_v5.5.0.md)
 
 ### Added
+- **Control Room and desktop:** rebuilt the live web dashboard and Electron shell, with runtime health/setup, live uptime, and dedicated project, IDE, integrations, cron, threads, games, and memory views.
 - **Project operations:** project-scoped task tracking, assignment and progress visibility, project editing and archiving, and project selection directly in the agent IDE.
+- **Agent capabilities:** scheduled work, persistent threads, workspace tasks, speech-to-text, image generation, Google Workspace, and cloud integrations.
+- **Windows deployment:** x64 MSI installer and service/firewall install and uninstall workflows.
 - **System resource telemetry:** a GPU dashboard card with adapter load and memory when available, plus per-logical-core CPU history.
 - **Project memory:** project files are indexed alongside knowledge and sessions and are represented as a distinct, linked node family in the memory map.
 - **Shared appearance controls:** brightness and primary/accent hue settings apply consistently across dashboard pages and desktop/web surfaces.
@@ -15,6 +18,7 @@ Full release notes: [RELEASE_NOTES_v5.5.0.md](RELEASE_NOTES_v5.5.0.md)
 - The workspace hero graph now lays out conversations, projects, agents, and subagents as connected outward branches from the main agent.
 - Windows GPU and host-counter collection now uses bounded queries, avoids overlapping GPU refreshes, and retries transient counter failures at the normal sampling cadence.
 - Discord streaming updates are serialized to prevent duplicate or out-of-order progress messages.
+- Added release build/test automation and Windows MSI release packaging.
 
 ### Fixed
 - Restored visible primary-hue accents in the hero and page headers at both dark and light brightness settings.
