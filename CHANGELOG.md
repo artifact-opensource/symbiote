@@ -1,5 +1,32 @@
 # Changelog
 
+## v5.5.0 (2026-10-17) — Apex
+
+Full release notes: [RELEASE_NOTES_v5.5.0.md](RELEASE_NOTES_v5.5.0.md)
+
+### Added
+- **Project operations:** project-scoped task tracking, assignment and progress visibility, project editing and archiving, and project selection directly in the agent IDE.
+- **System resource telemetry:** a GPU dashboard card with adapter load and memory when available, plus per-logical-core CPU history.
+- **Project memory:** project files are indexed alongside knowledge and sessions and are represented as a distinct, linked node family in the memory map.
+- **Shared appearance controls:** brightness and primary/accent hue settings apply consistently across dashboard pages and desktop/web surfaces.
+
+### Changed
+- Memory similarity ranking now uses inverse-document-frequency-weighted sparse cosine similarity, with bounded, symmetric graph links and clearer source-specific coloring.
+- The workspace hero graph now lays out conversations, projects, agents, and subagents as connected outward branches from the main agent.
+- Windows GPU and host-counter collection now uses bounded queries, avoids overlapping GPU refreshes, and retries transient counter failures at the normal sampling cadence.
+- Discord streaming updates are serialized to prevent duplicate or out-of-order progress messages.
+
+### Fixed
+- Restored visible primary-hue accents in the hero and page headers at both dark and light brightness settings.
+- Prevented projects from appearing detached from the main agent in the workspace graph.
+- Windows resource telemetry no longer treats a slow first sample as a persistent failure.
+- Suppressed expected Windows missing-registry lookup noise during Node executable resolution.
+
+### Upgrade notes
+- No configuration migration is required.
+- GPU metrics report unavailable when the operating system does not expose a supported adapter or counters.
+- Rebuild source installations with `npm ci` followed by `npm run build`.
+
 ## v5.3.0 (2026-10-12) — Apex
 
 Full release notes: [RELEASE_NOTES_v5.3.0.md](RELEASE_NOTES_v5.3.0.md)

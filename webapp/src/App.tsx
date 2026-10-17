@@ -4,7 +4,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Activity, ArrowRight, ArrowUpRight, Bell, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Command, Compass, Copy, Cpu,
-  Archive, Brain, Cloud, Database, Download, FileClock, Gauge, Globe, HardDrive, History, Info, LayoutDashboard, Leaf, LoaderCircle, Maximize2, Menu, MemoryStick, MessageSquare, Minimize2, Moon, Network,
+  Archive, Brain, Cloud, Database, Download, FileClock, Gauge, Globe, HardDrive, History, Info, LayoutDashboard, Leaf, LoaderCircle, Maximize2, Menu, MessageSquare, Minimize2, Moon, Network,
   Biohazard, ChevronUp, FolderOpen, MessagesSquare, Plus, RefreshCw, Search, Send, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
 } from 'lucide-react';
 import type { AgentProfile, ChatMessage, GatewayConfig, GatewayStatus, HostResourceSnapshot, SessionSummary, ThreadUserHelpRequest, ToolSummary, ViewId, WorkspaceAgent, WorkspaceProject, WorkspaceRun } from './types';
@@ -200,7 +200,7 @@ function AppearanceControl({
               <span><i className="appearance-color-swatch appearance-swatch-primary" aria-hidden="true" />Primary</span>
               <output>{Math.round(settings.primaryHue)}°</output>
             </span>
-            <small>Workspace and sidebar tone</small>
+            <small>Hero, page headings, and primary controls</small>
             <input
               className="appearance-range appearance-range-hue"
               type="range"
@@ -1005,7 +1005,9 @@ export default function App() {
     setTheme(nextTheme);
     const root = document.documentElement;
     const brightness = appearance.brightness;
-    const primaryLightness = brightness * 0.85;
+    const primaryLightness = brightness >= 50
+      ? 68 + (brightness - 50) * 0.34
+      : 27 + brightness * 0.2;
     const primary = `hsl(${appearance.primaryHue} 32% ${primaryLightness}%)`;
     const primaryInk = contrastInk(hslRgb(appearance.primaryHue, 32, primaryLightness));
     const paperInk = contrastInk(hslRgb(0, 0, brightness));
@@ -2366,11 +2368,7 @@ function OverviewView(props: {
             maxValue={100}
           />
         </MetricCard>
-        <MetricCard icon={MemoryStick} label="System RAM" tone="blue">
-          <div className="metric-memory-reading"><strong>{host ? formatSystemBytes(host.memory.totalBytes - host.memory.freeBytes) : '—'}</strong><span>/ {host ? formatSystemBytes(host.memory.totalBytes) : '—'}</span></div>
-          <div className="metric-reading-subtext">{host ? `${host.memory.usedPercent.toFixed(1)}% in use` : 'Waiting for sample'}</div>
-          <MetricPlot label="System RAM use over time" area series={[{ name: 'Used', color: 'var(--appearance-icon)', values: hostHistory.map(sample => sample.memory.totalBytes - sample.memory.freeBytes) }]} maxValue={host?.memory.totalBytes || 1} />
-        </MetricCard>
+        <GpuUsageCard host={host} hostHistory={hostHistory} />
         <MetricCard icon={Network} label="Network I/O" tone="green">
           <div className="metric-dual-reading"><span><b>↓</b> {formatRate(host?.network.receiveBytesPerSecond)}</span><span><b>↑</b> {formatRate(host?.network.transmitBytesPerSecond)}</span></div>
           <MetricPlot label="Network receive and transmit rates" series={[
@@ -2590,7 +2588,8 @@ function WorkspaceGraph({ sessions, projects, profiles, agents, onOpenSession, o
     const activeAgents = agents.slice().sort((left, right) => right.startedAt - left.startedAt).slice(0, 16);
     const agentNodeIds = new Set(activeAgents.map(agent => agent.sessionId));
     const profileNodeIds = new Set(profiles.map(profile => profile.id));
-    return [
+    const projectIds = new Set(projects.map(project => project.id));
+    const graphNodes: GraphNode[] = [
       { id: 'main', label: 'Main agent', kind: 'main' },
       ...projects.map(project => ({
         id: `project:${project.id}`,
@@ -2603,7 +2602,7 @@ function WorkspaceGraph({ sessions, projects, profiles, agents, onOpenSession, o
         id: `profile:${profile.id}`,
         label: profile.name,
         kind: 'profile' as const,
-        parentId: `project:${profile.projectId}`,
+        parentId: projectIds.has(profile.projectId) ? `project:${profile.projectId}` : 'main',
         projectId: profile.projectId,
         agentId: profile.id,
       })),
@@ -2643,6 +2642,27 @@ function WorkspaceGraph({ sessions, projects, profiles, agents, onOpenSession, o
         };
       }),
     ];
+    const graphNodesById = new Map(graphNodes.map(node => [node.id, node]));
+    for (const node of graphNodes) {
+      let ancestorId = node.parentId;
+      const ancestors = new Set([node.id]);
+      let hasMissingAncestor = false;
+      while (ancestorId && ancestorId !== 'main') {
+        if (ancestors.has(ancestorId)) {
+          hasMissingAncestor = true;
+          break;
+        }
+        ancestors.add(ancestorId);
+        const ancestor = graphNodesById.get(ancestorId);
+        if (!ancestor) {
+          hasMissingAncestor = true;
+          break;
+        }
+        ancestorId = ancestor.parentId;
+      }
+      if (hasMissingAncestor) node.parentId = 'main';
+    }
+    return graphNodes;
   }, [sessions, projects, profiles, agents]);
   const points = useMemo(() => {
     const center = { x: 280, y: 220 };
@@ -2672,7 +2692,7 @@ function WorkspaceGraph({ sessions, projects, profiles, agents, onOpenSession, o
       if (node.parentId === 'main' && node.kind === 'conversation') {
         const index = rootConversations.findIndex(item => item.id === node.id);
         const angle = -Math.PI / 2 + index / Math.max(1, rootConversations.length) * Math.PI * 2;
-        const radius = rootConversations.length === 1 ? 52 : 58;
+        const radius = rootConversations.length === 1 ? 66 : 72;
         angles.set(node.id, angle);
         depths.set(node.id, 1);
         baseRadii.set(node.id, radius);
@@ -2682,8 +2702,8 @@ function WorkspaceGraph({ sessions, projects, profiles, agents, onOpenSession, o
         const angle = -Math.PI / 2 + index / Math.max(1, rootProjects.length) * Math.PI * 2;
         angles.set(node.id, angle);
         depths.set(node.id, 1);
-        baseRadii.set(node.id, 90);
-        point = { x: center.x + Math.cos(angle) * 90, y: center.y + Math.sin(angle) * 90 };
+        baseRadii.set(node.id, 112);
+        point = { x: center.x + Math.cos(angle) * 112, y: center.y + Math.sin(angle) * 112 };
       } else if (!parent) {
         point = center;
       } else {
@@ -3228,6 +3248,48 @@ function MemoryInUseCard({ host, processRssMb }: { host?: HostResourceSnapshot; 
   );
 }
 
+function GpuUsageCard({ host, hostHistory }: { host?: HostResourceSnapshot; hostHistory: HostResourceSnapshot[] }) {
+  const gpu = host?.gpu;
+  if (!gpu || gpu.state === 'detecting') {
+    return <MetricCard icon={Cpu} label="System GPU" tone="neutral">
+      <strong className="metric-value">Detecting GPU…</strong>
+      <span className="metric-detail">Reading hardware telemetry</span>
+    </MetricCard>;
+  }
+  if (gpu.state === 'unavailable') {
+    return <MetricCard icon={Cpu} label="System GPU" tone="neutral">
+      <strong className="metric-value">GPU unavailable</strong>
+    </MetricCard>;
+  }
+  const names = gpu.devices.map(device => device.name).join(' · ');
+  const gpuHistory = hostHistory.filter(sample => sample.gpu.state === 'available');
+  return <MetricCard icon={Cpu} label="System GPU" tone="blue">
+    <div className="gpu-device-name" title={names}>{names || 'GPU detected'}</div>
+    <div className="metric-memory-reading">
+      <strong>{gpu.loadPercent === null ? '—' : `${gpu.loadPercent.toFixed(1)}%`}</strong>
+      <span>{gpu.loadPercent === null ? 'Load unavailable' : 'peak engine load'}</span>
+    </div>
+    <div className="metric-reading-subtext">
+      {gpu.dedicatedMemoryUsedBytes === null
+        ? gpu.sharedMemoryUsedBytes === null
+          ? 'GPU memory telemetry unavailable'
+          : `${formatSystemBytes(gpu.sharedMemoryUsedBytes)} shared memory in use`
+        : `${formatSystemBytes(gpu.dedicatedMemoryUsedBytes)} / ${gpu.dedicatedMemoryTotalBytes === null ? '—' : formatSystemBytes(gpu.dedicatedMemoryTotalBytes)} dedicated`}
+      {gpu.sharedMemoryUsedBytes !== null && gpu.dedicatedMemoryUsedBytes !== null
+        ? ` · ${formatSystemBytes(gpu.sharedMemoryUsedBytes)} shared`
+        : ''}
+    </div>
+    {gpu.loadPercent === null
+      ? <div className="gpu-telemetry-note">{gpu.unavailableReason ?? 'Load telemetry unavailable'}</div>
+      : <MetricPlot
+        label="GPU peak engine utilization over time"
+        area
+        maxValue={100}
+        series={[{ name: 'GPU load', color: '', values: gpuHistory.map(sample => sample.gpu.loadPercent ?? 0) }]}
+      />}
+  </MetricCard>;
+}
+
 function MetricPlot({ series, maxValue, area, label }: {
   series: Array<{ name: string; color: string; values: number[] }>;
   maxValue?: number;
@@ -3239,6 +3301,7 @@ function MetricPlot({ series, maxValue, area, label }: {
   const values = series.flatMap(item => item.values.slice(-60)).filter(Number.isFinite);
   const maximum = Math.max(1, maxValue ?? Math.max(0, ...values) * 1.1);
   const colorForSeries = (name: string, index: number) => {
+    if (name === 'Core 1') return '#ef4444';
     if (index === 0) return 'var(--appearance-primary)';
     if (index === 1) return 'var(--appearance-icon)';
     let hash = 2166136261;

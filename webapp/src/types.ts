@@ -151,6 +151,16 @@ export interface HostResourceSnapshot {
   cpuPercent: number | null;
   cpuLogicalCores: number;
   cpuCorePercents?: Array<number | null>;
+  gpu: {
+    state: 'detecting' | 'available' | 'unavailable';
+    devices: Array<{ name: string }>;
+    loadPercent: number | null;
+    dedicatedMemoryUsedBytes: number | null;
+    dedicatedMemoryTotalBytes: number | null;
+    sharedMemoryUsedBytes: number | null;
+    source: string;
+    unavailableReason?: string;
+  };
   memory: { totalBytes: number; freeBytes: number; usedPercent: number };
   network: { receiveBytesPerSecond: number | null; transmitBytesPerSecond: number | null; source: string };
   disk: { readBytesPerSecond: number | null; writeBytesPerSecond: number | null; source: string };

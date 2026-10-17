@@ -33,6 +33,28 @@ test('similarity graph returns accurate neighbors and remains stable after reloa
   }
 });
 
+test('similarity graph downweights corpus-wide terms and favors distinctive shared vocabulary', () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-vdb-idf-'));
+  try {
+    const db = new VectorDB(workspace);
+    db.indexBatch([
+      { id: 'a', text: 'common system update project semantic vector retrieval engine', source: 'docs', role: 'context', timestamp: 1 },
+      { id: 'b', text: 'common system update project semantic vector retrieval engine index', source: 'docs', role: 'context', timestamp: 2 },
+      { id: 'c', text: 'common system update project gardening photosynthesis soil', source: 'docs', role: 'context', timestamp: 3 },
+      { id: 'd', text: 'common system update project astronomy telescope nebula', source: 'docs', role: 'context', timestamp: 4 },
+    ]);
+
+    const edges = db.similarityEdges(3, 0.01);
+    const score = (left: string, right: string) => edges.find(edge =>
+      (edge.source === left && edge.target === right) || (edge.source === right && edge.target === left),
+    )?.similarity ?? 0;
+    assert.ok(score('a', 'b') > score('a', 'c'));
+    assert.ok(score('a', 'b') > score('a', 'c'));
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('namespace synchronization refreshes changed project documents and removes stale files', () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-vdb-namespace-'));
   try {

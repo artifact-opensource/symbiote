@@ -246,6 +246,12 @@ export class VectorDB {
 
   /** Return exact cosine-similarity neighbors from the VDB's sparse term vectors. */
   similarityEdges(neighborsPerDocument = 5, minimumSimilarity = 0.08): Array<{ source: string; target: string; similarity: number }> {
+    if (!Number.isInteger(neighborsPerDocument) || neighborsPerDocument < 1) {
+      throw new RangeError('neighborsPerDocument must be a positive integer.');
+    }
+    if (!Number.isFinite(minimumSimilarity) || minimumSimilarity < 0 || minimumSimilarity > 1) {
+      throw new RangeError('minimumSimilarity must be between 0 and 1.');
+    }
     this.ensureLoaded();
     this.lastAccess = Date.now();
     const docs = [...this.docs!.values()];
@@ -260,7 +266,9 @@ export class VectorDB {
       const vector = new Map<string, number>();
       let magnitudeSquared = 0;
       for (const [term, count] of counts) {
-        const weight = count / Math.max(1, doc.terms.length);
+        const documentFrequency = this.bm25!.postings.get(term)?.size ?? 0;
+        const inverseDocumentFrequency = Math.log(1 + (docs.length + 1) / (documentFrequency + 1));
+        const weight = count / Math.max(1, doc.terms.length) * inverseDocumentFrequency;
         vector.set(term, weight);
         magnitudeSquared += weight * weight;
         const termPostings = postings.get(term) ?? [];
@@ -278,7 +286,10 @@ export class VectorDB {
         if (list[existing].similarity >= candidate.similarity) return;
         list.splice(existing, 1);
       }
-      const insertion = list.findIndex(item => item.similarity < candidate.similarity);
+      const insertion = list.findIndex(item =>
+        item.similarity < candidate.similarity
+          || (item.similarity === candidate.similarity && docs[item.index].id > docs[candidate.index].id),
+      );
       list.splice(insertion < 0 ? list.length : insertion, 0, candidate);
       if (list.length > neighborsPerDocument) list.pop();
     };
@@ -311,7 +322,9 @@ export class VectorDB {
         edges.set(`${source}\0${target}`, { source, target, similarity: neighbor.similarity });
       }
     }
-    return [...edges.values()];
+    return [...edges.values()].sort((left, right) =>
+      right.similarity - left.similarity || left.source.localeCompare(right.source) || left.target.localeCompare(right.target),
+    );
   }
 
   /** Hybrid search: BM25 + TF-IDF cosine. */

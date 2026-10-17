@@ -23,6 +23,14 @@ type GraphNode = {
 type GraphEdge = { source: string; target: string; similarity: number; kind: 'structure' | 'similarity' };
 type Transform = { x: number; y: number; scale: number };
 
+const MEMORY_COLORS = {
+  symbiote: '#55c982',
+  knowledge: '#50b976',
+  sessions: '#5796f5',
+  projects: '#e8ba4b',
+  vdb: '#ed5964',
+};
+
 function stableHash(value: string): number {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index++) {
@@ -62,8 +70,29 @@ function buildGraph(data: MemoryGraphData, width: number, height: number): { nod
     if (leftRoot !== rightRoot) parent.set(leftRoot < rightRoot ? rightRoot : leftRoot, leftRoot < rightRoot ? leftRoot : rightRoot);
   };
   const sideById = new Map(data.nodes.map(document => [document.id, document.side]));
-  for (const edge of data.edges) {
-    if (edge.similarity >= 0.32 && sideById.get(edge.source) === sideById.get(edge.target)) join(edge.source, edge.target);
+  const documentIds = new Set(data.nodes.map(document => document.id));
+  const similarityEdges = data.edges.filter(edge =>
+    edge.source !== edge.target
+      && documentIds.has(edge.source)
+      && documentIds.has(edge.target)
+      && Number.isFinite(edge.similarity)
+      && edge.similarity >= 0
+      && edge.similarity <= 1,
+  );
+  const strongestSimilarity = new Map<string, number>();
+  for (const edge of similarityEdges) {
+    strongestSimilarity.set(edge.source, Math.max(strongestSimilarity.get(edge.source) ?? 0, edge.similarity));
+    strongestSimilarity.set(edge.target, Math.max(strongestSimilarity.get(edge.target) ?? 0, edge.similarity));
+  }
+  for (const edge of similarityEdges) {
+    const localBaseline = Math.min(
+      strongestSimilarity.get(edge.source) ?? 0,
+      strongestSimilarity.get(edge.target) ?? 0,
+    );
+    const clusterThreshold = Math.max(0.12, localBaseline * 0.68);
+    if (edge.similarity >= clusterThreshold && sideById.get(edge.source) === sideById.get(edge.target)) {
+      join(edge.source, edge.target);
+    }
   }
   const components = new Map<string, MemoryGraphNode[]>();
   for (const document of data.nodes) {
@@ -144,16 +173,18 @@ function buildGraph(data: MemoryGraphData, width: number, height: number): { nod
     });
   }
 
-  for (const edge of data.edges) {
+  for (const edge of similarityEdges) {
     edges.push({ ...edge, kind: 'similarity' });
   }
   return { nodes, edges };
 }
 
-function sideColor(node: GraphNode, ink: string, primary: string, secondary: string): string {
-  if (node.kind === 'system' || node.side === 'documents') return primary;
-  if (node.side === 'projects') return secondary;
-  return ink;
+function sideColor(node: GraphNode): string {
+  if (node.kind === 'system') return MEMORY_COLORS.symbiote;
+  if (node.side === 'documents') return MEMORY_COLORS.knowledge;
+  if (node.side === 'sessions') return MEMORY_COLORS.sessions;
+  if (node.side === 'projects') return MEMORY_COLORS.projects;
+  return MEMORY_COLORS.knowledge;
 }
 
 function formatBytes(bytes: number): string {
@@ -283,8 +314,6 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
       const themeStyles = getComputedStyle(themeRoot);
       const canvasBackground = themeStyles.getPropertyValue('--paper-raised').trim() || themeStyles.backgroundColor;
       const ink = themeStyles.getPropertyValue('--appearance-paper-ink').trim() || themeStyles.color || '#111';
-      const primary = themeStyles.getPropertyValue('--appearance-primary').trim() || themeStyles.getPropertyValue('--appearance-icon').trim() || ink;
-      const secondary = themeStyles.getPropertyValue('--appearance-icon').trim() || ink;
       context.clearRect(0, 0, width, height);
       context.fillStyle = canvasBackground;
       context.fillRect(0, 0, width, height);
@@ -313,13 +342,14 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
         context.moveTo(source.x, source.y);
         context.lineTo(target.x, target.y);
         if (edge.kind === 'similarity') {
-          context.strokeStyle = focused ? primary : ink;
-          context.globalAlpha = focused ? 0.22 + edge.similarity * 0.7 : 0.035 + edge.similarity * 0.22;
-          context.lineWidth = focused ? 0.8 + edge.similarity : 0.45;
+          context.strokeStyle = focused ? MEMORY_COLORS.knowledge : ink;
+          context.globalAlpha = focused ? 0.28 + edge.similarity * 0.62 : 0.025 + edge.similarity * 0.2;
+          context.lineWidth = focused ? 0.85 + edge.similarity : 0.45;
         } else {
-          context.strokeStyle = focused ? primary : ink;
-          context.globalAlpha = focused ? 0.72 : 0.16;
-          context.lineWidth = focused ? 0.9 : edge.source === 'system' ? 1 : 0.65;
+          const sourceNode = byId.get(edge.source);
+          context.strokeStyle = sourceNode ? sideColor(sourceNode) : MEMORY_COLORS.symbiote;
+          context.globalAlpha = focused ? 0.78 : edge.source === 'system' ? 0.38 : 0.2;
+          context.lineWidth = focused ? 1.1 : edge.source === 'system' ? 1.15 : 0.75;
         }
         context.stroke();
         context.globalAlpha = 1;
@@ -329,7 +359,7 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
       context.textBaseline = 'middle';
       for (const node of graph.nodes) {
         if (!visibleIds.has(node.id)) continue;
-        const color = sideColor(node, ink, primary, secondary);
+        const color = sideColor(node);
         const isFocused = node.id === focusId;
         const radius = node.radius * (isFocused ? 1.6 : 1);
         if (node.kind !== 'document') {
@@ -347,6 +377,15 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
         context.globalAlpha = node.kind === 'document' && focusId && !focusEdges.some(edge => edge.source === node.id || edge.target === node.id) ? 0.38 : 0.92;
         context.fill();
         context.globalAlpha = 1;
+        if (node.kind === 'document' && node.document?.storage === 'vdb') {
+          context.beginPath();
+          context.arc(node.x, node.y, radius + 2.1, 0, Math.PI * 2);
+          context.strokeStyle = MEMORY_COLORS.vdb;
+          context.globalAlpha = 0.8;
+          context.lineWidth = 0.8;
+          context.stroke();
+          context.globalAlpha = 1;
+        }
 
         if (node.id === focusId && transform.scale > 0.45) {
           context.font = `${node.kind === 'system' ? '600 9px' : '500 8px'} 'Cascadia Code', Consolas, monospace`;
@@ -358,29 +397,34 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
 
       if (!reducedMotion && tick < 150 && graph.nodes.length <= 5000) {
         tick++;
-        const cellSize = 38;
+        const cellSize = 42;
         const grid = new Map<string, GraphNode[]>();
+        const nodeIndexes = new Map(graph.nodes.map((node, index) => [node, index]));
         for (const node of graph.nodes) {
           const key = `${Math.floor(node.x / cellSize)},${Math.floor(node.y / cellSize)}`;
           const cell = grid.get(key) ?? [];
           cell.push(node);
           grid.set(key, cell);
         }
-        for (const node of graph.nodes) {
+        for (let nodeIndex = 0; nodeIndex < graph.nodes.length; nodeIndex++) {
+          const node = graph.nodes[nodeIndex];
           if (node.kind === 'system') continue;
           const cellX = Math.floor(node.x / cellSize);
           const cellY = Math.floor(node.y / cellSize);
           for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
               for (const other of grid.get(`${cellX + dx},${cellY + dy}`) ?? []) {
-                if (other === node) continue;
+                const otherIndex = nodeIndexes.get(other) ?? -1;
+                if (otherIndex <= nodeIndex) continue;
                 const differenceX = node.x - other.x;
                 const differenceY = node.y - other.y;
                 const distanceSquared = differenceX * differenceX + differenceY * differenceY;
                 if (distanceSquared > 0 && distanceSquared < cellSize * cellSize) {
-                  const force = (node.kind === 'document' && other.kind === 'document' ? 4.2 : 9) / distanceSquared;
+                  const force = (node.kind === 'document' && other.kind === 'document' ? 2.8 : 6) / distanceSquared;
                   node.vx += differenceX * force;
                   node.vy += differenceY * force;
+                  other.vx -= differenceX * force;
+                  other.vy -= differenceY * force;
                 }
               }
             }
@@ -406,7 +450,7 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
           }
         }
         for (const node of graph.nodes) {
-          const anchorForce = node.kind === 'system' ? 0 : node.kind === 'document' ? 0.004 : 0.015;
+          const anchorForce = node.kind === 'system' ? 0 : node.kind === 'document' ? 0.006 : 0.02;
           node.vx += (node.anchorX - node.x) * anchorForce;
           node.vy += (node.anchorY - node.y) * anchorForce;
           node.vx *= 0.84;
@@ -638,7 +682,7 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
           />
           {data?.nodes.length ? (
             <>
-              <div className="memory-map-legend"><span><i className="legend-dot legend-docs" />Knowledge</span><span><i className="legend-dot legend-sessions" />Sessions</span><span><i className="legend-dot legend-projects" />Projects</span><span><i className="legend-link" />Similarity</span></div>
+              <div className="memory-map-legend"><span><i className="legend-dot legend-docs" />Knowledge</span><span><i className="legend-dot legend-sessions" />Sessions</span><span><i className="legend-dot legend-projects" />Projects</span><span><i className="legend-vdb" />.vdb storage</span><span><i className="legend-link" />Similarity</span></div>
               <div className="memory-zoom-controls">
                 <button type="button" onClick={() => updateZoom(1.2)} aria-label="Zoom in"><Plus size={15} /></button>
                 <button type="button" onClick={() => updateZoom(0.84)} aria-label="Zoom out"><Minus size={15} /></button>

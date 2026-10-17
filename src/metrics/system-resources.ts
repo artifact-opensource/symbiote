@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const SAMPLE_INTERVAL_MS = 3_000;
+const WINDOWS_COUNTERS_REFRESH_INTERVAL_MS = 15_000;
 
 interface CpuTimes {
   user: number;
@@ -19,6 +20,7 @@ export interface HostResourceSnapshot {
   cpuPercent: number | null;
   cpuLogicalCores: number;
   cpuCorePercents: Array<number | null>;
+  gpu: GpuResourceSnapshot;
   memory: { totalBytes: number; freeBytes: number; usedPercent: number };
   network: {
     receiveBytesPerSecond: number | null;
@@ -38,22 +40,330 @@ export interface HostResourceSnapshot {
   warnings: string[];
 }
 
+export interface GpuResourceSnapshot {
+  state: 'detecting' | 'available' | 'unavailable';
+  devices: Array<{ name: string }>;
+  loadPercent: number | null;
+  dedicatedMemoryUsedBytes: number | null;
+  dedicatedMemoryTotalBytes: number | null;
+  sharedMemoryUsedBytes: number | null;
+  source: string;
+  unavailableReason?: string;
+}
+
 interface WindowsCounters {
   network: { receivePerSecond: number; transmitPerSecond: number } | null;
   disk: { readPerSecond: number; writePerSecond: number } | null;
+  unavailableReason?: string;
 }
+
+let windowsCountersCache: { sampledAt: number; value: WindowsCounters } | null = null;
+let windowsCountersPending: Promise<WindowsCounters> | null = null;
 
 const EMPTY_SNAPSHOT: HostResourceSnapshot = {
   sampledAt: 0,
   cpuPercent: null,
   cpuLogicalCores: Math.max(1, os.cpus().length),
   cpuCorePercents: [],
+  gpu: {
+    state: 'detecting',
+    devices: [],
+    loadPercent: null,
+    dedicatedMemoryUsedBytes: null,
+    dedicatedMemoryTotalBytes: null,
+    sharedMemoryUsedBytes: null,
+    source: 'GPU adapter detection',
+  },
   memory: { totalBytes: os.totalmem(), freeBytes: os.freemem(), usedPercent: 0 },
   network: { receiveBytesPerSecond: null, transmitBytesPerSecond: null, source: 'Waiting for a second sample' },
   disk: { readBytesPerSecond: null, writeBytesPerSecond: null, source: 'Waiting for a second sample' },
   temperature: { sensors: [], source: 'Operating-system hardware sensor interface', unavailableReason: 'Waiting for sensor detection' },
   warnings: [],
 };
+
+function unavailableGpu(reason: string): GpuResourceSnapshot {
+  return {
+    state: 'unavailable',
+    devices: [],
+    loadPercent: null,
+    dedicatedMemoryUsedBytes: null,
+    dedicatedMemoryTotalBytes: null,
+    sharedMemoryUsedBytes: null,
+    source: 'Operating-system GPU telemetry',
+    unavailableReason: reason,
+  };
+}
+
+function commandFailureReason(failure: unknown, timeoutMs: number): string {
+  if (failure && typeof failure === 'object') {
+    const commandError = failure as {
+      code?: unknown;
+      killed?: unknown;
+      signal?: unknown;
+      stderr?: unknown;
+    };
+    if (commandError.code === 'ETIMEDOUT' || commandError.killed === true) {
+      return `Windows telemetry query timed out after ${timeoutMs} ms.`;
+    }
+    const stderr = String(commandError.stderr ?? '').trim();
+    if (stderr) return stderr;
+    if (commandError.code !== undefined) {
+      return `Windows telemetry query exited with code ${String(commandError.code)}.`;
+    }
+    if (commandError.signal) {
+      return `Windows telemetry query was terminated by ${String(commandError.signal)}.`;
+    }
+  }
+  return failure instanceof Error ? failure.message : String(failure);
+}
+
+function finitePercent(value: unknown): number | null {
+  const percent = Number(value);
+  return Number.isFinite(percent) ? Math.round(Math.max(0, Math.min(100, percent)) * 10) / 10 : null;
+}
+
+function finiteBytes(value: unknown): number | null {
+  const bytes = Number(value);
+  return Number.isFinite(bytes) && bytes >= 0 ? bytes : null;
+}
+
+function records(value: unknown): Array<Record<string, unknown>> {
+  const items = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+  return items.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null);
+}
+
+export function parseNvidiaGpuCounters(raw: string): GpuResourceSnapshot {
+  const devices = raw.split(/\r?\n/).flatMap(line => {
+    const [name, load, used, total] = line.split(',').map(value => value.trim());
+    if (!name) return [];
+    const megabytesToBytes = (value: string | undefined) => {
+      const megabytes = Number(value);
+      return Number.isFinite(megabytes) && megabytes >= 0 ? megabytes * 1024 * 1024 : null;
+    };
+    return [{
+      name,
+      loadPercent: finitePercent(load),
+      usedBytes: megabytesToBytes(used),
+      totalBytes: megabytesToBytes(total),
+    }];
+  });
+  if (!devices.length) return unavailableGpu('No supported GPU adapter was detected.');
+  const dedicatedMemoryUsedBytes = devices.every(device => device.usedBytes !== null)
+    ? devices.reduce((sum, device) => sum + (device.usedBytes ?? 0), 0)
+    : null;
+  const dedicatedMemoryTotalBytes = devices.every(device => device.totalBytes !== null)
+    ? devices.reduce((sum, device) => sum + (device.totalBytes ?? 0), 0)
+    : null;
+  return {
+    state: 'available',
+    devices: devices.map(device => ({ name: device.name })),
+    loadPercent: devices.some(device => device.loadPercent !== null)
+      ? Math.max(...devices.flatMap(device => device.loadPercent === null ? [] : [device.loadPercent]))
+      : null,
+    dedicatedMemoryUsedBytes,
+    dedicatedMemoryTotalBytes,
+    sharedMemoryUsedBytes: null,
+    source: 'NVIDIA Management Library (nvidia-smi)',
+  };
+}
+
+export function parseWindowsGpuCounters(raw: string): GpuResourceSnapshot {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return unavailableGpu('Windows returned invalid GPU counter data.');
+  }
+  if (!parsed || typeof parsed !== 'object') return unavailableGpu('Windows returned no GPU counter data.');
+  const payload = parsed as Record<string, unknown>;
+  const adapters = records(payload.adapters).filter(adapter =>
+    typeof adapter.name === 'string'
+      && adapter.name.trim()
+      && !/Microsoft Basic (?:Display|Render) Driver/i.test(adapter.name),
+  );
+  if (!adapters.length) return unavailableGpu('No GPU adapter was detected by Windows.');
+  const engineCountersAvailable = payload.engineCountersAvailable === true;
+
+  const engineTotals = new Map<string, Map<string, number>>();
+  for (const sample of records(payload.engines)) {
+    if (typeof sample.name !== 'string') continue;
+    const match = sample.name.match(/luid_(.+?)_phys_(\d+)_eng_(\d+)_engtype_/i);
+    const value = Number(sample.value);
+    if (!match || !Number.isFinite(value) || value < 0) continue;
+    const adapterId = `${match[1]}_phys_${match[2]}`;
+    const engineId = match[3];
+    const engines = engineTotals.get(adapterId) ?? new Map<string, number>();
+    engines.set(engineId, (engines.get(engineId) ?? 0) + value);
+    engineTotals.set(adapterId, engines);
+  }
+  const perAdapterLoad = [...engineTotals.values()].flatMap(engines => {
+    const load = Math.max(...engines.values());
+    return Number.isFinite(load) ? [Math.min(100, load)] : [];
+  });
+
+  let dedicatedMemoryUsedBytes = 0;
+  let sharedMemoryUsedBytes = 0;
+  let hasDedicatedMemory = false;
+  let hasSharedMemory = false;
+  for (const sample of records(payload.memory)) {
+    const value = finiteBytes(sample.value);
+    if (typeof sample.name !== 'string' || value === null) continue;
+    if (typeof sample.counter === 'string' && /dedicated usage$/i.test(sample.counter)) {
+      dedicatedMemoryUsedBytes += value;
+      hasDedicatedMemory = true;
+    } else if (typeof sample.counter === 'string' && /shared usage$/i.test(sample.counter)) {
+      sharedMemoryUsedBytes += value;
+      hasSharedMemory = true;
+    }
+  }
+  const dedicatedMemoryTotalBytes = adapters.reduce(
+    (sum, adapter) => sum + (finiteBytes(adapter.dedicatedTotalBytes) ?? 0),
+    0,
+  );
+  return {
+    state: 'available',
+    devices: adapters.map(adapter => ({ name: String(adapter.name).trim() })),
+    loadPercent: perAdapterLoad.length ? Math.max(...perAdapterLoad) : engineCountersAvailable ? 0 : null,
+    dedicatedMemoryUsedBytes: hasDedicatedMemory ? dedicatedMemoryUsedBytes : null,
+    dedicatedMemoryTotalBytes: dedicatedMemoryTotalBytes > 0 ? dedicatedMemoryTotalBytes : null,
+    sharedMemoryUsedBytes: hasSharedMemory ? sharedMemoryUsedBytes : null,
+    source: 'Windows GPU Engine and Adapter Memory performance counters',
+    ...(engineCountersAvailable || perAdapterLoad.length || hasDedicatedMemory || hasSharedMemory
+      ? {}
+      : { unavailableReason: 'GPU detected, but Windows did not expose utilization or memory counters.' }),
+  };
+}
+
+async function readNvidiaGpu(): Promise<GpuResourceSnapshot | undefined> {
+  try {
+    const { stdout } = await execFileAsync('nvidia-smi', [
+      '--query-gpu=name,utilization.gpu,memory.used,memory.total',
+      '--format=csv,noheader,nounits',
+    ], { timeout: 5_000, windowsHide: true, maxBuffer: 64 * 1024 });
+    const snapshot = parseNvidiaGpuCounters(stdout);
+    return snapshot.state === 'available' ? snapshot : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readWindowsGpu(): Promise<GpuResourceSnapshot> {
+  const script = [
+    "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'",
+    "$adapters=@(Get-CimInstance Win32_VideoController | Where-Object {$_.Name -and $_.Name -notmatch 'Microsoft Basic (Display|Render) Driver'} | ForEach-Object {@{name=[string]$_.Name; dedicatedTotalBytes=[double]$_.AdapterRAM}})",
+    "$engines=@(); $memory=@(); $engineCountersAvailable=$false",
+    "try {$engines=@(Get-CimInstance -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine -Filter \"UtilizationPercentage > 0 AND (Name LIKE '%engtype_3D%' OR Name LIKE '%engtype_Compute%' OR Name LIKE '%engtype_Copy%' OR Name LIKE '%engtype_VideoDecode%' OR Name LIKE '%engtype_VideoEncode%' OR Name LIKE '%engtype_VideoProcessing%')\" | ForEach-Object {@{name=[string]$_.Name; value=[double]$_.UtilizationPercentage}}); $engineCountersAvailable=$true} catch {}",
+    "try {$memory=@(Get-CimInstance -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory | ForEach-Object {@{name=[string]$_.Name; counter='Dedicated Usage'; value=[double]$_.DedicatedUsage},@{name=[string]$_.Name; counter='Shared Usage'; value=[double]$_.SharedUsage}})} catch {}",
+    "[pscustomobject]@{adapters=$adapters; engines=$engines; memory=$memory; engineCountersAvailable=$engineCountersAvailable} | ConvertTo-Json -Compress -Depth 5",
+  ].join('; ');
+  try {
+    const { stdout } = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+      timeout: 15_000,
+      windowsHide: true,
+      maxBuffer: 256 * 1024,
+    });
+    return parseWindowsGpuCounters(stdout);
+  } catch (failure) {
+    const reason = commandFailureReason(failure, 15_000);
+    return unavailableGpu(`GPU detection failed: ${reason}`);
+  }
+}
+
+function readLinuxGpu(): GpuResourceSnapshot {
+  let cards: string[];
+  try {
+    cards = fs.readdirSync('/sys/class/drm').filter(entry => /^card\d+$/.test(entry));
+  } catch {
+    return unavailableGpu('Linux did not expose GPU adapters through DRM sysfs.');
+  }
+  const devices = cards.flatMap((card, index) => {
+    const base = `/sys/class/drm/${card}/device`;
+    try {
+      const vendor = fs.readFileSync(`${base}/vendor`, 'utf8').trim().toLowerCase();
+      const product = fs.readFileSync(`${base}/device`, 'utf8').trim().toLowerCase();
+      const vendorNames: Record<string, string> = {
+        '0x1002': 'AMD',
+        '0x10de': 'NVIDIA',
+        '0x8086': 'Intel',
+      };
+      const vendorName = (vendorNames[vendor] ?? vendor) || 'Unknown';
+      const name = `${vendorName} GPU ${product} · Adapter ${index + 1}`;
+      const readMetric = (file: string) => {
+        try {
+          const value = Number(fs.readFileSync(`${base}/${file}`, 'utf8').trim());
+          return Number.isFinite(value) && value >= 0 ? value : null;
+        } catch {
+          return null;
+        }
+      };
+      return [{
+        name,
+        loadPercent: finitePercent(readMetric('gpu_busy_percent')),
+        usedBytes: readMetric('mem_info_vram_used'),
+        totalBytes: readMetric('mem_info_vram_total'),
+      }];
+    } catch {
+      return [];
+    }
+  });
+  if (!devices.length) return unavailableGpu('No GPU adapter was detected by Linux DRM.');
+  return {
+    state: 'available',
+    devices: devices.map(device => ({ name: device.name })),
+    loadPercent: devices.some(device => device.loadPercent !== null)
+      ? Math.max(...devices.flatMap(device => device.loadPercent === null ? [] : [device.loadPercent]))
+      : null,
+    dedicatedMemoryUsedBytes: devices.every(device => device.usedBytes !== null)
+      ? devices.reduce((sum, device) => sum + (device.usedBytes ?? 0), 0)
+      : null,
+    dedicatedMemoryTotalBytes: devices.every(device => device.totalBytes !== null)
+      ? devices.reduce((sum, device) => sum + (device.totalBytes ?? 0), 0)
+      : null,
+    sharedMemoryUsedBytes: null,
+    source: 'Linux DRM sysfs GPU counters',
+    ...(devices.some(device => device.loadPercent !== null || device.usedBytes !== null)
+      ? {}
+      : { unavailableReason: 'GPU detected, but this driver does not expose load or memory counters.' }),
+  };
+}
+
+async function readMacGpu(): Promise<GpuResourceSnapshot> {
+  try {
+    const { stdout } = await execFileAsync('system_profiler', ['SPDisplaysDataType', '-json'], {
+      timeout: 10_000,
+      windowsHide: true,
+      maxBuffer: 256 * 1024,
+    });
+    const parsed: unknown = JSON.parse(stdout);
+    const root = parsed as { SPDisplaysDataType?: Array<Record<string, unknown>> };
+    const devices = (root.SPDisplaysDataType ?? []).flatMap(display =>
+      typeof display.sppci_model === 'string' ? [{ name: display.sppci_model }] : [],
+    );
+    return devices.length
+      ? {
+        state: 'available',
+        devices,
+        loadPercent: null,
+        dedicatedMemoryUsedBytes: null,
+        dedicatedMemoryTotalBytes: null,
+        sharedMemoryUsedBytes: null,
+        source: 'macOS System Information',
+        unavailableReason: 'macOS does not expose GPU load counters through System Information.',
+      }
+      : unavailableGpu('No GPU adapter was detected by macOS.');
+  } catch (failure) {
+    return unavailableGpu(`GPU detection failed: ${failure instanceof Error ? failure.message : String(failure)}`);
+  }
+}
+
+async function readGpuSnapshot(): Promise<GpuResourceSnapshot> {
+  const nvidia = await readNvidiaGpu();
+  if (nvidia) return nvidia;
+  if (process.platform === 'win32') return readWindowsGpu();
+  if (process.platform === 'linux') return readLinuxGpu();
+  if (process.platform === 'darwin') return readMacGpu();
+  return unavailableGpu(`GPU detection is unsupported on ${process.platform}.`);
+}
 
 function cpuTotal(times: CpuTimes): number {
   return times.user + times.nice + times.sys + times.idle + times.irq;
@@ -183,17 +493,17 @@ function readLinuxTemperatures(): HostResourceSnapshot['temperature'] {
 
 async function readWindowsCounters(): Promise<WindowsCounters> {
   const script = [
-    "$ProgressPreference='SilentlyContinue'; $WarningPreference='SilentlyContinue'",
-    "$samples=(Get-Counter -Counter '\\Network Interface(*)\\Bytes Received/sec','\\Network Interface(*)\\Bytes Sent/sec','\\PhysicalDisk(_Total)\\Disk Read Bytes/sec','\\PhysicalDisk(_Total)\\Disk Write Bytes/sec' -ErrorAction Stop).CounterSamples",
-    "$networkSamples=$samples | Where-Object {$_.InstanceName -notmatch 'Loopback|isatap|Teredo'}",
-    "$rx=($networkSamples | Where-Object {$_.Path -match 'bytes received/sec'} | Measure-Object -Property CookedValue -Sum).Sum",
-    "$tx=($networkSamples | Where-Object {$_.Path -match 'bytes sent/sec'} | Measure-Object -Property CookedValue -Sum).Sum",
-    "$read=($samples | Where-Object {$_.Path -match 'disk read bytes/sec'} | Measure-Object -Property CookedValue -Sum).Sum",
-    "$write=($samples | Where-Object {$_.Path -match 'disk write bytes/sec'} | Measure-Object -Property CookedValue -Sum).Sum",
+    "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'",
+    "$network=@(Get-CimInstance -ClassName Win32_PerfFormattedData_Tcpip_NetworkInterface -ErrorAction Stop | Where-Object {$_.Name -notmatch 'Loopback|isatap|Teredo'})",
+    "$disk=Get-CimInstance -ClassName Win32_PerfFormattedData_PerfDisk_PhysicalDisk -Filter \"Name='_Total'\" -ErrorAction Stop",
+    "$rx=($network | Measure-Object -Property BytesReceivedPersec -Sum).Sum",
+    "$tx=($network | Measure-Object -Property BytesSentPersec -Sum).Sum",
+    "$read=[double]$disk.DiskReadBytesPersec",
+    "$write=[double]$disk.DiskWriteBytesPersec",
     "[pscustomobject]@{network=@{receivePerSecond=[double]$rx; transmitPerSecond=[double]$tx}; disk=@{readPerSecond=[double]$read; writePerSecond=[double]$write}} | ConvertTo-Json -Compress -Depth 4",
   ].join('; ');
   const { stdout } = await execFileAsync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
-    timeout: 8_000,
+    timeout: 15_000,
     windowsHide: true,
     maxBuffer: 128 * 1024,
   });
@@ -210,6 +520,31 @@ async function readWindowsCounters(): Promise<WindowsCounters> {
       ? { readPerSecond: Number(disk.readPerSecond), writePerSecond: Number(disk.writePerSecond) }
       : null,
   };
+}
+
+function readCachedWindowsCounters(): Promise<WindowsCounters> {
+  const now = Date.now();
+  if (windowsCountersCache) {
+    if (now - windowsCountersCache.sampledAt < WINDOWS_COUNTERS_REFRESH_INTERVAL_MS) {
+      return Promise.resolve(windowsCountersCache.value);
+    }
+  }
+  if (windowsCountersPending) return windowsCountersPending;
+
+  const pending = readWindowsCounters()
+    .catch(failure => ({
+      network: null,
+      disk: null,
+      unavailableReason: commandFailureReason(failure, 15_000),
+    }))
+    .then(value => {
+      windowsCountersCache = { sampledAt: Date.now(), value };
+      return value;
+    });
+  windowsCountersPending = pending.finally(() => {
+    windowsCountersPending = null;
+  });
+  return windowsCountersPending;
 }
 
 async function readWindowsTemperature(): Promise<HostResourceSnapshot['temperature']> {
@@ -240,12 +575,17 @@ export class SystemResourcesSampler {
   private previousDisk: { readBytes: number; writtenBytes: number; at: number } | null = null;
   private timer: ReturnType<typeof setInterval>;
   private temperatureTimer: ReturnType<typeof setInterval> | null = null;
+  private gpuTimer: ReturnType<typeof setInterval>;
   private sampling = false;
+  private refreshingGpu = false;
 
   constructor() {
     void this.sample();
     this.timer = setInterval(() => void this.sample(), SAMPLE_INTERVAL_MS);
     this.timer.unref?.();
+    void this.refreshGpu();
+    this.gpuTimer = setInterval(() => void this.refreshGpu(), 15_000);
+    this.gpuTimer.unref?.();
     if (process.platform === 'win32') {
       void this.refreshTemperature();
       this.temperatureTimer = setInterval(() => void this.refreshTemperature(), 60_000);
@@ -257,6 +597,7 @@ export class SystemResourcesSampler {
     return {
       ...this.value,
       memory: { ...this.value.memory },
+      gpu: { ...this.value.gpu, devices: this.value.gpu.devices.map(device => ({ ...device })) },
       network: { ...this.value.network },
       disk: { ...this.value.disk },
       temperature: { ...this.value.temperature, sensors: this.value.temperature.sensors.map(sensor => ({ ...sensor })) },
@@ -266,6 +607,7 @@ export class SystemResourcesSampler {
 
   stop(): void {
     clearInterval(this.timer);
+    clearInterval(this.gpuTimer);
     if (this.temperatureTimer) clearInterval(this.temperatureTimer);
   }
 
@@ -314,7 +656,10 @@ export class SystemResourcesSampler {
         }
         temperature = readLinuxTemperatures();
       } else if (process.platform === 'win32') {
-        const counters = await readWindowsCounters();
+        const counters = await readCachedWindowsCounters();
+        if (counters.unavailableReason) {
+          warnings.push(`Hardware counters could not be sampled: ${counters.unavailableReason}`);
+        }
         if (counters.network) {
           network = {
             receiveBytesPerSecond: Math.max(0, counters.network.receivePerSecond),
@@ -348,6 +693,7 @@ export class SystemResourcesSampler {
         cpuPercent,
         cpuLogicalCores: Math.max(1, cpu.length),
         cpuCorePercents,
+        gpu: this.value.gpu,
         memory: {
           totalBytes,
           freeBytes,
@@ -364,5 +710,15 @@ export class SystemResourcesSampler {
 
   private async refreshTemperature(): Promise<void> {
     this.value = { ...this.value, temperature: await readWindowsTemperature() };
+  }
+
+  private async refreshGpu(): Promise<void> {
+    if (this.refreshingGpu) return;
+    this.refreshingGpu = true;
+    try {
+      this.value = { ...this.value, gpu: await readGpuSnapshot() };
+    } finally {
+      this.refreshingGpu = false;
+    }
   }
 }
