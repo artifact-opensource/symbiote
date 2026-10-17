@@ -1399,12 +1399,12 @@ export default function App() {
     }
   };
 
-  const runProjectTask = async (projectId: string, prompt: string): Promise<boolean> => {
+  const runProjectTask = async (projectId: string, prompt: string, agentId?: string): Promise<boolean> => {
     setError('');
     try {
       const created = await api<{ id: string }>('/api/sessions', {
         method: 'POST',
-        body: JSON.stringify({ name: 'IDE project task', projectId }),
+        body: JSON.stringify({ name: 'IDE project task', projectId, ...(agentId ? { agentId } : {}) }),
       });
       await refreshAll();
       return await launchRun(prompt, created.id);
@@ -2000,6 +2000,7 @@ export default function App() {
                 <Suspense fallback={<div className="loading-state"><LoaderCircle size={20} className="spin" /><span>Loading the project IDE…</span></div>}>
                   <ProjectIDE
                     projects={projects}
+                    profiles={workspaceAgents}
                     onArchiveProject={archiveProject}
                     onRunTask={runProjectTask}
                     request={api}

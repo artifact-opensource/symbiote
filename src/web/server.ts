@@ -1291,7 +1291,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     if ((method === 'POST' || method === 'PUT') && projectFileRoute) {
       let body: unknown;
       try {
-        body = JSON.parse(await readBody(req, 1_100_000) || '{}');
+        body = JSON.parse(await readBody(req) || '{}');
       } catch (failure) {
         return json(res, { error: failure instanceof Error ? failure.message : 'Project file request must be valid JSON.' }, 400);
       }

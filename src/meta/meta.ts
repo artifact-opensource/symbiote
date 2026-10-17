@@ -111,6 +111,40 @@ export class MetaN {
       return true;
     });
 
+    if (pending.length > 0) {
+      let belowConfidence = 0;
+      let alreadyEvaluating = 0;
+      let awaitingBaseline = 0;
+      let duplicateRule = 0;
+      const countedRules = new Set<string>();
+      for (const proposal of pending) {
+        if (proposal.confidence < 0.5) {
+          belowConfidence++;
+          continue;
+        }
+        const key = `${proposal.ruleType}:${proposal.ruleId}`;
+        if ([...this.activeEvaluations.values()].some(active =>
+          active.change.ruleType === proposal.ruleType && active.change.ruleId === proposal.ruleId,
+        )) {
+          alreadyEvaluating++;
+          continue;
+        }
+        if (countedRules.has(key)) {
+          duplicateRule++;
+          continue;
+        }
+        countedRules.add(key);
+        if ((this.baselineFor(proposal, pending)?.length ?? 0) < MIN_BASELINE_SAMPLES) awaitingBaseline++;
+      }
+      const reasons = [
+        belowConfidence ? `${belowConfidence} below confidence threshold` : '',
+        alreadyEvaluating ? `${alreadyEvaluating} already under evaluation` : '',
+        awaitingBaseline ? `${awaitingBaseline} awaiting ${MIN_BASELINE_SAMPLES} matched baseline outcomes` : '',
+        duplicateRule ? `${duplicateRule} duplicate rule proposals` : '',
+      ].filter(Boolean);
+      if (reasons.length) console.log(`[Meta^n] Deferred pending proposals: ${reasons.join('; ')}`);
+    }
+
     for (const change of appliedChanges) {
       const baseline = this.baselineForChange(change);
       if (!baseline || baseline.length < MIN_BASELINE_SAMPLES) {

@@ -11,6 +11,7 @@ import 'dotenv/config';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { parse } from 'dotenv';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 // @ts-ignore — no types for qrcode-terminal
@@ -25,7 +26,7 @@ import {
 } from '../cli/brand.js';
 import { ChannelRegistry } from '../channels/registry.js';
 import { ToolProgressBubble } from '../channels/progress-bubble.js';
-import { expandHome } from '../runtime/platform.js';
+import { configSearchPaths, expandHome } from '../runtime/platform.js';
 import { AppearanceSettingsStore } from '../appearance/settings.js';
 import {
   DiscordAdapter,
@@ -2962,23 +2963,60 @@ export class SymbioteGateway {
 // ─── CLI Entry ─────────────────────────────────────────────────────────────
 
 export async function startGateway(configPath?: string): Promise<SymbioteGateway> {
+  const configFile = configSearchPaths(configPath).find(candidate => fs.existsSync(candidate));
+  const envFilePath = path.join(configFile ? path.dirname(path.resolve(configFile)) : process.cwd(), '.env');
+  let envFile: Record<string, string> = {};
+  if (fs.existsSync(envFilePath)) {
+    envFile = parse(fs.readFileSync(envFilePath, 'utf8'));
+    for (const key of ['DISCORD_BOT_TOKEN', 'DISCORD_CLIENT_ID']) {
+      if (!process.env[key] && envFile[key]) process.env[key] = envFile[key];
+    }
+  }
+
+  const credentialVault = new CredentialVault();
+  let discordCredentials: Record<string, string> | null = null;
+  try {
+    discordCredentials = credentialVault.migrateDiscordCredentials(envFilePath) ?? credentialVault.get('discord');
+  } catch (failure) {
+    console.warn(
+      '[gateway] Discord vault migration unavailable; using workspace .env/config credentials:',
+      failure instanceof Error ? failure.message : failure,
+    );
+  }
+
   // Load gateway config from symbiote config or env
   const config = loadConfig(configPath);
+  const discordToken = envFile.DISCORD_BOT_TOKEN
+    || process.env.DISCORD_BOT_TOKEN
+    || discordCredentials?.token
+    || config.discord?.token
+    || '';
+  const discordBotId = envFile.DISCORD_CLIENT_ID
+    || process.env.DISCORD_CLIENT_ID
+    || discordCredentials?.clientId
+    || config.discord?.botId;
+  if (discordToken || discordBotId) {
+    config.discord = {
+      ...config.discord,
+      ...(discordToken ? { token: discordToken } : {}),
+      ...(discordBotId ? { botId: discordBotId } : {}),
+    };
+  }
   if (!validateAndReport(config)) {
     throw new Error('Configuration validation failed');
   }
 
-  // Build gateway config from environment + symbiote config
+  // Build gateway config from environment, vault, and Symbiote config.
   const gatewayConfig: GatewayConfig = {
     configPath,
     ownerIds: (config as any).ownerIds ?? [],
     channels: {
       discord: {
-        enabled: !!process.env.DISCORD_BOT_TOKEN || !!(config as any).discord?.token,
-        token: process.env.DISCORD_BOT_TOKEN ?? (config as any).discord?.token ?? '',
-        botId: (config as any).discord?.botId,
-        adapterId: (config as any).discord?.adapterId ?? 'discord-main',
-        policy: (config as any).discord?.policy,
+        enabled: !!discordToken || !!config.discord?.enabled,
+        token: discordToken,
+        botId: discordBotId,
+        adapterId: config.discord?.adapterId ?? 'discord-main',
+        policy: config.discord?.policy as Partial<ChannelPolicy> | undefined,
       },
       whatsapp: {
         enabled: !!(config as any).whatsapp?.enabled,

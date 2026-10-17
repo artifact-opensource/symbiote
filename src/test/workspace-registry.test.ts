@@ -35,7 +35,7 @@ test('workspace registry persists isolated project and agent workspaces', () => 
   }
 });
 
-test('project file access is project-scoped, bounded, and excludes reserved paths', () => {
+test('project file access is project-scoped, supports large editor files, and excludes reserved paths', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-project-files-'));
   try {
     const registry = new WorkspaceRegistry(root);
@@ -64,6 +64,11 @@ test('project file access is project-scoped, bounded, and excludes reserved path
     assert.throws(() => registry.writeProjectFile(project.id, '.git/config', 'no'), /reserved/i);
     assert.throws(() => registry.writeProjectFile(project.id, 'C:/outside.txt', 'no'), /invalid|escapes/i);
     assert.throws(() => registry.listProjectFiles('missing-project'), /not found/i);
+    const largeContent = 'x'.repeat(1_250_000);
+    const largeFile = registry.createProjectFile(project.id, 'data/large.json', largeContent);
+    assert.equal(largeFile.size, Buffer.byteLength(largeContent));
+    assert.equal(registry.readProjectFile(project.id, 'data/large.json').content, largeContent);
+    assert.equal(registry.writeProjectFile(project.id, 'data/large.json', `${largeContent}y`).size, largeContent.length + 1);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
