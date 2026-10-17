@@ -55,8 +55,8 @@ Symbiote 5.5 is a major workspace and runtime release. It rebuilds the Control R
 
 - **Windows x64:** [Symbiote-5.5.0-x64.msi](https://github.com/artifact-opensource/symbiote/releases/download/v5.5.0/Symbiote-5.5.0-x64.msi)
 - **MSI SHA-256:** `DC15DC3B92EC1BE53719EE0AFDF57353CAA89B753369CDBA83F97C6D9EFA91DF`
-- **Source archive (tar.gz):** [v5.5.0 source](https://github.com/artifact-opensource/symbiote/archive/refs/tags/v5.5.0.tar.gz)
-- **Source archive (zip):** [v5.5.0 source](https://github.com/artifact-opensource/symbiote/archive/refs/tags/v5.5.0.zip)
+- **Source archive (tar.gz):** [symbiote-5.5.0-source.tar.gz](https://github.com/artifact-opensource/symbiote/releases/download/v5.5.0/symbiote-5.5.0-source.tar.gz)
+- **Source archive (zip):** [symbiote-5.5.0-source.zip](https://github.com/artifact-opensource/symbiote/releases/download/v5.5.0/symbiote-5.5.0-source.zip)
 - **Linux and macOS:** build from either source archive. See the installation instructions below.
 
 ## Upgrade and installation
@@ -74,4 +74,4 @@ On Windows, run the x64 MSI to install the Gateway service. On Linux and macOS, 
 
 ## Release artifacts
 
-The release page includes the Windows MSI and GitHub-generated source archives (`.tar.gz` and `.zip`). Linux and macOS do not require a separate installer package; install from source.
+The release page includes the Windows MSI and source archives (`.tar.gz` and `.zip`). Linux and macOS do not require a separate installer package; install from source.

@@ -1915,8 +1915,6 @@ export default function App() {
           <div className="topbar-right">
             {isDesktopApp && <button className="icon-button utility-button" onClick={() => void window.symbioteDesktop?.openMini()} aria-label="Open floating mini chat" title="Open floating mini chat"><Minimize2 size={16} /></button>}
             <span className={`live-indicator${isOnline ? ' live-indicator-on' : ''}`}><span />{isOnline ? 'LIVE' : 'OFFLINE'}</span>
-            <span className="topbar-separator" />
-            <span className="topbar-provider">{status?.provider || 'Runtime unavailable'}</span>
             <button className="icon-button utility-button" onClick={() => { setCommandOpen(true); setCommandQuery(''); }} aria-label="Open command menu (Ctrl+K)" title="Command menu · Ctrl+K">
               <Command size={16} />
             </button>
@@ -2324,8 +2322,8 @@ function OverviewView(props: {
       <section className="overview-banner">
         <div className="banner-orbit orbit-one" /><div className="banner-orbit orbit-two" />
         <div className="banner-copy">
-          <h2>{status?.provider ? <>Working with <span>{status.provider.split('/')[0]}</span></> : 'Waiting for your runtime'}</h2>
-          <p>{status?.provider ? `Model ${status.provider.split('/').slice(1).join('/') || 'configured'} · ${status.activeTurns ?? 0} active ${status.activeTurns === 1 ? 'turn' : 'turns'}` : 'Start the Symbiote gateway to bring your control room online.'}</p>
+          <h2>{status ? 'Your workspace is online' : 'Waiting for your runtime'}</h2>
+          <p>{status ? `${status.activeTurns ?? 0} active ${status.activeTurns === 1 ? 'turn' : 'turns'} · Symbiote Gateway connected` : 'Start the Symbiote gateway to bring your control room online.'}</p>
           {status && <HeroTaskForm sessionId={activeSessionId} onStart={onStartRun} starting={startingRun} />}
           <button className="banner-link" onClick={() => onNavigate('operations')}>View runtime details <ArrowRight size={15} /></button>
         </div>

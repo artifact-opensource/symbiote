@@ -1967,14 +1967,20 @@ button.minimal-list-item { cursor: pointer; }
 :root[data-theme] .sidebar-dismiss { color: var(--appearance-sidebar-ink); }
 :root[data-theme] .overview-banner {
   border-color: var(--appearance-sidebar-line);
-  color: var(--ink);
-  background: var(--paper-raised);
+  color: var(--appearance-primary-ink);
+  background: var(--appearance-primary);
 }
-:root[data-theme] :is(.banner-kicker, .banner-copy p, .banner-link, .banner-index, .graph-main-node text) {
-  color: var(--ink-muted);
+:root[data-theme] :is(.banner-kicker, .banner-copy p, .banner-link, .banner-index) {
+  color: color-mix(in srgb, var(--appearance-primary-ink) 78%, transparent);
 }
-:root[data-theme] .graph-main-node text { fill: var(--ink-muted); }
-:root[data-theme] .hero-task-heading h3 { color: var(--ink); }
+:root[data-theme] .banner-copy h2 span {
+  color: var(--appearance-primary-ink);
+  background: none;
+  -webkit-text-fill-color: var(--appearance-primary-ink);
+  animation: none;
+}
+:root[data-theme] .graph-main-node text { fill: color-mix(in srgb, var(--appearance-primary-ink) 78%, transparent); }
+:root[data-theme] .hero-task-heading h3 { color: var(--appearance-primary-ink); }
 :root[data-theme] .hero-task-submit > svg.lucide { color: var(--ink) !important; }
 :root[data-theme] .task-help > button { border-color: var(--line-strong); color: var(--appearance-icon); }
 :root[data-theme] .task-help > span {
@@ -1982,7 +1988,7 @@ button.minimal-list-item { cursor: pointer; }
   color: var(--ink);
   background: var(--paper-raised);
 }
-:root[data-theme] .banner-link:hover { color: var(--appearance-icon); }
+:root[data-theme] .banner-link:hover { color: var(--appearance-primary-ink); text-decoration: underline; }
 :root[data-theme] .graph-link { stroke: color-mix(in srgb, var(--appearance-sidebar-ink) 28%, transparent); }
 :root[data-theme] .graph-link-agent { stroke: color-mix(in srgb, var(--appearance-icon) 45%, transparent); }
 :root[data-theme] .graph-core-ring {
@@ -2801,11 +2807,7 @@ button.minimal-list-item { cursor: pointer; }
 
 :root[data-theme] .overview-banner {
   border-inline-start: 3px solid var(--appearance-primary);
-  background: linear-gradient(
-    110deg,
-    color-mix(in srgb, var(--appearance-primary) 12%, var(--paper-raised)),
-    var(--paper-raised) 55%
-  );
+  background: var(--appearance-primary);
 }
 
 :root[data-theme] .graph-core {
