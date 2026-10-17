@@ -55,6 +55,34 @@ test('streamed channel reply is edited into the final response without a duplica
   assert.equal(edits.at(-1), '<@user> I found the answer.');
 });
 
+test('concurrent stream deltas create one message and coalesce edits', async () => {
+  const sent: string[] = [];
+  const edits: string[] = [];
+  let releaseSend!: (result: { messageId: string }) => void;
+  const firstSend = new Promise<{ messageId: string }>(resolve => { releaseSend = resolve; });
+  const bubble = new ToolProgressBubble({
+    enabled: true,
+    send: async (_adapterId, _chatId, content) => {
+      sent.push(content);
+      return firstSend;
+    },
+    edit: async (_adapterId, _chatId, _messageId, content) => {
+      edits.push(content);
+    },
+  }, 'discord-main', 'channel');
+
+  const deltas = Array.from({ length: 100 }, (_, index) => bubble.streamText(`token-${index} `));
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(sent.length, 1);
+  const finalText = 'A single complete response.';
+  const finalization = bubble.finalize(finalText);
+  releaseSend({ messageId: 'live-reply' });
+  assert.equal(await finalization, true);
+  await Promise.all(deltas);
+  assert.equal(sent.length, 1);
+  assert.equal(edits.at(-1), finalText);
+});
+
 test('streaming stays disabled for adapters that cannot edit messages', async () => {
   const sent: string[] = [];
   const bubble = new ToolProgressBubble({
