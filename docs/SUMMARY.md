@@ -27,6 +27,7 @@
 * [Discord](channels/discord.md)
 * [WhatsApp](channels/whatsapp.md)
 * [HTTP API](channels/http-api.md)
+* [Web Control Room](channels/webchat.md)
 
 ## Providers
 
@@ -60,6 +61,11 @@
 * [Meta-Cognitive Upgrade](advanced/meta-cognitive-upgrade.md)
 * [Production Deployment](advanced/production.md)
 * [Security](advanced/security.md)
+
+## Integrations
+
+* [Cloud and Automation Integrations](cloud-integrations.md)
+* [Google Workspace](google-workspace.md)
 
 ## Reference
 

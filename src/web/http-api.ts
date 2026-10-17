@@ -33,7 +33,7 @@ export interface HttpApiConfig {
   /** CORS origins to allow (default: ['*']) */
   allowedOrigins?: string[];
   /** Callback to handle a chat message through the agent pipeline */
-  onChat: (message: ChatRequest) => Promise<ChatResponse>;
+  onChat: (message: ChatRequest, emit?: (event: Record<string, unknown>) => void) => Promise<ChatResponse>;
   /** Callback to relay a message to WhatsApp */
   onRelay?: (target: string, text: string) => Promise<{ success: boolean; error?: string }>;
   /** Get gateway status */
@@ -53,6 +53,8 @@ export interface ChatRequest {
   source?: string;
   /** Internal identifier used to cancel one queued or active workspace run. */
   webRunId?: string;
+  /** Short-lived OAuth credential for the current browser-backed agent turn. */
+  googleWorkspaceAccessToken?: string;
   /** Verified IPC agent ID (injected by middleware, not from client) */
   verifiedAgentId?: string;
   /** Verified IPC agent name */
@@ -66,6 +68,9 @@ export interface ChatResponse {
   durationMs?: number;
   /** Iterations consumed by the turn */
   iterations?: number;
+  /** Provider-reported token usage across the turn */
+  inputTokens?: number;
+  outputTokens?: number;
   /** Tool calls executed by the turn */
   toolCalls?: Array<{ name: string; input: Record<string, unknown>; result: string }>;
   /** Per-iteration reasoning/temperature classification */
@@ -185,8 +190,8 @@ export class HttpApiServer {
 
     // POST /api/v1/chat (JSON response) + /api/chat (SSE response for web UI)
     if (method === 'POST' && (pathname === '/api/v1/chat' || pathname === '/api/chat')) {
-      const isWebUI = pathname === '/api/chat';
-      return this.handleChat(req, res, isWebUI);
+      const wantsSse = pathname === '/api/chat' || req.headers.accept?.includes('text/event-stream') === true;
+      return this.handleChat(req, res, wantsSse);
     }
 
     // POST /api/v1/relay
@@ -252,22 +257,33 @@ export class HttpApiServer {
 
     try {
       const startMs = Date.now();
-      const response = await this.config.onChat(parsed);
-      response.durationMs = Date.now() - startMs;
-
+      let streamedText = '';
       if (sse) {
-        // SSE format for web UI
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
           'Connection': 'keep-alive',
         });
-        res.write(`data: ${JSON.stringify({ type: 'text', content: response.text })}\n\n`);
+      }
+      const response = await this.config.onChat(parsed, event => {
+        if (!sse || res.destroyed) return;
+        if (event.type === 'text_delta' && typeof event.text === 'string') streamedText += event.text;
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      });
+      response.durationMs = Date.now() - startMs;
+
+      if (sse) {
+        if (!streamedText && response.text) {
+          res.write(`data: ${JSON.stringify({ type: 'text_delta', text: response.text })}\n\n`);
+        }
         res.write(`data: ${JSON.stringify({
           type: 'done',
           message: {
+            text: response.text,
             latencyMs: response.durationMs,
             iterations: response.iterations ?? 0,
+            tokensIn: response.inputTokens,
+            tokensOut: response.outputTokens,
             toolCalls: response.toolCalls ?? [],
             temperatureHistory: response.temperatureHistory ?? [],
           },
@@ -280,15 +296,22 @@ export class HttpApiServer {
           sessionId: response.sessionId,
           durationMs: response.durationMs,
           iterations: response.iterations,
+          inputTokens: response.inputTokens,
+          outputTokens: response.outputTokens,
           toolCalls: response.toolCalls,
           temperatureHistory: response.temperatureHistory,
         });
       }
     } catch (err) {
       console.error(`${palette.dim}  [http-api]${palette.reset} ${palette.red}Chat error:${palette.reset}`, err);
-      this.json(res, {
-        error: err instanceof Error ? err.message : String(err),
-      }, 500);
+      if (sse && res.headersSent && !res.destroyed) {
+        res.write(`data: ${JSON.stringify({ type: 'error', error: err instanceof Error ? err.message : String(err) })}\n\n`);
+        res.end();
+      } else {
+        this.json(res, {
+          error: err instanceof Error ? err.message : String(err),
+        }, 500);
+      }
     }
   }
 

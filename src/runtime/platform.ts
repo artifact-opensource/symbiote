@@ -150,6 +150,21 @@ export function shellCommand(command: string, login = false, kind: ShellKind = '
   };
 }
 
+/** Start a long-lived shell whose commands can be sent through stdin. */
+export function interactiveShellCommand(kind: ShellKind = 'auto'): { file: string; args: string[] } {
+  const resolved = kind === 'auto' ? (isWindows() ? 'powershell' : 'bash') : kind;
+  if (resolved === 'bash') {
+    const bash = findBash();
+    if (bash) return { file: bash, args: ['--noprofile', '--norc', '-i'] };
+    if (!isWindows()) return { file: process.env.SYMBIOTE_SHELL ?? process.env.SHELL ?? 'sh', args: ['-i'] };
+  }
+  if (isWindows()) {
+    if (resolved === 'cmd') return { file: process.env.COMSPEC ?? 'cmd.exe', args: ['/d', '/q', '/k'] };
+    return { file: windowsShell(), args: ['-NoLogo', '-NoProfile', '-NoExit', '-ExecutionPolicy', 'Bypass'] };
+  }
+  return { file: process.env.SYMBIOTE_SHELL ?? process.env.SHELL ?? 'sh', args: ['-i'] };
+}
+
 /** One-line description of the execution environment, for the agent's system prompt. */
 export function describeShell(): string {
   if (!isWindows()) return `exec runs commands with ${process.env.SHELL ?? 'sh'} from ${process.cwd()} unless workdir is specified.`;

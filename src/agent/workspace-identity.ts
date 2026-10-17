@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { appHomeDir } from '../runtime/platform.js';
 
 export interface WorkspaceIdentity {
   agentName: string;
@@ -16,6 +17,62 @@ export interface WorkspaceIdentityUpdate {
   soulContent?: string;
   agentsContent?: string;
   instructions: string;
+  avatarDataUrl?: string | null;
+}
+
+const AVATAR_PATHS = {
+  png: path.join(appHomeDir(), 'agent-avatar.png'),
+  jpg: path.join(appHomeDir(), 'agent-avatar.jpg'),
+  webp: path.join(appHomeDir(), 'agent-avatar.webp'),
+};
+
+function saveAgentAvatar(dataUrl: string | null): void {
+  if (dataUrl === null) {
+    for (const avatarPath of Object.values(AVATAR_PATHS)) {
+      try { fs.unlinkSync(avatarPath); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    return;
+  }
+
+  if (dataUrl.length > 2_800_000) throw new Error('Agent avatar must be 2 MiB or smaller.');
+  const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl);
+  if (!match) throw new Error('Agent avatar must be a PNG, JPEG, or WebP image.');
+  const [, mime, encoded] = match;
+  const data = Buffer.from(encoded, 'base64');
+  if (data.length > 2 * 1024 * 1024) throw new Error('Agent avatar must be 2 MiB or smaller.');
+
+  const validSignature = mime === 'png'
+    ? data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    : mime === 'jpeg'
+      ? data[0] === 0xff && data[1] === 0xd8 && data[data.length - 2] === 0xff && data[data.length - 1] === 0xd9
+      : data.length >= 12 && data.toString('ascii', 0, 4) === 'RIFF' && data.toString('ascii', 8, 12) === 'WEBP';
+  if (!validSignature) throw new Error('The selected file is not a valid image of the declared type.');
+
+  fs.mkdirSync(appHomeDir(), { recursive: true });
+  const extension: keyof typeof AVATAR_PATHS = mime === 'jpeg' ? 'jpg' : mime === 'png' ? 'png' : 'webp';
+  const target = AVATAR_PATHS[extension];
+  const temporary = `${target}.tmp`;
+  fs.writeFileSync(temporary, data, { mode: 0o600 });
+  fs.renameSync(temporary, target);
+  for (const [otherExtension, avatarPath] of Object.entries(AVATAR_PATHS)) {
+    if (otherExtension === extension) continue;
+    try { fs.unlinkSync(avatarPath); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+}
+
+export function readAgentAvatarDataUrl(): string | undefined {
+  for (const [extension, avatarPath] of Object.entries(AVATAR_PATHS)) {
+    if (!fs.existsSync(avatarPath)) continue;
+    const mime = extension === 'jpg' ? 'jpeg' : extension;
+    return `data:image/${mime};base64,${fs.readFileSync(avatarPath).toString('base64')}`;
+  }
+  return undefined;
 }
 
 function readText(filePath: string): string {
@@ -54,6 +111,7 @@ export function readWorkspaceIdentity(workspace: string, fallbackName = 'Agent',
 }
 
 export function updateWorkspaceIdentity(workspace: string, update: WorkspaceIdentityUpdate): WorkspaceIdentity {
+  if (update.avatarDataUrl !== undefined) saveAgentAvatar(update.avatarDataUrl);
   const soulPath = path.join(workspace, 'SOUL.md');
   let soul = update.soulContent ?? readText(soulPath);
   if (!soul) soul = '# Soul\n';

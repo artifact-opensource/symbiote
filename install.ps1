@@ -5,10 +5,20 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-function Write-Ok($msg)   { Write-Host "  ✓ $msg" -ForegroundColor Green }
-function Write-Fail($msg) { Write-Host "  ✗ $msg" -ForegroundColor Red }
-function Write-Info($msg) { Write-Host "  → $msg" -ForegroundColor Cyan }
-function Invoke-Step($label, [scriptblock]$cmd) {
+function Write-Ok {
+  param($msg)
+  Write-Host "  [OK] $msg" -ForegroundColor Green
+}
+function Write-Fail {
+  param($msg)
+  Write-Host "  [ERROR] $msg" -ForegroundColor Red
+}
+function Write-Info {
+  param($msg)
+  Write-Host "  -> $msg" -ForegroundColor Cyan
+}
+function Invoke-Step {
+  param($label, [scriptblock]$cmd)
   & $cmd
   if ($LASTEXITCODE -ne 0) { Write-Fail "$label failed (exit $LASTEXITCODE)"; exit $LASTEXITCODE }
 }
@@ -18,10 +28,10 @@ $RepoUrl = 'https://github.com/artifact-opensource/symbiote.git'
 $Branch = 'main'
 
 Write-Host ""
-Write-Host "╔══════════════════════════════════════════════╗" -ForegroundColor Magenta
-Write-Host "║  Symbiote v5.2 — Desktop Installer           ║" -ForegroundColor Magenta
-Write-Host "║  Apex · cross-platform setup                 ║" -ForegroundColor Magenta
-Write-Host "╚══════════════════════════════════════════════╝" -ForegroundColor Magenta
+Write-Host "+----------------------------------------------+" -ForegroundColor Magenta
+Write-Host "|  Symbiote v5.5.0 - Desktop Installer         |" -ForegroundColor Magenta
+Write-Host "|  Apex - cross-platform setup                 |" -ForegroundColor Magenta
+Write-Host "+----------------------------------------------+" -ForegroundColor Magenta
 Write-Host ""
 
 foreach ($tool in 'node', 'npm', 'git') {

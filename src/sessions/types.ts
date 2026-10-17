@@ -13,6 +13,8 @@ export interface SessionMetadata {
   depth: number; // sub-agent nesting depth (0 = root)
   archivedAt?: number;
   sessionKind?: 'conversation' | 'subagent';
+  projectId?: string;
+  agentId?: string;
   webRuns?: Array<{
     id: string;
     sessionId?: string;
@@ -56,11 +58,16 @@ export interface SessionSummary {
   model?: string;
   parentSessionId?: string;
   sessionKind?: 'conversation' | 'subagent';
+  projectId?: string;
+  agentId?: string;
 }
 
 export interface SubAgentConfig {
   parentSessionId: string;
+  projectId?: string;
+  agentId?: string;
   task: string;
+  googleWorkspaceAccessToken?: string;
   provider?: string;
   model?: string;
   maxIterations?: number;

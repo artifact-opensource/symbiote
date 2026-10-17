@@ -7,7 +7,9 @@ import test from 'node:test';
 import { readWorkspaceIdentity, updateWorkspaceIdentity } from '../agent/workspace-identity.js';
 import { createWorkspaceSessionManager, SessionManager } from '../sessions/manager.js';
 import { createWorkspaceTaskTool } from '../tools/builtin/workspace-tasks.js';
+import { validateAppearanceSettings } from '../appearance/settings.js';
 import { startWebServer, type WebControlPlane } from '../web/server.js';
+import type { AgentThread, ThreadContact } from '../threads/manager.js';
 
 test('run metadata and colon-containing agent sessions survive a manager restart', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-workspace-run-'));
@@ -42,15 +44,125 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   let browserUrl = 'https://example.com/';
   let chessState: Record<string, unknown> | null = null;
   let stoppedRun = '';
+  let configuredProvider = '';
+  let includedArchivedProjects = false;
+  let integrationTests = 0;
+  let defaultAgentPrompt = 'test prompt';
+  let appearanceSettings = { brightness: 64, primaryHue: 145, secondaryHue: 13 };
+  let updatePrepareCalls = 0;
+  const updateDownload = {
+    state: 'ready' as const,
+    version: '5.6.0',
+    filename: 'Symbiote-5.6.0-x64.msi',
+    sha256: 'a'.repeat(64),
+  };
+  const updateDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-update-api-'));
+  const updateInstallerPath = path.join(updateDirectory, updateDownload.filename);
+  fs.writeFileSync(updateInstallerPath, 'verified MSI');
   const control: WebControlPlane = {
     getStatus: () => ({}),
+    getUpdateDownload: () => updateDownload,
+    prepareUpdateDownload: async () => {
+      updatePrepareCalls++;
+      return updateDownload;
+    },
+    getUpdateInstallerPath: () => updateInstallerPath,
     getConfig: () => ({}),
+    getAppearanceSettings: () => ({ settings: appearanceSettings, initialized: true }),
+    updateAppearanceSettings: settings => appearanceSettings = validateAppearanceSettings(settings),
     getSessions: () => [],
     getSessionMessages: () => [],
     createSession: () => ({}),
+    getProjects: includeArchived => { includedArchivedProjects = includeArchived === true; return []; },
+    archiveProject: projectId => ({ id: projectId, archivedAt: 1 }),
+    restoreProject: projectId => ({ id: projectId, name: 'Research' }),
+    updateProject: (projectId, patch) => ({ id: projectId, name: patch.name ?? 'Research', scope: patch.scope ?? '' }),
+    deleteArchivedProject: projectId => projectId === 'project-1',
+    getProjectFiles: () => [],
+    getProjectStorage: () => ({ fileCount: 0, directoryCount: 0, bytes: 0 }),
+    readProjectFile: (projectId, filePath) => {
+      if (filePath.includes('..')) throw new Error('Project file path is invalid or reserved.');
+      return { projectId, path: filePath, content: '' };
+    },
+    createProjectFile: (projectId, filePath, content) => ({ projectId, path: filePath, size: Buffer.byteLength(content) }),
+    createProjectDirectory: (projectId, filePath) => ({ projectId, path: filePath }),
+    moveProjectEntry: (_projectId, _source, destination) => ({ path: destination }),
+    deleteProjectEntry: () => true,
+    writeProjectFile: (projectId, filePath, content) => ({ projectId, path: filePath, size: Buffer.byteLength(content) }),
+    deleteProjectFile: () => true,
+    runProjectCommand: async (_projectId, command, timeout) => `${timeout}s: ${command}`,
+    startProjectTerminal: () => ({ terminalId: 'terminal-1', pid: 123 }),
+    writeProjectTerminal: () => {},
+    pollProjectTerminal: () => ({ output: '', running: true, exitCode: null, truncated: false }),
+    killProjectTerminal: async () => true,
+    getProjectTasks: () => [],
+    addProjectTask: (_projectId, title, description) => ({ id: 'task-1', title, description: description ?? '', status: 'pending', createdAt: 1, updatedAt: 1 }),
+    updateProjectTask: (_projectId, id, patch) => ({ id, title: patch.title ?? 'Task', description: patch.description ?? '', status: patch.status ?? 'pending', createdAt: 1, updatedAt: 2 }),
+    deleteProjectTask: () => true,
+    getWorkspaceAgents: () => [],
+    createProject: name => ({ id: 'project-1', name }),
+    createWorkspaceAgent: input => ({ id: 'agent-1', ...input }),
     hasSession: id => id === 'web-session',
-    archiveSession: id => id === 'web-session',
+    archiveSession: id => id === 'web-session' || id === 'subagent:completed',
     getTools: () => [],
+    getIntegrationStatus: () => ({
+      azure: configuredProvider === 'azure',
+      oci: configuredProvider === 'oci',
+      n8n: configuredProvider === 'n8n',
+      kaggle: configuredProvider === 'kaggle',
+    }),
+    saveIntegrationCredentials: provider => { configuredProvider = provider; },
+    deleteIntegrationCredentials: provider => { if (configuredProvider === provider) configuredProvider = ''; },
+    testIntegration: async () => { integrationTests++; },
+    getCronState: () => ({ jobs: [], alerts: [], systemPrompt: defaultAgentPrompt }),
+    createCronJob: input => ({ id: 'cron-1', ...input, enabled: input.enabled !== false, createdAt: 1, updatedAt: 1, nextRunAt: 2, runCount: 0 }),
+    updateCronJob: (id, patch) => ({
+      id, name: patch.name ?? 'test', prompt: patch.prompt ?? 'test',
+      schedule: patch.schedule ?? { type: 'cron', expression: '0 9 * * *' },
+      enabled: patch.enabled ?? true, createdAt: 1, updatedAt: 1, nextRunAt: 2, runCount: 0,
+    }),
+    deleteCronJob: () => true,
+    retryCronAlert: id => ({ id, jobId: 'cron-1', jobName: 'test', prompt: 'test', scheduledAt: 1, createdAt: 1, status: 'pending', attempts: 1 }),
+    updateDefaultAgentPrompt: systemPrompt => { defaultAgentPrompt = systemPrompt; return systemPrompt; },
+    getThreads: () => [],
+    getUnreadThreadRequests: () => [{ id: 'thread-1:post-1', threadId: 'thread-1', postId: 'post-1', title: 'Need help', body: 'Blocked', createdAt: 2 }],
+    createThread: input => ({
+      id: 'thread-1',
+      title: input.title,
+      scope: input.scope,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      participants: input.participants ?? [],
+      externalContactIds: input.externalContactIds ?? [],
+      createdBy: { type: 'user', id: 'user' },
+      createdAt: 1,
+      updatedAt: 1,
+      posts: [],
+    } satisfies AgentThread),
+    postThreadMessage: id => ({
+      id, title: 'Thread', scope: 'open', participants: [], externalContactIds: [],
+      createdBy: { type: 'user', id: 'user' }, createdAt: 1, updatedAt: 2,
+      posts: [{ id: 'post-1', author: { type: 'user', id: 'user' }, body: 'Hello', mentions: [], createdAt: 2 }],
+    }),
+    markThreadRead: id => ({ id, title: 'Thread', scope: 'open', participants: [], externalContactIds: [], createdBy: { type: 'user', id: 'user' }, createdAt: 1, updatedAt: 2, posts: [] }),
+    reactToThreadPost: id => ({ id, title: 'Thread', scope: 'open', participants: [], externalContactIds: [], createdBy: { type: 'user', id: 'user' }, createdAt: 1, updatedAt: 2, posts: [] }),
+    archiveThread: () => true,
+    createThreadContact: label => ({ id: 'contact-1', label, createdAt: 1, token: 'one-time-secret' }),
+    getThreadContacts: (): Array<Omit<ThreadContact, 'tokenHash' | 'postTimes'>> => [],
+    deleteThreadContact: () => true,
+    authenticateThreadContact: token => token === 'external-secret' ? { id: 'contact-1', label: 'Build bot' } : undefined,
+    createExternalThread: (_contact, title) => ({
+      id: 'thread-external', title, scope: 'external', participants: ['main'], externalContactIds: ['contact-1'],
+      createdBy: { type: 'user', id: 'user' }, createdAt: 1, updatedAt: 2,
+      posts: [{ id: 'post-external', author: { type: 'external', id: 'contact-1' }, body: 'Build complete', mentions: [], createdAt: 2 }],
+    }),
+    getExternalThreads: () => [],
+    getExternalThread: () => undefined,
+    postExternalThreadMessage: (_contact, id) => ({
+      id, title: 'Thread', scope: 'external', participants: ['main'], externalContactIds: ['contact-1'],
+      createdBy: { type: 'user', id: 'user' }, createdAt: 1, updatedAt: 2,
+      posts: [{ id: 'post-external', author: { type: 'external', id: 'contact-1' }, body: 'Follow up', mentions: [], createdAt: 2 }],
+    }),
+    retryThreadNotification: id => ({ id, status: 'pending' }),
     chat: async (_request, emit) => {
       emit?.({ type: 'text_delta', text: 'Hello' });
       return { text: 'Hello' };
@@ -104,12 +216,227 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
   try {
+    const preparedUpdate = await fetch(`${baseUrl}/api/update/download`, {
+      method: 'POST',
+      headers: { origin: baseUrl },
+    });
+    assert.equal(preparedUpdate.status, 201);
+    assert.deepEqual(await preparedUpdate.json(), updateDownload);
+    assert.equal(updatePrepareCalls, 1);
+    const rejectedUpdateOrigin = await fetch(`${baseUrl}/api/update/download`, {
+      method: 'POST',
+      headers: { origin: 'https://untrusted.example' },
+    });
+    assert.equal(rejectedUpdateOrigin.status, 403);
+    const installerDownload = await fetch(`${baseUrl}/api/update/installer`, {
+      headers: { origin: baseUrl },
+    });
+    assert.equal(installerDownload.status, 200);
+    assert.equal(installerDownload.headers.get('content-disposition'), 'attachment; filename="Symbiote-5.6.0-x64.msi"');
+    assert.equal(await installerDownload.text(), 'verified MSI');
+
     const lanToken = await fetch(`${baseUrl}/api/access/token`);
     assert.equal(lanToken.status, 200);
     assert.equal((await lanToken.json() as { token: string }).token, control.webAccessToken);
     assert.equal(lanToken.headers.get('cache-control'), 'no-store');
     const crossOriginToken = await fetch(`${baseUrl}/api/access/token`, { headers: { Origin: 'https://untrusted.example' } });
     assert.equal(crossOriginToken.status, 403);
+
+    const appearanceResponse = await fetch(`${baseUrl}/api/appearance`);
+    assert.equal(appearanceResponse.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await appearanceResponse.json(), { settings: appearanceSettings, initialized: true });
+    const savedAppearance = await fetch(`${baseUrl}/api/appearance`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ brightness: 0, primaryHue: 280, secondaryHue: 42 }),
+    });
+    assert.deepEqual(await savedAppearance.json(), { settings: { brightness: 0, primaryHue: 280, secondaryHue: 42 }, initialized: true });
+    assert.deepEqual(appearanceSettings, { brightness: 0, primaryHue: 280, secondaryHue: 42 });
+    const invalidAppearance = await fetch(`${baseUrl}/api/appearance`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ brightness: 101, primaryHue: 280, secondaryHue: 42 }),
+    });
+    assert.equal(invalidAppearance.status, 400);
+
+    const integrationStatus = await fetch(`${baseUrl}/api/integrations`);
+    assert.deepEqual(await integrationStatus.json(), {
+      providers: { azure: false, oci: false, n8n: false, kaggle: false },
+    });
+    const cronState = await fetch(`${baseUrl}/api/cron`);
+    assert.equal(cronState.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await cronState.json(), { jobs: [], alerts: [], systemPrompt: 'test prompt' });
+    const createdCronJob = await fetch(`${baseUrl}/api/cron/jobs`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Morning check', prompt: 'Review the queue.', schedule: { type: 'cron', expression: '0 9 * * 1-5' } }),
+    });
+    assert.equal(createdCronJob.status, 201);
+    assert.equal((await createdCronJob.json() as { id: string }).id, 'cron-1');
+    const updatedCronJob = await fetch(`${baseUrl}/api/cron/jobs/cron-1`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    });
+    assert.equal((await updatedCronJob.json() as { enabled: boolean }).enabled, false);
+    const retriedAlert = await fetch(`${baseUrl}/api/cron/alerts/alert-1/retry`, { method: 'POST' });
+    assert.equal(retriedAlert.status, 200);
+    const savedCronPrompt = await fetch(`${baseUrl}/api/cron/default-prompt`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ systemPrompt: 'Updated operations prompt.' }),
+    });
+    assert.deepEqual(await savedCronPrompt.json(), { systemPrompt: 'Updated operations prompt.' });
+    assert.equal(defaultAgentPrompt, 'Updated operations prompt.');
+    const listedThreads = await fetch(`${baseUrl}/api/threads`);
+    assert.deepEqual(await listedThreads.json(), []);
+    const userHelpRequests = await fetch(`${baseUrl}/api/threads/requests`);
+    assert.equal((await userHelpRequests.json() as Array<{ title: string }>)[0].title, 'Need help');
+    const markThreadRead = await fetch(`${baseUrl}/api/threads/thread-1/read`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ postId: 'post-1' }),
+    });
+    assert.equal(markThreadRead.status, 200);
+    const addThreadReaction = await fetch(`${baseUrl}/api/threads/thread-1/reactions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ postId: 'post-1', emoji: '✅' }),
+    });
+    assert.equal(addThreadReaction.status, 200);
+    const externalUnauthorized = await fetch(`${baseUrl}/api/external/threads`);
+    assert.equal(externalUnauthorized.status, 401);
+    const externalCreated = await fetch(`${baseUrl}/api/external/threads`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer external-secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'CI result', body: 'Build succeeded.' }),
+    });
+    assert.equal(externalCreated.status, 201);
+    assert.equal((await externalCreated.json() as { scope: string }).scope, 'external');
+    const listedExternalThreads = await fetch(`${baseUrl}/api/external/threads`, {
+      headers: { authorization: 'Bearer external-secret' },
+    });
+    assert.equal(listedExternalThreads.status, 200);
+    const deletedCronJob = await fetch(`${baseUrl}/api/cron/jobs/cron-1`, { method: 'DELETE' });
+    assert.deepEqual(await deletedCronJob.json(), { deleted: true });
+    const createdProject = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Research' }),
+    });
+    assert.equal(createdProject.status, 201);
+    assert.deepEqual(await createdProject.json(), { id: 'project-1', name: 'Research' });
+    const updatedProject = await fetch(`${baseUrl}/api/projects/project-1`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Research revamp', scope: 'Ship a documented product.' }),
+    });
+    assert.equal(updatedProject.status, 200);
+    assert.deepEqual(await updatedProject.json(), { id: 'project-1', name: 'Research revamp', scope: 'Ship a documented product.' });
+    const archivedProject = await fetch(`${baseUrl}/api/projects/project-1`, { method: 'DELETE' });
+    assert.deepEqual(await archivedProject.json(), { id: 'project-1', archivedAt: 1 });
+    const archivedProjects = await fetch(`${baseUrl}/api/projects?includeArchived=true`);
+    assert.deepEqual(await archivedProjects.json(), []);
+    assert.equal(includedArchivedProjects, true);
+    const restoredProject = await fetch(`${baseUrl}/api/projects/project-1/restore`, { method: 'POST' });
+    assert.deepEqual(await restoredProject.json(), { id: 'project-1', name: 'Research' });
+    const permanentDelete = await fetch(`${baseUrl}/api/projects/project-1/permanent`, { method: 'DELETE' });
+    assert.deepEqual(await permanentDelete.json(), { deleted: true });
+    const projectFiles = await fetch(`${baseUrl}/api/projects/project-1/files`);
+    assert.deepEqual(await projectFiles.json(), []);
+    const openedProjectFile = await fetch(`${baseUrl}/api/projects/project-1/file?path=src%2Findex.ts`);
+    assert.equal(openedProjectFile.status, 200);
+    assert.deepEqual(await openedProjectFile.json(), { projectId: 'project-1', path: 'src/index.ts', content: '' });
+    const createdProjectFile = await fetch(`${baseUrl}/api/projects/project-1/file`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'src/index.ts', content: 'export {};' }),
+    });
+    assert.equal(createdProjectFile.status, 201);
+    const savedProjectFile = await fetch(`${baseUrl}/api/projects/project-1/file`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'src/index.ts', content: 'export const value = 1;' }),
+    });
+    assert.equal(savedProjectFile.status, 200);
+    const deletedProjectFile = await fetch(`${baseUrl}/api/projects/project-1/file`, {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'src/index.ts' }),
+    });
+    assert.deepEqual(await deletedProjectFile.json(), { deleted: true });
+    const invalidProjectFile = await fetch(`${baseUrl}/api/projects/project-1/file?path=..%2Foutside`);
+    assert.equal(invalidProjectFile.status, 400);
+    const projectCommand = await fetch(`${baseUrl}/api/projects/project-1/terminal`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ command: 'git status --short', timeout: 60 }),
+    });
+    assert.deepEqual(await projectCommand.json(), { output: '60s: git status --short' });
+    const startedProjectTerminal = await fetch(`${baseUrl}/api/projects/project-1/terminal`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'start' }),
+    });
+    assert.deepEqual(await startedProjectTerminal.json(), { terminalId: 'terminal-1', pid: 123 });
+    const projectTerminalOutput = await fetch(`${baseUrl}/api/projects/project-1/terminal?terminalId=terminal-1`);
+    assert.deepEqual(await projectTerminalOutput.json(), { output: '', running: true, exitCode: null, truncated: false });
+    const projectTerminalInput = await fetch(`${baseUrl}/api/projects/project-1/terminal`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'input', terminalId: 'terminal-1', input: 'echo ok\n' }),
+    });
+    assert.deepEqual(await projectTerminalInput.json(), { sent: true });
+    const stoppedProjectTerminal = await fetch(`${baseUrl}/api/projects/project-1/terminal?terminalId=terminal-1`, { method: 'DELETE' });
+    assert.deepEqual(await stoppedProjectTerminal.json(), { stopped: true });
+    const invalidProjectCommand = await fetch(`${baseUrl}/api/projects/project-1/terminal`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ command: 'git status', timeout: 301 }),
+    });
+    assert.equal(invalidProjectCommand.status, 400);
+    const projectTasks = await fetch(`${baseUrl}/api/projects/project-1/tasks`);
+    assert.deepEqual(await projectTasks.json(), []);
+    const addedProjectTask = await fetch(`${baseUrl}/api/projects/project-1/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Add plan', description: 'Make it live.' }),
+    });
+    assert.deepEqual(await addedProjectTask.json(), { id: 'task-1', title: 'Add plan', description: 'Make it live.', status: 'pending', createdAt: 1, updatedAt: 1 });
+    const createdFolder = await fetch(`${baseUrl}/api/projects/project-1/directories`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'src/components' }),
+    });
+    assert.deepEqual(await createdFolder.json(), { projectId: 'project-1', path: 'src/components' });
+    const movedProjectEntry = await fetch(`${baseUrl}/api/projects/project-1/entries`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'src/index.ts', destination: 'src/main.ts' }),
+    });
+    assert.deepEqual(await movedProjectEntry.json(), { path: 'src/main.ts' });
+    const projectStorage = await fetch(`${baseUrl}/api/projects/project-1/storage`);
+    assert.deepEqual(await projectStorage.json(), { fileCount: 0, directoryCount: 0, bytes: 0 });
+    const createdAgent = await fetch(`${baseUrl}/api/workspace-agents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ projectId: 'project-1', name: 'Analyst', emoji: '🧠', instructions: 'Analyze research.' }),
+    });
+    assert.equal(createdAgent.status, 201);
+    assert.deepEqual(await createdAgent.json(), { id: 'agent-1', projectId: 'project-1', name: 'Analyst', emoji: '🧠', instructions: 'Analyze research.' });
+    const saveIntegration = await fetch(`${baseUrl}/api/integrations/n8n`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ apiKey: 'must-not-be-returned' }),
+    });
+    assert.equal(saveIntegration.status, 200);
+    assert.deepEqual(await saveIntegration.json(), { configured: true });
+    const testIntegration = await fetch(`${baseUrl}/api/integrations/n8n/test`, { method: 'POST' });
+    assert.equal(testIntegration.status, 200);
+    assert.equal(integrationTests, 1);
+    const deleteIntegration = await fetch(`${baseUrl}/api/integrations/n8n`, { method: 'DELETE' });
+    assert.deepEqual(await deleteIntegration.json(), { configured: false });
+    assert.equal(configuredProvider, '');
 
     const memoryGraph = await fetch(`${baseUrl}/api/memory/graph`);
     assert.equal(memoryGraph.status, 200);
@@ -212,6 +539,9 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
     const archiveResponse = await fetch(`${baseUrl}/api/sessions/web-session`, { method: 'DELETE' });
     assert.equal(archiveResponse.status, 200);
     assert.deepEqual(await archiveResponse.json(), { archived: true });
+    const archiveSubagentResponse = await fetch(`${baseUrl}/api/sessions/subagent%3Acompleted`, { method: 'DELETE' });
+    assert.equal(archiveSubagentResponse.status, 200);
+    assert.deepEqual(await archiveSubagentResponse.json(), { archived: true });
 
     const stopResponse = await fetch(`${baseUrl}/api/runs/run-2/stop`, { method: 'POST' });
     assert.equal(stopResponse.status, 200);
@@ -264,6 +594,7 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   } finally {
     server.close();
     await once(server, 'close');
+    fs.rmSync(updateDirectory, { recursive: true, force: true });
   }
 });
 
@@ -274,6 +605,11 @@ test('main-agent workspace task tool can list and control Kanban runs', async ()
     stopRun: id => { actions.push({ action: 'stop', id }); return true; },
     restartRun: id => { actions.push({ action: 'restart', id }); return { id: 'run-2', status: 'running' }; },
     guideRun: (id, message) => { actions.push({ action: 'guide', id, message }); return { id: 'run-3', status: 'running' }; },
+    getProjectId: sessionId => sessionId === 'project-session' ? 'project-1' : undefined,
+    listProjectTasks: () => [{ id: 'task-1', title: 'Plan', description: '', status: 'pending', createdAt: 1, updatedAt: 1 }],
+    addProjectTask: (_projectId, title) => ({ id: 'task-2', title, description: '', status: 'pending', createdAt: 2, updatedAt: 2 }),
+    updateProjectTask: (_projectId, id, patch) => ({ id, title: patch.title ?? 'Plan', description: '', status: patch.status ?? 'pending', createdAt: 1, updatedAt: 2 }),
+    deleteProjectTask: (_projectId, id) => id === 'task-1',
   });
 
   assert.deepEqual(JSON.parse(await tool.execute({ action: 'list' })), [{ id: 'run-1', status: 'running' }]);
@@ -286,6 +622,11 @@ test('main-agent workspace task tool can list and control Kanban runs', async ()
     { action: 'stop', id: 'run-1' },
   ]);
   await assert.rejects(tool.execute({ action: 'guide', runId: 'run-1', message: '  ' }), /non-empty message/);
+  assert.equal(JSON.parse(await tool.execute({ action: 'todo_list' }, { sessionId: 'project-session' }))[0].id, 'task-1');
+  assert.equal(JSON.parse(await tool.execute({ action: 'todo_add', title: 'Deploy' }, { sessionId: 'project-session' })).title, 'Deploy');
+  assert.equal(JSON.parse(await tool.execute({ action: 'todo_update', taskId: 'task-1', status: 'completed' }, { sessionId: 'project-session' })).status, 'completed');
+  assert.deepEqual(JSON.parse(await tool.execute({ action: 'todo_delete', taskId: 'task-1' }, { sessionId: 'project-session' })), { deleted: true, taskId: 'task-1' });
+  await assert.rejects(tool.execute({ action: 'todo_list' }, { sessionId: 'unscoped' }), /assigned to a project/);
 });
 
 test('workspace identity reads its name from AGENTS.md and updates it with identity settings', () => {

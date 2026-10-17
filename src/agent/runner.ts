@@ -8,7 +8,7 @@ import type { PolicyEngine } from '../tools/policy.js';
 import { sanitizeToolResult, logInjectionAttempt } from '../security/sanitizer.js';
 import { classifyTask, getTemperature } from './temperature.js';
 import type { TemperatureConfig, TaskCategory } from './temperature.js';
-import type { BlinkController } from './blink.js';
+import { stripBlinkControlMessages, type BlinkController } from './blink.js';
 import type { ContextStore } from './context-store.js';
 import { TodoManager } from './todo.js';
 import type { ToolExecuteOptions } from '../tools/types.js';
@@ -31,6 +31,7 @@ export interface RunnerConfig {
   maxIterations?: number;
   maxContextTokens?: number;
   sessionId?: string;
+  googleWorkspaceAccessToken?: string;
   contextMonitor?: ContextMonitor;
   policyEngine?: PolicyEngine;
   temperatureConfig?: TemperatureConfig;
@@ -191,7 +192,7 @@ export async function runAgent(
   const allToolCalls: RunResult['toolCalls'] = [];
   const temperatureHistory: Array<{ iteration: number; category: TaskCategory; temperature: number }> = [];
   let recentToolNames: string[] = [];
-  let currentMessages = [...messages];
+  let currentMessages = stripBlinkControlMessages(messages);
   let iterations = 0;
   let textAccum = '';
   let completionReviewPending = false;
@@ -280,19 +281,16 @@ export async function runAgent(
       currentMessages = await config.contextMonitor.manage(currentMessages);
     }
 
-    // BLINK: inject preparation message when approaching budget wall
+    // BLINK control stays in the runtime; never expose it as a synthetic user message.
     if (config.blinkController) {
       const remaining = maxIter - iterations;
       if (config.blinkController.shouldPrepare(remaining)) {
-        const prepMsg = config.blinkController.getPrepareMessage();
-        currentMessages.push({ role: 'user', content: prepMsg });
-        console.log(`[BLINK] Prepare message injected at iteration ${iterations} (${remaining} remaining)`);
+        config.blinkController.markPrepared();
+        console.log(`[BLINK] Prepare state set at iteration ${iterations} (${remaining} remaining)`);
       }
-      // BLINK checkpoint: periodic state save for long runs (external kill safety)
       else if (config.blinkController.shouldCheckpoint(iterations)) {
-        const cpMsg = config.blinkController.getCheckpointMessage(iterations);
-        currentMessages.push({ role: 'user', content: cpMsg });
-        console.log(`[BLINK] Checkpoint injected at iteration ${iterations}/${maxIter}`);
+        config.blinkController.recordCheckpoint(iterations);
+        console.log(`[BLINK] Runtime checkpoint recorded at iteration ${iterations}/${maxIter}`);
       }
     }
 
@@ -302,10 +300,13 @@ export async function runAgent(
       if (iterCheck.warning) {
         console.warn(`⚠️  ${iterCheck.warning}`);
         // Inject warning into context so the LLM can react and wrap up gracefully
-        currentMessages.push({
-          role: 'user',
-          content: `⚠️ SYSTEM WARNING: ${iterCheck.warning}. Wrap up NOW — provide your best result immediately. Do not start new work.`,
-        });
+        const directive = `Runtime policy warning: ${iterCheck.warning}. Wrap up now with the best available result; do not start new work.`;
+        const systemMessage = currentMessages.find(message => message.role === 'system');
+        if (systemMessage) {
+          systemMessage.content = `${typeof systemMessage.content === 'string' ? systemMessage.content : ''}\n\n${directive}`;
+        } else {
+          currentMessages.unshift({ role: 'system', content: directive });
+        }
       }
       if (!iterCheck.ok) {
         return {
@@ -461,7 +462,7 @@ export async function runAgent(
         const candidate = textAccum.trim();
         if (candidate) currentMessages.push({ role: 'assistant', content: candidate });
         currentMessages.push({
-          role: 'user',
+          role: 'system',
           content: 'Internal completion review: compare the original request with the work completed so far. If any requested work remains, continue it now using tools. If it is complete, provide the final user-facing response. If genuinely blocked, state the blocker and what remains. Do not mention this review.',
         });
         textAccum = '';
@@ -534,6 +535,7 @@ export async function runAgent(
         try {
           const toolOptions: ToolExecuteOptions = {
             sessionId: config.sessionId,
+            googleWorkspaceAccessToken: config.googleWorkspaceAccessToken,
           };
           let result = clipResult(await executeToolWithTimeout(
             (signal) => config.toolRegistry.execute(tc.name, toolInput, { ...toolOptions, signal }),
@@ -541,13 +543,13 @@ export async function runAgent(
             config.abortSignal,
             `Tool ${tc.name}`,
           ));
+          const isError = looksFailed(result);
           // Sanitize tool result before it enters the LLM context
           const sanitized = sanitizeToolResult(tc.name, result);
           if (sanitized.injectionDetected) {
             logInjectionAttempt(tc.name, sanitized.patterns, result);
           }
           result = sanitized.text || '(no output)';
-          const isError = looksFailed(result);
           try { config.onToolEnd?.(tc.name, result); } catch { /* progress reporting is non-critical */ }
           toolResults.push({ tc, input: toolInput, result, isError });
         } catch (err) {

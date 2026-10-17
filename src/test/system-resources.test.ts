@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { calculateCpuPercent, parseProcDiskStats, parseProcNetwork, parseWindowsThermalCounter } from '../metrics/system-resources.js';
+import { calculateCpuCorePercents, calculateCpuPercent, parseProcDiskStats, parseProcNetwork, parseWindowsThermalCounter } from '../metrics/system-resources.js';
 
 test('host CPU utilization is normalized by aggregate core time and bounded', () => {
   const previous = [
@@ -13,6 +13,8 @@ test('host CPU utilization is normalized by aggregate core time and bounded', ()
   ];
 
   assert.equal(calculateCpuPercent(previous, current), 25);
+  assert.deepEqual(calculateCpuCorePercents(previous, current), [20, 30]);
+  assert.deepEqual(calculateCpuCorePercents([], current), [null, null]);
   assert.equal(calculateCpuPercent([], current), null);
   assert.equal(calculateCpuPercent(previous, previous), null);
 });

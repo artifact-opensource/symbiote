@@ -1,0 +1,85 @@
+name: Build and publish release assets
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node --test dist/test/*.test.js
+
+  linux-package:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Package Linux npm distribution
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          npm pack --pack-destination release-assets
+          cd release-assets
+          sha256sum *.tgz > SHA256SUMS-linux.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-release-assets
+          path: release-assets/*
+          if-no-files-found: error
+
+  windows-msi:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:msi
+      - name: Add MSI checksum
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem dist\windows-installer\*.msi
+          $hash = (Get-FileHash -LiteralPath $msi.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($msi.Name)" | Set-Content -Encoding ascii (Join-Path $msi.DirectoryName 'SHA256SUMS-windows.txt')
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-assets
+          path: dist/windows-installer/*
+          if-no-files-found: error
+
+  publish:
+    needs: [linux-package, windows-msi]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Symbiote ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-assets/*

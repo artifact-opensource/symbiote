@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import type { TemperatureConfig, TaskCategory } from '../agent/temperature.js';
+import type { SandboxConfig } from '../tools/sandbox.js';
 import { appPath, configSearchPaths } from '../runtime/platform.js';
 
 export interface ChannelConfig {
@@ -124,6 +125,7 @@ export interface SymbioteConfig {
   tools?: {
     enabled?: boolean;
   };
+  sandbox?: SandboxConfig;
 }
 
 const DEFAULT_CONFIG: SymbioteConfig = {
@@ -135,6 +137,12 @@ const DEFAULT_CONFIG: SymbioteConfig = {
   maxIterations: 50,
   workspace: process.cwd(),
   sessionsDir: '.session',
+  sandbox: {
+    enabled: true,
+    ownerAccess: true,
+    internalTier: 'standard',
+    nonOwnerTier: 'restricted',
+  },
   ownerIds: [],
   apiPort: 3006,
   apiHost: '127.0.0.1',

@@ -9,14 +9,7 @@ npm i @symbiote-agi/symbiote
 npx symbiote init
 ```
 
-The [guided setup flow](wizard.md) walks you through provider, channel, access, and workspace setup:
-
-1. **Agent Identity** — name, emoji, personality (generates SOUL.md, IDENTITY.md, etc.)
-2. **Provider** — choose from 8 LLM providers (Groq is the default — free, fastest)
-3. **Channels** — Discord and/or WhatsApp (both optional)
-4. **Access Control** — owner IDs, DM/group policies
-5. **Workspace** — working directory and API port
-6. **Review** — confirm and write files
+The [guided setup flow](wizard.md) configures the model, workspace, optional channels, identity, and network settings. Keep provider keys and channel credentials in `.env`.
 
 Output:
 
@@ -48,7 +41,7 @@ You'll see the [boot sequence](../core/boot-sequence.md):
 - **Discord** — mention your bot or DM it
 - **WhatsApp** — send a message to the connected number
 - **HTTP API** — `POST http://localhost:3006/api/v1/chat`
-- **Web UI** — open `http://localhost:3006` in your browser
+- **Web Control Room** — open `http://localhost:3009` in your browser
 - **CLI REPL** — run `node dist/index.js` for an interactive terminal
 
 ## Manual Setup (Without Wizard)
@@ -60,7 +53,7 @@ cp .env.example .env
 
 Edit both files — set your API keys, channel tokens, workspace path, and owner IDs. See [Configuration](configuration.md) for details.
 
-## Minimum Viable Setup (Groq, no channels)
+## Minimum Viable Setup (OpenRouter, no channels)
 
 The fastest path to a running agent:
 
@@ -82,7 +75,7 @@ OPENROUTER_API_KEY=your_key_here
 node dist/index.js --config=symbiote.json
 ```
 
-This gives you a CLI agent with file tools, shell access, and web fetch — no Discord or WhatsApp needed.
+This gives you a CLI agent with file tools, shell access, and web fetch — no Discord or WhatsApp needed. The example configuration defaults to `openrouter/free`; choose a model available to your account.
 
 ## Windows
 

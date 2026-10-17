@@ -350,7 +350,11 @@ async function cmdInit() {
   const args = process.argv.slice(3);
   if (args.includes('--ui') || args.includes('--desktop')) {
     const { startInstallerUi } = await import('./installer-ui.js');
-    await startInstallerUi();
+    const configDirectoryArgument = args.find(argument => argument.startsWith('--config-dir='));
+    const configDirectory = configDirectoryArgument
+      ? path.resolve(configDirectoryArgument.slice('--config-dir='.length))
+      : path.dirname(getConfigPath() ?? path.resolve('symbiote.json'));
+    await startInstallerUi(3010, configDirectory);
     await new Promise<void>(() => {});
     return;
   }

@@ -1,1 +1,1 @@
-constexpr char VERSION[] = "v5.3.0-apex";
+constexpr char VERSION[] = "v5.5.0";

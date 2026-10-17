@@ -52,3 +52,5 @@ Environment variables are auto-loaded from `.env` via the built-in dotenv loader
 | Windows (x64) | ✅ Supported |
 
 Symbiote resolves temp, home, config, and credential paths through platform-aware runtime helpers. Legacy `symbiote` paths remain supported for compatibility, while new installs use the current Symbiote runtime assets.
+
+For Windows MSI packaging, service deployment, and Linux/macOS daemon guidance, see [Production Deployment](../advanced/production.md).

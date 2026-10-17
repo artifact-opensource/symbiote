@@ -91,9 +91,15 @@ after five seconds; Windows Service Control Manager recovery also restarts a fai
 service wrapper. The installer keeps configuration, credentials, sessions, workspace,
 and logs under `%ProgramData%\Symbiote`; runtime sessions are stored in
 `%ProgramData%\Symbiote\workspace\.session`. The MSI adds Start Menu and desktop
-shortcuts, launches the desktop app after installation, and adds a Domain/Private
-Windows Firewall rule for the configured web port. Uninstalling the MSI removes that
-firewall rule and preserves data.
+shortcuts, then opens the setup wizard in the browser with its configuration target set
+to `%ProgramData%\Symbiote`. The wizard covers the provider key, Discord, and WhatsApp
+settings and saves `symbiote.json` and `.env` in that protected data directory. Start the
+gateway service again after saving so it loads newly entered environment credentials.
+The desktop app remains available from the installed shortcuts. The MSI does not add a
+firewall rule during installation. When the Electron desktop app is opened, it checks for
+an existing rule and asks before adding optional Domain/Private LAN access for the
+configured web port. Uninstalling removes the Symbiote firewall rule, if present, and
+preserves data.
 
 To initialize the installed service from a source checkout, pass the checkout as the
 seed directory when installing. The installer copies `symbiote.json` and `.env` into
@@ -102,7 +108,7 @@ Existing ProgramData configuration is preserved on upgrades.
 
 ```powershell
 node .\dist\index.js stop
-msiexec /i .\dist\windows-installer\Symbiote-5.3.0-x64.msi SYMBIOTE_SEED_DIRECTORY="C:\workspace\symbiote"
+msiexec /i .\dist\windows-installer\Symbiote-5.5.0-x64.msi SYMBIOTE_SEED_DIRECTORY="C:\workspace\symbiote"
 ```
 
 Stop an already-running gateway before installation; the service installer refuses
@@ -110,7 +116,8 @@ to proceed while another Symbiote daemon is active, avoiding a port conflict or 
 competing gateway processes.
 
 If no seed directory is supplied, the service starts with the example configuration.
-Add provider keys and channel credentials to
+The post-install setup wizard opens automatically; if it was closed, rerun the setup
+wizard from the installed package or add provider keys and channel credentials to
 `%ProgramData%\Symbiote\.env`, then restart the service from an elevated PowerShell.
 The installed desktop app opens the running control room; from **Configuration** on
 the host, reveal the LAN access token to connect other devices on the trusted network.
@@ -131,6 +138,17 @@ machine, because LocalSystem executes the checkout's code with full machine priv
 To install the current checkout as a service instead, run
 `scripts\windows\install-service.ps1` from an elevated PowerShell; remove only the
 service while preserving its state with `scripts\windows\uninstall-service.ps1`.
+
+Pushing a `vX.Y.Z` tag runs the release workflow after the full test suite passes. It
+publishes the Windows MSI and Linux npm package with SHA-256 checksum files. The
+Windows Electron Control Room can prepare a newer stable MSI after the user chooses
+**Download and install**. The Gateway downloads only the release's version-matched MSI,
+checks its published SHA-256 manifest and size, and serves the verified file to Electron.
+Electron verifies the downloaded bytes again, asks for confirmation, then opens the MSI
+installer, which may request Windows administrator approval. Electron closes while the
+installer upgrades the application and Gateway service. The browser Control Room and
+non-Windows platforms continue to link to the release page for manual installation;
+they do not perform in-place updates.
 
 > **Note:** `SIGUSR1` hot-reload is not available on Windows. Restart the service to apply config changes.
 

@@ -34,6 +34,7 @@ export interface SessionContext {
   chatType: 'direct' | 'group';
   senderId: string;
   isOwner: boolean;
+  workspaceRoot?: string;
 }
 
 export interface SandboxRule {
@@ -55,20 +56,42 @@ export interface SandboxDenial {
   input: Record<string, unknown>;
 }
 
+export interface SandboxConfig {
+  enabled?: boolean;
+  ownerAccess?: boolean;
+  internalTier?: 'standard' | 'restricted';
+  nonOwnerTier?: 'standard' | 'restricted';
+}
+
 // ─── Tier Classification ───────────────────────────────────────────────────
 
 const PRIMARY_ADAPTERS = new Set(['discord-main', 'whatsapp-main']);
 
+let sandboxConfig: Required<SandboxConfig> = {
+  enabled: true,
+  ownerAccess: true,
+  internalTier: 'standard',
+  nonOwnerTier: 'restricted',
+};
+
+export function configureSandbox(config: SandboxConfig | undefined): void {
+  sandboxConfig = {
+    enabled: config?.enabled !== false,
+    ownerAccess: config?.ownerAccess !== false,
+    internalTier: config?.internalTier === 'restricted' ? 'restricted' : 'standard',
+    nonOwnerTier: config?.nonOwnerTier === 'standard' ? 'standard' : 'restricted',
+  };
+}
+
 export function classifySession(ctx: SessionContext): SessionTier {
-  // Sandbox is off unless explicitly enabled; every session gets full access.
-  if (process.env.SYMBIOTE_SANDBOX !== '1') return 'admin';
+  if (!sandboxConfig.enabled) return 'admin';
   if (ctx.channelType === 'internal' || ctx.adapterId === 'subagent') {
-    return 'standard';
+    return sandboxConfig.internalTier;
   }
-  if (ctx.isOwner) {
+  if (ctx.isOwner && sandboxConfig.ownerAccess) {
     return 'admin';
   }
-  return 'restricted';
+  return sandboxConfig.nonOwnerTier;
 }
 
 // ─── Built-in Rules ────────────────────────────────────────────────────────
@@ -183,6 +206,35 @@ const noSensitiveReads: SandboxRule = {
   },
 };
 
+const projectWorkspaceBoundary: SandboxRule = {
+  name: 'project-workspace-boundary',
+  tools: ['read', 'write', 'edit', 'exec', 'process_start'],
+  check: (tool, input, ctx) => {
+    if (!ctx.workspaceRoot || classifySession(ctx) === 'admin') return null;
+    const root = path.resolve(ctx.workspaceRoot);
+    const key = tool === 'exec' || tool === 'process_start' ? 'workdir' : 'path';
+    const requested = typeof input[key] === 'string' ? input[key] as string : root;
+    const target = path.resolve(root, requested);
+    const relative = path.relative(root, target);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      return `Project tools are confined to the assigned workspace (${root}).`;
+    }
+    let current = root;
+    for (const part of relative.split(path.sep).filter(Boolean)) {
+      current = path.join(current, part);
+      try {
+        if (fs.lstatSync(current).isSymbolicLink()) {
+          return 'Project tools cannot follow symbolic links.';
+        }
+      } catch (failure) {
+        if ((failure as NodeJS.ErrnoException).code === 'ENOENT') break;
+        throw failure;
+      }
+    }
+    return null;
+  },
+};
+
 /**
  * Rule: Restricted sessions get read-only + limited exec
  */
@@ -226,6 +278,7 @@ const BUILTIN_RULES: SandboxRule[] = [
   noEngineModification,
   noDangerousCommands,
   noSensitiveReads,
+  projectWorkspaceBoundary,
   restrictedLimitations,
   noCrossChannelToOwner,
 ];
@@ -303,7 +356,20 @@ export class SandboxedToolRegistry {
 
   /** Execute with sandbox enforcement */
   async execute(name: string, input: Record<string, unknown>, options?: ToolExecuteOptions): Promise<string> {
-    // Check all applicable rules
+    const denial = this.validate(name, input);
+    if (denial) return JSON.stringify({ error: denial, sandbox: true });
+
+    // Project commands default to the assigned workspace unless the caller gives a checked path.
+    const scopedInput = { ...input };
+    if (this.ctx.workspaceRoot && ['exec', 'process_start'].includes(name)
+      && typeof scopedInput.workdir !== 'string') {
+      scopedInput.workdir = this.ctx.workspaceRoot;
+    }
+    return this.inner.execute(name, scopedInput, options);
+  }
+
+  /** Validate a command before it is submitted to a long-lived project shell. */
+  validate(name: string, input: Record<string, unknown>): string | null {
     for (const rule of this.rules) {
       if (rule.tools === '*' || rule.tools.includes(name)) {
         const denial = rule.check(name, input, this.ctx);
@@ -318,13 +384,11 @@ export class SandboxedToolRegistry {
             input: this.sanitizeInput(input),
           };
           logDenial(record);
-          return JSON.stringify({ error: denial, sandbox: true });
+          return denial;
         }
       }
     }
-
-    // All rules passed — execute
-    return this.inner.execute(name, input, options);
+    return null;
   }
 
   /** Sanitize input for audit log (remove large content, sensitive values) */

@@ -7,7 +7,7 @@ node dist/index.js --config=symbiote.json
 ```
 
 ```
-Symbiote v5.3.0 | openrouter/openrouter/free | session: default
+Symbiote v5.5.0 | openrouter/openrouter/free | session: default
 Tools: runtime-registered count
 Type /help for commands
 

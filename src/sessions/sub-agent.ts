@@ -59,14 +59,20 @@ export class SubAgentManager {
       };
     }
 
-    const sessionId = `subagent:${randomUUID()}`;
+    const sessionId = config.projectId && config.agentId
+      ? `agent-${config.projectId}-${config.agentId}-${randomUUID()}`
+      : config.projectId
+        ? `project-${config.projectId}-${randomUUID()}`
+        : `subagent:${randomUUID()}`;
     const session = this.sessionManager.create(sessionId, {
-      label: `Sub-agent: ${config.task.slice(0, 50)}`,
+      label: 'Sub-agent conversation',
       provider: config.provider ?? providerConfig.model,
       model: config.model ?? providerConfig.model,
       parentSessionId: config.parentSessionId,
       depth: config.depth,
       sessionKind: 'subagent',
+      projectId: config.projectId,
+      agentId: config.agentId,
     });
 
     const handle: SubAgentHandle = {
@@ -147,6 +153,7 @@ Task: ${config.task}`,
           toolRegistry,
           maxIterations: maxIter,
           sessionId: session.id,
+          googleWorkspaceAccessToken: config.googleWorkspaceAccessToken,
           contextStore: this.getContextStore?.(),
           todoScope,
           policyEngine,
@@ -185,7 +192,6 @@ Task: ${config.task}`,
         if (result.maxIterationsHit) {
           if (blinkCtrl.needsBlink(true)) {
             blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);
-            session.messages.push({ role: 'user', content: blinkCtrl.getResumeMessage() });
             this.sessionManager.save(session);
             await new Promise(resolve => setTimeout(resolve, blinkCtrl.getCooldownMs()));
             continue;

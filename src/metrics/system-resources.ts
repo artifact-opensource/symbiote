@@ -18,6 +18,7 @@ export interface HostResourceSnapshot {
   sampledAt: number;
   cpuPercent: number | null;
   cpuLogicalCores: number;
+  cpuCorePercents: Array<number | null>;
   memory: { totalBytes: number; freeBytes: number; usedPercent: number };
   network: {
     receiveBytesPerSecond: number | null;
@@ -46,6 +47,7 @@ const EMPTY_SNAPSHOT: HostResourceSnapshot = {
   sampledAt: 0,
   cpuPercent: null,
   cpuLogicalCores: Math.max(1, os.cpus().length),
+  cpuCorePercents: [],
   memory: { totalBytes: os.totalmem(), freeBytes: os.freemem(), usedPercent: 0 },
   network: { receiveBytesPerSecond: null, transmitBytesPerSecond: null, source: 'Waiting for a second sample' },
   disk: { readBytesPerSecond: null, writeBytesPerSecond: null, source: 'Waiting for a second sample' },
@@ -71,6 +73,17 @@ export function calculateCpuPercent(previous: CpuTimes[], current: CpuTimes[]): 
     totalDelta += delta;
   }
   return totalDelta > 0 ? Math.round(Math.min(100, Math.max(0, (1 - idleDelta / totalDelta) * 100)) * 10) / 10 : null;
+}
+
+export function calculateCpuCorePercents(previous: CpuTimes[], current: CpuTimes[]): Array<number | null> {
+  return current.map((next, index) => {
+    const prior = previous[index];
+    if (!prior) return null;
+    const delta = cpuTotal(next) - cpuTotal(prior);
+    if (delta <= 0) return null;
+    const idleDelta = Math.max(0, next.idle - prior.idle);
+    return Math.round(Math.min(100, Math.max(0, (1 - idleDelta / delta) * 100)) * 10) / 10;
+  });
 }
 
 export function parseProcNetwork(raw: string): { received: number; sent: number } {
@@ -328,11 +341,13 @@ export class SystemResourcesSampler {
       warnings.push(`Hardware counters could not be sampled: ${reason || 'Windows counter query failed.'}`);
     } finally {
       const cpuPercent = calculateCpuPercent(this.previousCpu, currentCpu);
+      const cpuCorePercents = calculateCpuCorePercents(this.previousCpu, currentCpu);
       this.previousCpu = currentCpu;
       this.value = {
         sampledAt: now,
         cpuPercent,
         cpuLogicalCores: Math.max(1, cpu.length),
+        cpuCorePercents,
         memory: {
           totalBytes,
           freeBytes,

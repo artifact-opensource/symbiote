@@ -3,7 +3,7 @@ import { Activity, Download, Maximize2, Minus, Plus, Search, X } from 'lucide-re
 import type { MemoryDocument, MemoryGraphData, MemoryGraphNode } from '../types';
 
 type MemoryRequest = <T>(endpoint: string, options?: RequestInit) => Promise<T>;
-type Side = 'system' | 'documents' | 'sessions';
+type Side = 'system' | 'documents' | 'sessions' | 'projects';
 type NodeKind = 'system' | 'domain' | 'shard' | 'document';
 type GraphNode = {
   id: string;
@@ -22,20 +22,6 @@ type GraphNode = {
 };
 type GraphEdge = { source: string; target: string; similarity: number; kind: 'structure' | 'similarity' };
 type Transform = { x: number; y: number; scale: number };
-
-const COLORS: Record<string, string> = {
-  system: '#d2dfb8',
-  documents: '#86aeb4',
-  sessions: '#d4ad81',
-  memograph: '#9aa8cf',
-  skill: '#9cb77d',
-  session: '#d4ad81',
-  webchat: '#d7b181',
-  discord: '#a8a0d2',
-  whatsapp: '#89b69e',
-  absorbed: '#a5b8a6',
-  default: '#9ca995',
-};
 
 function stableHash(value: string): number {
   let hash = 2166136261;
@@ -57,9 +43,10 @@ function buildGraph(data: MemoryGraphData, width: number, height: number): { nod
     x: centerX, y: centerY, anchorX: centerX, anchorY: centerY, radius: 12,
   });
 
-  const sides: Array<{ id: 'documents' | 'sessions'; label: string; x: number }> = [
-    { id: 'documents', label: 'KNOWLEDGE', x: centerX - Math.min(215, width * 0.25) },
-    { id: 'sessions', label: 'SESSIONS', x: centerX + Math.min(215, width * 0.25) },
+  const sides: Array<{ id: Exclude<Side, 'system'>; label: string; x: number; y: number; dx: number; dy: number }> = [
+    { id: 'documents', label: 'KNOWLEDGE', x: centerX - Math.min(215, width * 0.27), y: centerY, dx: -1, dy: 0 },
+    { id: 'sessions', label: 'SESSIONS', x: centerX + Math.min(215, width * 0.27), y: centerY, dx: 1, dy: 0 },
+    { id: 'projects', label: 'PROJECTS', x: centerX, y: centerY + Math.min(130, height * 0.26), dx: 0, dy: 1 },
   ];
   const parent = new Map(data.nodes.map(document => [document.id, document.id]));
   const find = (id: string): string => {
@@ -89,7 +76,7 @@ function buildGraph(data: MemoryGraphData, width: number, height: number): { nod
     .filter(([, documents]) => documents.length > 1)
     .sort(([left], [right]) => left.localeCompare(right));
   const componentNumbers = new Map(multiDocumentComponents.map(([root], index) => [root, index + 1]));
-  const shards = new Map<string, { side: 'documents' | 'sessions'; source: string; label: string; documents: MemoryGraphNode[] }>();
+  const shards = new Map<string, { side: Exclude<Side, 'system'>; source: string; label: string; documents: MemoryGraphNode[] }>();
   const isolated = new Map<string, MemoryGraphNode[]>();
   for (const [root, documents] of components) {
     const side = documents[0].side;
@@ -109,7 +96,7 @@ function buildGraph(data: MemoryGraphData, width: number, height: number): { nod
     }
   }
   for (const [key, documents] of isolated) {
-    const [side, source] = key.split('\0') as ['documents' | 'sessions', string];
+    const [side, source] = key.split('\0') as [Exclude<Side, 'system'>, string];
     shards.set(`isolated:${side}:${source}`, {
       side, source, label: `${source.toUpperCase()} · OTHER`, documents,
     });
@@ -119,29 +106,34 @@ function buildGraph(data: MemoryGraphData, width: number, height: number): { nod
     const domainId = `domain:${side.id}`;
     addNode({
       id: domainId, label: side.label, kind: 'domain', side: side.id,
-      x: side.x, y: centerY, anchorX: side.x, anchorY: centerY, radius: 8,
+      x: side.x, y: side.y, anchorX: side.x, anchorY: side.y, radius: 8,
     });
     edges.push({ source: 'system', target: domainId, similarity: 1, kind: 'structure' });
     const groups = [...shards.entries()]
       .filter(([, shard]) => shard.side === side.id)
       .sort(([left], [right]) => left.localeCompare(right));
-    const sourceColumnX = side.x + (side.id === 'documents' ? -72 : 72);
+    const perpendicularX = -side.dy;
+    const perpendicularY = side.dx;
+    const sourceX = side.x + side.dx * 72;
+    const sourceY = side.y + side.dy * 72;
     groups.forEach(([key, shard], groupIndex) => {
       const { source, documents } = shard;
       const rows = Math.max(1, groups.length);
-      const sourceY = centerY + (groupIndex - (rows - 1) / 2) * Math.min(125, height / rows * 0.68);
+      const offset = (groupIndex - (rows - 1) / 2) * Math.min(125, Math.max(24, width / rows * 0.12));
+      const shardX = sourceX + perpendicularX * offset;
+      const shardY = sourceY + perpendicularY * offset;
       const shardId = `shard:${key}`;
       addNode({
         id: shardId, label: shard.label, kind: 'shard', side: side.id, source,
-        x: sourceColumnX, y: sourceY, anchorX: sourceColumnX, anchorY: sourceY, radius: 5,
+        x: shardX, y: shardY, anchorX: shardX, anchorY: shardY, radius: 5,
       });
       edges.push({ source: domainId, target: shardId, similarity: 1, kind: 'structure' });
       documents.forEach(document => {
         const hash = stableHash(document.id);
         const angle = (hash % 3600) / 3600 * Math.PI * 2;
         const distance = 24 + ((hash >>> 9) % 100) / 100 * 77;
-        const x = sourceColumnX + Math.cos(angle) * distance;
-        const y = sourceY + Math.sin(angle) * distance;
+        const x = shardX + Math.cos(angle) * distance;
+        const y = shardY + Math.sin(angle) * distance;
         addNode({
           id: document.id, label: document.label, kind: 'document', side: side.id,
           source: document.source, document,
@@ -158,10 +150,10 @@ function buildGraph(data: MemoryGraphData, width: number, height: number): { nod
   return { nodes, edges };
 }
 
-function sideColor(node: GraphNode): string {
-  if (node.kind === 'system') return COLORS.system;
-  if (node.kind === 'domain') return COLORS[node.side] ?? COLORS.default;
-  return COLORS[node.source ?? ''] ?? COLORS[node.side] ?? COLORS.default;
+function sideColor(node: GraphNode, ink: string, primary: string, secondary: string): string {
+  if (node.kind === 'system' || node.side === 'documents') return primary;
+  if (node.side === 'projects') return secondary;
+  return ink;
 }
 
 function formatBytes(bytes: number): string {
@@ -216,7 +208,7 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
   const sources = useMemo(() => [...new Set(data?.nodes.map(node => node.source) ?? [])].sort(), [data]);
   const queryLower = query.trim().toLowerCase();
   const shownDocuments = useMemo(() => (data?.nodes ?? []).filter(node =>
-    (sourceFilter === 'all' || node.source === sourceFilter)
+    (sourceFilter === 'all' || (sourceFilter === 'projects' && node.side === 'projects') || node.storage === sourceFilter || node.source === sourceFilter)
     && (!queryLower || `${node.label} ${node.source} ${node.excerpt}`.toLowerCase().includes(queryLower)),
   ), [data, queryLower, sourceFilter]);
 
@@ -287,9 +279,14 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
     const render = () => {
       const context = canvas.getContext('2d');
       if (!context) return;
-      const theme = document.documentElement.dataset.theme;
+      const themeRoot = document.documentElement;
+      const themeStyles = getComputedStyle(themeRoot);
+      const canvasBackground = themeStyles.getPropertyValue('--paper-raised').trim() || themeStyles.backgroundColor;
+      const ink = themeStyles.getPropertyValue('--appearance-paper-ink').trim() || themeStyles.color || '#111';
+      const primary = themeStyles.getPropertyValue('--appearance-primary').trim() || themeStyles.getPropertyValue('--appearance-icon').trim() || ink;
+      const secondary = themeStyles.getPropertyValue('--appearance-icon').trim() || ink;
       context.clearRect(0, 0, width, height);
-      context.fillStyle = theme === 'dark' ? '#1c241e' : '#f7f6f0';
+      context.fillStyle = canvasBackground;
       context.fillRect(0, 0, width, height);
       const transform = transformRef.current;
       context.save();
@@ -297,7 +294,7 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
       context.scale(transform.scale, transform.scale);
 
       const byId = new Map(graph.nodes.map(node => [node.id, node]));
-      const visibleIds = new Set(['system', 'domain:documents', 'domain:sessions']);
+      const visibleIds = new Set(['system', 'domain:documents', 'domain:sessions', 'domain:projects']);
       for (const document of shownDocuments) {
         visibleIds.add(document.id);
         const parentEdge = graph.edges.find(edge => edge.kind === 'structure' && edge.target === document.id);
@@ -316,33 +313,33 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
         context.moveTo(source.x, source.y);
         context.lineTo(target.x, target.y);
         if (edge.kind === 'similarity') {
-          context.strokeStyle = focused
-            ? `rgba(207, 188, 128, ${0.22 + edge.similarity * 0.7})`
-            : `rgba(132, 149, 128, ${0.035 + edge.similarity * 0.22})`;
+          context.strokeStyle = focused ? primary : ink;
+          context.globalAlpha = focused ? 0.22 + edge.similarity * 0.7 : 0.035 + edge.similarity * 0.22;
           context.lineWidth = focused ? 0.8 + edge.similarity : 0.45;
         } else {
-          context.strokeStyle = focused
-            ? 'rgba(181, 192, 161, .72)'
-            : theme === 'dark' ? 'rgba(175, 188, 166, .16)' : 'rgba(96, 111, 88, .18)';
+          context.strokeStyle = focused ? primary : ink;
+          context.globalAlpha = focused ? 0.72 : 0.16;
           context.lineWidth = focused ? 0.9 : edge.source === 'system' ? 1 : 0.65;
         }
         context.stroke();
+        context.globalAlpha = 1;
       }
 
-      const dark = theme === 'dark';
       context.textAlign = 'center';
       context.textBaseline = 'middle';
       for (const node of graph.nodes) {
         if (!visibleIds.has(node.id)) continue;
-        const color = sideColor(node);
+        const color = sideColor(node, ink, primary, secondary);
         const isFocused = node.id === focusId;
         const radius = node.radius * (isFocused ? 1.6 : 1);
         if (node.kind !== 'document') {
           context.beginPath();
           context.arc(node.x, node.y, radius + (node.kind === 'system' ? 11 : 5), 0, Math.PI * 2);
-          context.strokeStyle = `${color}${node.kind === 'system' ? '38' : '1c'}`;
+          context.strokeStyle = color;
+          context.globalAlpha = node.kind === 'system' ? 0.24 : 0.12;
           context.lineWidth = node.kind === 'system' ? 1.2 : 0.8;
           context.stroke();
+          context.globalAlpha = 1;
         }
         context.beginPath();
         context.arc(node.x, node.y, radius, 0, Math.PI * 2);
@@ -353,7 +350,7 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
 
         if (node.id === focusId && transform.scale > 0.45) {
           context.font = `${node.kind === 'system' ? '600 9px' : '500 8px'} 'Cascadia Code', Consolas, monospace`;
-          context.fillStyle = dark ? '#c7cebf' : '#555d50';
+          context.fillStyle = ink;
           context.fillText(node.label.slice(0, 42), node.x, node.y - radius - 10);
         }
       }
@@ -423,7 +420,7 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
     renderGraphRef.current = render;
     render();
     const themeObserver = new MutationObserver(() => renderGraphRef.current());
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] });
     return () => {
       window.cancelAnimationFrame(frame);
       observer.disconnect();
@@ -536,12 +533,13 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
     ? graphEdgesRef.current.filter(edge => edge.source === hoveredNode.id || edge.target === hoveredNode.id).length
     : 0;
   const sessionCount = data?.nodes.filter(node => node.side === 'sessions').length ?? 0;
-  const documentCount = data?.nodes.length ? data.nodes.length - sessionCount : 0;
+  const projectCount = data?.nodes.filter(node => node.side === 'projects').length ?? 0;
+  const documentCount = data?.nodes.length ? data.nodes.length - sessionCount - projectCount : 0;
 
   return (
     <div className="page memory-page">
       <header className="memory-heading">
-        <div><div className="eyebrow">PERSISTENT KNOWLEDGE · LIVE SIMILARITY</div><h1>Memory map</h1><p>One corpus, shaped into related shards. Knowledge and conversations stay distinct, linked by similarity.</p></div>
+        <div><div className="eyebrow">PERSISTENT KNOWLEDGE · LIVE SIMILARITY</div><h1>Memory map</h1><p>Indexed from {data?.storage ?? '.vdb/'} · Knowledge, sessions, and project work stay distinct and connect through semantic similarity.</p></div>
         <button className="button button-secondary memory-export" type="button" onClick={saveImage} disabled={!data?.nodes.length}><Download size={15} />Save as image</button>
       </header>
 
@@ -551,6 +549,7 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
         <div><span>VDB DOCUMENTS</span><strong>{stats?.documentCount ?? '—'}</strong></div>
         <div><span>KNOWLEDGE</span><strong>{documentCount.toLocaleString()}</strong></div>
         <div><span>SESSION MEMORY</span><strong>{sessionCount.toLocaleString()}</strong></div>
+        <div><span>PROJECT MEMORY</span><strong>{projectCount.toLocaleString()}</strong></div>
         <div><span>VOCABULARY</span><strong>{stats?.termCount.toLocaleString() ?? '—'}</strong></div>
         <div><span>INDEX SIZE</span><strong>{stats ? formatBytes(stats.diskBytes) : '—'}</strong></div>
       </section>
@@ -558,12 +557,12 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
       <section className="memory-map-card surface-card">
         <div className="memory-toolbar">
           <label className="search-field memory-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a memory…" aria-label="Search memory map" />{query && <button className="icon-button small" onClick={() => setQuery('')} aria-label="Clear search"><X size={13} /></button>}</label>
-          <label className="memory-source-filter"><span className="sr-only">Filter by source</span><select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}><option value="all">All sources</option>{sources.map(source => <option key={source} value={source}>{source}</option>)}</select></label>
+          <label className="memory-source-filter"><span className="sr-only">Filter by source</span><select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}><option value="all">All sources</option><option value="vdb">.vdb vector store</option><option value="projects">Projects</option>{sources.map(source => <option key={source} value={source}>{source}</option>)}</select></label>
           <span className={`memory-refresh-label${refreshing ? ' is-refreshing' : ''}`}>{refreshing ? 'SYNCING' : stats ? `${shownDocuments.length.toLocaleString()} / ${stats.documentCount.toLocaleString()} NODES` : loading ? 'INDEXING' : 'NO INDEX'}</span>
         </div>
         <div className="memory-map-shell" ref={shellRef}>
           {loading && <div className="memory-loading">Loading indexed knowledge…</div>}
-          {!loading && !data?.nodes.length && <div className="memory-empty">No indexed knowledge yet. Memory documents and saved conversations appear here as they are ingested.</div>}
+          {!loading && !data?.nodes.length && <div className="memory-empty">No indexed knowledge yet. Memory documents, sessions, and project files appear here as they are synchronized.</div>}
           <canvas
             ref={canvasRef}
             className="memory-canvas"
@@ -639,14 +638,15 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
           />
           {data?.nodes.length ? (
             <>
-              <div className="memory-map-legend"><span><i className="legend-dot legend-docs" />Knowledge</span><span><i className="legend-dot legend-sessions" />Sessions</span><span><i className="legend-link" />Similarity</span></div>
+              <div className="memory-map-legend"><span><i className="legend-dot legend-docs" />Knowledge</span><span><i className="legend-dot legend-sessions" />Sessions</span><span><i className="legend-dot legend-projects" />Projects</span><span><i className="legend-link" />Similarity</span></div>
               <div className="memory-zoom-controls">
                 <button type="button" onClick={() => updateZoom(1.2)} aria-label="Zoom in"><Plus size={15} /></button>
                 <button type="button" onClick={() => updateZoom(0.84)} aria-label="Zoom out"><Minus size={15} /></button>
                 <button type="button" onClick={resetMap} aria-label="Fit map to view"><Maximize2 size={14} /></button>
               </div>
-              <div className="memory-map-side-label memory-map-left">KNOWLEDGE SHARDS</div>
-              <div className="memory-map-side-label memory-map-right">SESSION KNOWLEDGE</div>
+              <div className="memory-map-side-label memory-map-left">KNOWLEDGE</div>
+              <div className="memory-map-side-label memory-map-right">SESSIONS</div>
+              <div className="memory-map-side-label memory-map-bottom">PROJECT MEMORY</div>
             </>
           ) : null}
           {hoveredNode && hoverPosition && (

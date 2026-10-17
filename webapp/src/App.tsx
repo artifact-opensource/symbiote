@@ -4,20 +4,26 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Activity, ArrowRight, ArrowUpRight, Bell, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Command, Compass, Copy, Cpu,
-  Archive, Brain, Download, FileClock, Gauge, Globe, HardDrive, History, Info, LayoutDashboard, Leaf, LoaderCircle, Maximize2, Menu, MemoryStick, MessageSquare, Minimize2, Moon, Network,
-  Biohazard, Plus, RefreshCw, Search, Send, Server, Settings2, ShieldCheck, Sparkles, Sun, TerminalSquare, Thermometer, Users, Wrench, X,
+  Archive, Brain, Cloud, Database, Download, FileClock, Gauge, Globe, HardDrive, History, Info, LayoutDashboard, Leaf, LoaderCircle, Maximize2, Menu, MemoryStick, MessageSquare, Minimize2, Moon, Network,
+  Biohazard, ChevronUp, FolderOpen, MessagesSquare, Plus, RefreshCw, Search, Send, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
 } from 'lucide-react';
-import type { ChatMessage, GatewayConfig, GatewayStatus, HostResourceSnapshot, SessionSummary, ToolSummary, ViewId, WorkspaceAgent, WorkspaceRun } from './types';
+import type { AgentProfile, ChatMessage, GatewayConfig, GatewayStatus, HostResourceSnapshot, SessionSummary, ThreadUserHelpRequest, ToolSummary, ViewId, WorkspaceAgent, WorkspaceProject, WorkspaceRun } from './types';
+import type { CloudProviderStatus, GoogleWorkspaceGrant } from './components/IntegrationsView';
+import CronPanel from './components/CronPanel';
+import ThreadsPanel from './components/ThreadsPanel';
 
 declare const __SYMBIOTE_VERSION__: string;
 
 const GamesView = lazy(() => import('./components/GamesView'));
 const MemoryMap = lazy(() => import('./components/MemoryMap'));
+const IntegrationsView = lazy(() => import('./components/IntegrationsView'));
+const ProjectIDE = lazy(() => import('./components/ProjectIDE'));
+const ProjectsPanel = lazy(() => import('./components/ProjectsPanel'));
 
 const NAVIGATION: { id: ViewId; label: string; icon: typeof LayoutDashboard; group: string }[] = [
   { id: 'workspace', label: 'Workspace', icon: LayoutDashboard, group: 'Work' },
+  { id: 'ide', label: 'Agent IDE', icon: TerminalSquare, group: 'Work' },
   { id: 'runs', label: 'Tasks', icon: Activity, group: 'Work' },
-  { id: 'agents', label: 'Agents', icon: Users, group: 'Work' },
   { id: 'chat', label: 'Conversations', icon: MessageSquare, group: 'Work' },
   { id: 'browser', label: 'Browser', icon: Globe, group: 'Work' },
   { id: 'memory', label: 'Memory', icon: Brain, group: 'Work' },
@@ -25,10 +31,51 @@ const NAVIGATION: { id: ViewId; label: string; icon: typeof LayoutDashboard; gro
   { id: 'games', label: 'Zen', icon: Leaf, group: 'Play' },
   { id: 'operations', label: 'Operations', icon: Activity, group: 'Runtime' },
   { id: 'tools', label: 'Tool registry', icon: Wrench, group: 'Runtime' },
+  { id: 'integrations', label: 'Integrations', icon: Network, group: 'Runtime' },
   { id: 'settings', label: 'Configuration', icon: Settings2, group: 'Runtime' },
 ];
 
 type Theme = 'light' | 'dark';
+type AppearanceSettings = { brightness: number; primaryHue: number; secondaryHue: number };
+
+function parseAppearanceSettings(value: unknown): AppearanceSettings | null {
+  if (!value || typeof value !== 'object') return null;
+  const settings = value as Partial<AppearanceSettings>;
+  if (typeof settings.brightness !== 'number' || !Number.isFinite(settings.brightness) || settings.brightness < 0 || settings.brightness > 100
+    || typeof settings.primaryHue !== 'number' || !Number.isFinite(settings.primaryHue) || settings.primaryHue < 0 || settings.primaryHue > 360
+    || typeof settings.secondaryHue !== 'number' || !Number.isFinite(settings.secondaryHue) || settings.secondaryHue < 0 || settings.secondaryHue > 360) return null;
+  return { brightness: settings.brightness, primaryHue: settings.primaryHue, secondaryHue: settings.secondaryHue };
+}
+
+function initialAppearance(): AppearanceSettings {
+  const fallbackBrightness = (() => {
+    try {
+      const savedTheme = window.localStorage.getItem('symbiote-theme');
+      if (savedTheme === 'dark') return 0;
+      if (savedTheme === 'light') return 100;
+    } catch {
+      // Use the system preference when local storage is unavailable.
+    }
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 0 : 100;
+  })();
+  try {
+    const stored = window.localStorage.getItem('symbiote-appearance');
+    if (stored) {
+      const parsed: unknown = JSON.parse(stored);
+      if (parsed && typeof parsed === 'object') {
+        const settings = parsed as Partial<AppearanceSettings>;
+        return {
+          brightness: Number.isFinite(settings.brightness) ? Math.min(100, Math.max(0, settings.brightness!)) : fallbackBrightness,
+          primaryHue: Number.isFinite(settings.primaryHue) ? Math.min(360, Math.max(0, settings.primaryHue!)) : 145,
+          secondaryHue: Number.isFinite(settings.secondaryHue) ? Math.min(360, Math.max(0, settings.secondaryHue!)) : 13,
+        };
+      }
+    }
+  } catch {
+    // Invalid saved settings are ignored.
+  }
+  return { brightness: fallbackBrightness, primaryHue: 145, secondaryHue: 13 };
+}
 
 function createClientId(): string {
   return typeof crypto.randomUUID === 'function'
@@ -44,7 +91,9 @@ declare global {
       closeMini(): Promise<void>;
       getOpacity(): Promise<number>;
       setOpacity(opacity: number): Promise<number>;
+      setTheme(theme: Theme): Promise<Theme>;
       requestLanAccess(): Promise<{ status: string }>;
+      installUpdate(): Promise<boolean>;
     };
   }
 }
@@ -76,14 +125,112 @@ function ResourceStatusStrip({ host }: { host?: HostResourceSnapshot }) {
   );
 }
 
+function GoogleWorkspaceMark() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M23.5 12.27c0-.78-.07-1.53-.2-2.27H12v4.3h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.27-2.09 3.57-5.16 3.57-8.65Z" /><path fill="currentColor" d="M12 24c3.24 0 5.96-1.08 7.95-2.92l-3.87-3c-1.08.72-2.46 1.15-4.08 1.15-3.13 0-5.78-2.11-6.73-4.95H1.27v3.1A12 12 0 0 0 12 24Z" /><path fill="currentColor" d="M5.27 14.28a7.2 7.2 0 0 1 0-4.56v-3.1H1.27a12 12 0 0 0 0 10.76l4-3.1Z" /><path fill="currentColor" d="M12 4.77c1.77 0 3.35.61 4.6 1.8l3.43-3.42A11.5 11.5 0 0 0 12 0 12 12 0 0 0 1.27 6.62l4 3.1c.95-2.84 3.6-4.95 6.73-4.95Z" /></svg>;
+}
+
 function initialTheme(): Theme {
-  try {
-    const saved = window.localStorage.getItem('symbiote-theme');
-    if (saved === 'light' || saved === 'dark') return saved;
-  } catch {
-    // Storage can be unavailable in restricted browser contexts.
-  }
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return initialAppearance().brightness >= 50 ? 'light' : 'dark';
+}
+
+function hslRgb(hue: number, saturation: number, lightness: number): [number, number, number] {
+  const h = ((hue % 360) + 360) % 360 / 360;
+  const s = saturation / 100;
+  const l = lightness / 100;
+  const channel = (n: number) => {
+    const k = (n + h * 12) % 12;
+    const a = s * Math.min(l, 1 - l);
+    return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+  };
+  return [channel(0), channel(8), channel(4)];
+}
+
+function contrastInk(rgb: [number, number, number]): string {
+  const luminance = rgb.reduce((total, channel, index) => {
+    const linear = channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+    return total + linear * [0.2126, 0.7152, 0.0722][index];
+  }, 0);
+  const blackContrast = (luminance + 0.05) / 0.05;
+  const whiteContrast = 1.05 / (luminance + 0.05);
+  return whiteContrast > blackContrast ? '#ffffff' : '#000000';
+}
+
+function AppearanceControl({
+  settings,
+  onChange,
+}: {
+  settings: AppearanceSettings;
+  onChange: (settings: AppearanceSettings) => void;
+}) {
+  const brightnessLabel = settings.brightness === 0
+    ? 'AMOLED black'
+    : settings.brightness === 100
+      ? 'Full light'
+      : settings.brightness < 50 ? 'Deep' : 'Bright';
+  return (
+    <details className="appearance-anchor">
+      <summary className="icon-button utility-button appearance-trigger" aria-label="Open appearance controls" title="Appearance">
+        <SlidersHorizontal size={16} />
+      </summary>
+      <section className="appearance-popover" aria-label="Appearance controls">
+        <header className="appearance-popover-heading">
+          <span className="appearance-heading-mark"><SlidersHorizontal size={15} /></span>
+          <span><strong>Appearance</strong><small>One palette, across the whole workspace</small></span>
+        </header>
+        <section className="appearance-brightness" aria-labelledby="appearance-brightness-label">
+          <div className="appearance-control-heading">
+            <span id="appearance-brightness-label">Brightness</span>
+            <output>{brightnessLabel} · {settings.brightness}%</output>
+          </div>
+          <div className="appearance-brightness-ends" aria-hidden="true"><span>OLED black</span><span>Daylight</span></div>
+          <input
+            className="appearance-range appearance-range-brightness"
+            type="range"
+            min={0}
+            max={100}
+            value={settings.brightness}
+            aria-label="Brightness from AMOLED black to full light"
+            onChange={event => onChange({ ...settings, brightness: Number(event.target.value) })}
+          />
+        </section>
+        <div className="appearance-divider" />
+        <section className="appearance-hue-controls" aria-label="Color controls">
+          <label className="appearance-hue-control">
+            <span className="appearance-control-heading">
+              <span><i className="appearance-color-swatch appearance-swatch-primary" aria-hidden="true" />Primary</span>
+              <output>{Math.round(settings.primaryHue)}°</output>
+            </span>
+            <small>Workspace and sidebar tone</small>
+            <input
+              className="appearance-range appearance-range-hue"
+              type="range"
+              min={0}
+              max={360}
+              value={settings.primaryHue}
+              aria-label="Primary hue for workspace and sidebar"
+              onChange={event => onChange({ ...settings, primaryHue: Number(event.target.value) })}
+            />
+          </label>
+          <label className="appearance-hue-control">
+            <span className="appearance-control-heading">
+              <span><i className="appearance-color-swatch appearance-swatch-secondary" aria-hidden="true" />Accent</span>
+              <output>{Math.round(settings.secondaryHue)}°</output>
+            </span>
+            <small>Icons, focus, and active details</small>
+            <input
+              className="appearance-range appearance-range-hue"
+              type="range"
+              min={0}
+              max={360}
+              value={settings.secondaryHue}
+              aria-label="Accent hue for icons and focus states"
+              onChange={event => onChange({ ...settings, secondaryHue: Number(event.target.value) })}
+            />
+          </label>
+        </section>
+      </section>
+    </details>
+  );
 }
 
 async function api<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -143,8 +290,23 @@ async function streamApi<T>(
     if (!data) return;
     const event = JSON.parse(data) as Record<string, unknown>;
     if (event.type === 'error') throw new Error(typeof event.error === 'string' ? event.error : 'The agent turn failed.');
-    if (event.type === 'done') finalResult = event.result as T;
-    else onEvent(event);
+    if (event.type === 'done') {
+      const result = event.result ?? event.message ?? event;
+      if (result && typeof result === 'object') {
+        const payload = result as Record<string, unknown>;
+        finalResult = {
+          ...payload,
+          text: typeof payload.text === 'string' ? payload.text : typeof payload.content === 'string' ? payload.content : '',
+          durationMs: payload.durationMs ?? payload.latencyMs,
+          inputTokens: payload.inputTokens ?? payload.tokensIn,
+          outputTokens: payload.outputTokens ?? payload.tokensOut,
+        } as T;
+      }
+    } else if (event.type === 'text') {
+      onEvent({ ...event, type: 'text_delta', text: event.text ?? event.content });
+    } else {
+      onEvent(event);
+    }
   };
   const consume = (chunk: string, flush = false) => {
     buffer += chunk;
@@ -182,6 +344,12 @@ function formatRelative(timestamp?: number): string {
   return new Date(timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+function formatChatElapsed(durationMs?: number): string {
+  if (durationMs === undefined || !Number.isFinite(durationMs)) return '—';
+  if (durationMs < 1000) return `${Math.max(0, Math.round(durationMs))} ms`;
+  return `${(durationMs / 1000).toFixed(1)} s`;
+}
+
 function notificationTimestamp(timestamp: number): string {
   return formatRelative(timestamp);
 }
@@ -195,7 +363,13 @@ function findSavedAssistantResponse(messages: ChatMessage[], userText: string): 
   return undefined;
 }
 
-function MinimalMode({ theme, onThemeChange }: { theme: Theme; onThemeChange: () => void }) {
+function MinimalMode({ theme, agentName, agentEmoji, agentAvatarDataUrl, onThemeChange }: {
+  theme: Theme;
+  agentName?: string;
+  agentEmoji?: string;
+  agentAvatarDataUrl?: string;
+  onThemeChange: () => void;
+}) {
   const [tab, setTab] = useState<'chat' | 'history' | 'agents' | 'tasks'>('chat');
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [activeSessionId, setActiveSessionId] = useState('');
@@ -204,6 +378,8 @@ function MinimalMode({ theme, onThemeChange }: { theme: Theme; onThemeChange: ()
   const [runs, setRuns] = useState<WorkspaceRun[]>([]);
   const [text, setText] = useState('');
   const [opacity, setOpacity] = useState(0.88);
+  const [opacityControlsOpen, setOpacityControlsOpen] = useState(false);
+  const opacityRevisionRef = useRef(0);
   const [busy, setBusy] = useState(false);
   const [activeTurnSessionId, setActiveTurnSessionId] = useState('');
   const [error, setError] = useState('');
@@ -278,14 +454,24 @@ function MinimalMode({ theme, onThemeChange }: { theme: Theme; onThemeChange: ()
     const assistantId = createClientId();
     let streamedText = '';
     setActiveTurnSessionId(activeSessionId);
-    setMessages(current => [...current, { id: `pending-${Date.now()}`, role: 'user', content: message, timestamp: Date.now() }, { id: assistantId, role: 'assistant', content: '', streaming: true, timestamp: Date.now() }]);
+    setMessages(current => [...current, { id: `pending-${Date.now()}`, role: 'user', content: message, timestamp: Date.now() }, { id: assistantId, role: 'assistant', content: '', streaming: true, thinking: true, timestamp: Date.now() }]);
     try {
       const outcome = await streamApi<{ text: string }>('/api/chat', { text: message, sessionId: activeSessionId }, event => {
-        setMessages(current => current.map(item => item.id === assistantId
-          ? event.type === 'text_delta'
-            ? { ...item, content: item.content + String(event.text ?? '') }
-            : item
-          : item));
+        setMessages(current => current.map(item => {
+          if (item.id !== assistantId) return item;
+          if (event.type === 'text_delta') return { ...item, content: item.content + String(event.text ?? ''), thinking: false };
+          if (event.type === 'thinking_delta') return { ...item, thinking: true };
+          if (event.type === 'tool_start') {
+            const name = String(event.name ?? 'tool');
+            return { ...item, thinking: false, activeTool: name, activeTools: [...(item.activeTools ?? []), name] };
+          }
+          if (event.type === 'tool_end') {
+            const name = String(event.name ?? 'tool');
+            const activeTools = (item.activeTools ?? []).filter((tool, index, tools) => tool !== name || index !== tools.lastIndexOf(name));
+            return { ...item, activeTools, activeTool: activeTools.at(-1), thinking: activeTools.length === 0 };
+          }
+          return item;
+        }));
         if (event.type === 'text_delta') streamedText += String(event.text ?? '');
       });
       if (!outcome.complete) {
@@ -318,10 +504,18 @@ function MinimalMode({ theme, onThemeChange }: { theme: Theme; onThemeChange: ()
   };
 
   const updateOpacity = async (value: number) => {
+    const revision = ++opacityRevisionRef.current;
     setOpacity(value);
     try {
-      await window.symbioteDesktop?.setOpacity(value);
+      const applied = await window.symbioteDesktop?.setOpacity(value);
+      if (revision === opacityRevisionRef.current && applied !== undefined) setOpacity(applied);
     } catch (failure) {
+      if (revision !== opacityRevisionRef.current) return;
+      try {
+        setOpacity(await window.symbioteDesktop?.getOpacity() ?? opacity);
+      } catch (readFailure) {
+        console.error('Could not restore the Electron overlay opacity after an update failed:', readFailure);
+      }
       setError(failure instanceof Error ? failure.message : 'Could not update overlay transparency.');
     }
   };
@@ -359,7 +553,7 @@ function MinimalMode({ theme, onThemeChange }: { theme: Theme; onThemeChange: ()
           </div>
           <div className="minimal-messages" ref={scrollRef}>
             {messages.length === 0 && <p className="minimal-empty">Start a conversation.</p>}
-            {messages.map(message => <article className={`minimal-message minimal-message-${message.role}`} key={message.id}><span>{message.role === 'user' ? 'You' : 'Agent'}</span>{message.content && <MessageBody content={message.content} />}{message.interrupted && <small className="message-interrupted">This reply did not finish. Your message is preserved; you can try again.</small>}</article>)}
+            {messages.map(message => <article className={`minimal-message minimal-message-${message.role}`} key={message.id}><span className={message.role === 'assistant' ? 'minimal-message-agent' : undefined}>{message.role === 'user' ? 'You' : <><AgentAvatar emoji={agentEmoji} image={agentAvatarDataUrl} size={13} />{agentName || 'Agent'}</>}</span>{message.content && <MessageBody content={message.content} />}{message.streaming && (message.activeTool || message.thinking) && <small className="message-live-activity"><span className="thinking-pulse" />{message.activeTool ? `Using ${message.activeTool}` : 'Thinking'}</small>}{message.interrupted && <small className="message-interrupted">This reply did not finish. Your message is preserved; you can try again.</small>}</article>)}
           </div>
           <form className="minimal-composer" onSubmit={event => void sendMessage(event)}>
             <textarea value={text} onChange={event => setText(event.target.value)} rows={2} placeholder="Write a message…" aria-label="Message" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
@@ -381,9 +575,12 @@ function MinimalMode({ theme, onThemeChange }: { theme: Theme; onThemeChange: ()
           {runs.length === 0 && <p className="minimal-empty">No agent tasks yet.</p>}
         </div>}
         <footer className="minimal-footer">
-          <span>Overlay opacity</span>
-          <input type="range" min="0.35" max="1" step="0.01" value={opacity} onChange={event => void updateOpacity(Number(event.target.value))} aria-label="Overlay opacity" />
-          <span>{Math.round(opacity * 100)}%</span>
+          <button type="button" className="minimal-opacity-toggle" onClick={() => setOpacityControlsOpen(open => !open)} aria-expanded={opacityControlsOpen} aria-controls="minimal-opacity-controls">
+            <Gauge size={13} /><span>Opacity</span><strong>{Math.round(opacity * 100)}%</strong><ChevronDown size={12} />
+          </button>
+          {opacityControlsOpen && <div id="minimal-opacity-controls" className="minimal-opacity-controls">
+            <input type="range" min="0.35" max="1" step="0.01" value={opacity} onChange={event => void updateOpacity(Number(event.target.value))} aria-label="Overlay opacity" />
+          </div>}
         </footer>
       </section>
     </div>
@@ -425,6 +622,95 @@ function agentIcon(emoji?: string) {
   return Bot;
 }
 
+function AgentAvatar({ emoji, image, size = 16, className = '' }: {
+  emoji?: string;
+  image?: string;
+  size?: number;
+  className?: string;
+}) {
+  const Icon = agentIcon(emoji);
+  return image
+    ? <img className={className} src={image} alt="" width={size} height={size} />
+    : <Icon className={className} size={size} aria-hidden="true" />;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function uiText(value: unknown, maxLength = 240): string | null {
+  return typeof value === 'string' && value.trim() && value.length <= maxLength ? value.trim() : null;
+}
+
+function SafeUiNode({ value, keyValue }: { value: unknown; keyValue: string }): ReactNode {
+  if (!isRecord(value)) return null;
+  const title = uiText(value.title, 120);
+  const description = uiText(value.description, 500);
+  if (value.type === 'card') {
+    const children = Array.isArray(value.children) ? value.children.slice(0, 8) : [];
+    return <section className="message-ui-card" key={keyValue}>
+      {title && <h3>{title}</h3>}
+      {description && <p>{description}</p>}
+      {!!children.length && <div className="message-ui-children">{children.map((child, index) => <SafeUiNode key={index} keyValue={`${keyValue}-${index}`} value={child} />)}</div>}
+    </section>;
+  }
+  if (value.type === 'metric') {
+    const label = uiText(value.label, 80);
+    const metric = typeof value.value === 'number' && Number.isFinite(value.value)
+      ? String(value.value)
+      : uiText(value.value, 100);
+    const detail = uiText(value.detail, 160);
+    if (!label || !metric) return null;
+    return <div className="message-ui-metric" key={keyValue}><span>{label}</span><strong>{metric}</strong>{detail && <small>{detail}</small>}</div>;
+  }
+  if (value.type === 'progress') {
+    const label = uiText(value.label, 80);
+    if (!label || typeof value.value !== 'number' || !Number.isFinite(value.value)) return null;
+    const percent = Math.max(0, Math.min(100, value.value));
+    return <div className="message-ui-progress" key={keyValue}>
+      <div><strong>{label}</strong><span>{Math.round(percent)}%</span></div>
+      <progress max={100} value={percent} aria-label={`${label}: ${Math.round(percent)}%`} />
+      {description && <small>{description}</small>}
+    </div>;
+  }
+  if (value.type === 'steps') {
+    const items = Array.isArray(value.items) ? value.items.slice(0, 10) : [];
+    if (!items.length) return null;
+    return <ol className="message-ui-steps" key={keyValue}>{items.map((item, index) => {
+      if (!isRecord(item)) return null;
+      const label = uiText(item.label, 160);
+      if (!label) return null;
+      const status = item.status === 'done' || item.status === 'active' ? item.status : 'pending';
+      return <li className={`message-ui-step message-ui-step-${status}`} key={index}><span aria-hidden="true" />{label}</li>;
+    })}</ol>;
+  }
+  if (value.type === 'link') {
+    const label = uiText(value.label, 120);
+    const target = uiText(value.url, 2_000);
+    if (!label || !target) return null;
+    try {
+      const url = new URL(target);
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+      return <a className="message-ui-link" href={url.toString()} target="_blank" rel="noopener noreferrer" key={keyValue}>{label}<ArrowUpRight size={13} /></a>;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function SafeUiBlock({ source }: { source: string }) {
+  try {
+    const value: unknown = JSON.parse(source);
+    if (!isRecord(value) || !['card', 'metric', 'progress', 'steps', 'link'].includes(String(value.type))) {
+      return <div className="message-ui-invalid" role="note">This interactive layout uses an unsupported component.</div>;
+    }
+    return <div className="message-ui-block"><SafeUiNode value={value} keyValue="root" /></div>;
+  } catch {
+    return <div className="message-ui-invalid" role="note">This interactive layout is incomplete or invalid.</div>;
+  }
+}
+
 function MessageBody({ content }: { content: string }) {
   return (
     <div className="message-markdown">
@@ -433,6 +719,10 @@ function MessageBody({ content }: { content: string }) {
         components={{
           table: ({ children }) => <div className="markdown-table-scroll"><table>{children}</table></div>,
           img: ({ src, alt }) => src ? <figure className="markdown-image"><img src={src} alt={alt ?? ''} loading="lazy" decoding="async" /><figcaption>{alt}</figcaption></figure> : null,
+          pre: ({ children }) => <div className="message-code-block">{children}</div>,
+          code: ({ className, children }) => className === 'language-symbiote-ui'
+            ? <SafeUiBlock source={String(children).replace(/\n$/, '')} />
+            : <code className={className}>{children}</code>,
         }}
       >{content}</Markdown>
     </div>
@@ -532,15 +822,44 @@ function CommandPalette({ query, onQuery, onClose, onNavigate, onNewSession }: {
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [appearance, setAppearance] = useState<AppearanceSettings>(initialAppearance);
+  const appearanceReadyRef = useRef(false);
+  const appearanceDirtyRef = useRef(false);
+  const appearanceRevisionRef = useRef(0);
+  const appearanceRef = useRef(appearance);
+  const appearanceSyncErrorRef = useRef(false);
+  appearanceRef.current = appearance;
+  const changeAppearance = (next: AppearanceSettings) => {
+    appearanceRevisionRef.current++;
+    appearanceDirtyRef.current = true;
+    appearanceRef.current = next;
+    setAppearance(next);
+  };
   const isMinimalMode = new URLSearchParams(window.location.search).get('minimal') === '1';
   const isDesktopApp = new URLSearchParams(window.location.search).get('desktop') === '1' && Boolean(window.symbioteDesktop);
   const [view, setView] = useState<ViewId>('workspace');
+  const [workspaceDrawerRequest, setWorkspaceDrawerRequest] = useState(0);
+  const [projectOpenRequest, setProjectOpenRequest] = useState(0);
+  const [projectToOpen, setProjectToOpen] = useState('');
+  const [workspaceThreadOpenRequest, setWorkspaceThreadOpenRequest] = useState(0);
+  const [threadToOpen, setThreadToOpen] = useState('');
+  const [googleWorkspaceGrant, setGoogleWorkspaceGrant] = useState<GoogleWorkspaceGrant | null>(null);
+  const [cloudProviderStatus, setCloudProviderStatus] = useState<CloudProviderStatus>({
+    azure: false, oci: false, n8n: false, kaggle: false,
+  });
   const [status, setStatus] = useState<GatewayStatus | null>(null);
+  const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
+  const [preparingUpdate, setPreparingUpdate] = useState(false);
   const [config, setConfig] = useState<GatewayConfig | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [projects, setProjects] = useState<WorkspaceProject[]>([]);
+  const [workspaceAgents, setWorkspaceAgents] = useState<AgentProfile[]>([]);
+  const [workspaceProjectId, setWorkspaceProjectId] = useState('');
+  const [workspaceAgentId, setWorkspaceAgentId] = useState('');
   const [tools, setTools] = useState<ToolSummary[]>([]);
   const [runs, setRuns] = useState<WorkspaceRun[]>([]);
   const [agents, setAgents] = useState<WorkspaceAgent[]>([]);
+  const [threadHelpRequests, setThreadHelpRequests] = useState<ThreadUserHelpRequest[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [logLines, setLogLines] = useState('');
   const [memoryHistory, setMemoryHistory] = useState<number[]>([]);
@@ -587,6 +906,7 @@ export default function App() {
   const [startingRun, setStartingRun] = useState(false);
   const [error, setError] = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [recentThreadsOpen, setRecentThreadsOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeTurnSessionId = useRef<string | null>(null);
@@ -595,19 +915,150 @@ export default function App() {
   const toolSearchRef = useRef<HTMLInputElement>(null);
   const logSearchRef = useRef<HTMLInputElement>(null);
   const activeSession = sessions.find(session => session.id === activeSessionId);
+  const activeProfile = activeSession?.agentId ? workspaceAgents.find(profile => profile.id === activeSession.agentId) : undefined;
   const currentNavigation = NAVIGATION.find(item => item.id === view) ?? NAVIGATION[0];
+  const contextSessions = useMemo(() => sessions.filter(session => {
+    if (workspaceAgentId) return session.agentId === workspaceAgentId;
+    if (workspaceProjectId) return session.projectId === workspaceProjectId;
+    return true;
+  }), [sessions, workspaceAgentId, workspaceProjectId]);
+  const contextSessionIds = useMemo(() => new Set(contextSessions.map(session => session.id)), [contextSessions]);
+  const contextRuns = useMemo(() => workspaceAgentId || workspaceProjectId
+    ? runs.filter(run => contextSessionIds.has(run.sessionId))
+    : runs, [runs, contextSessionIds, workspaceAgentId, workspaceProjectId]);
+  const contextAgents = useMemo(() => workspaceAgentId || workspaceProjectId
+    ? agents.filter(agent => workspaceAgentId ? agent.agentId === workspaceAgentId : agent.projectId === workspaceProjectId)
+    : agents, [agents, workspaceAgentId, workspaceProjectId]);
+  const googleWorkspaceOnline = Boolean(googleWorkspaceGrant && googleWorkspaceGrant.expiresAt > Date.now());
+  const cloudIntegrations: Array<{ id: string; label: string; online: boolean; view: ViewId; icon: ReactNode }> = [
+    { id: 'google-workspace', label: 'Google Workspace', online: googleWorkspaceOnline, view: 'integrations', icon: <GoogleWorkspaceMark /> },
+    { id: 'azure', label: 'Microsoft Azure', online: cloudProviderStatus.azure, view: 'integrations', icon: <Cloud /> },
+    { id: 'oci', label: 'Oracle Cloud Infrastructure', online: cloudProviderStatus.oci, view: 'integrations', icon: <Database /> },
+    { id: 'n8n', label: 'n8n Cloud', online: cloudProviderStatus.n8n, view: 'integrations', icon: <Workflow /> },
+    { id: 'kaggle', label: 'Kaggle', online: cloudProviderStatus.kaggle, view: 'integrations', icon: <Cpu /> },
+  ];
   const sessionDraft = sessionDrafts[activeSessionId] ?? '';
+
+  useEffect(() => {
+    let cancelled = false;
+    const synchronize = async () => {
+      try {
+        const state = await api<{ settings: unknown; initialized: boolean }>('/api/appearance');
+        const remote = parseAppearanceSettings(state.settings);
+        if (!remote) throw new Error('Gateway returned invalid appearance settings.');
+        if (cancelled) return;
+        const wasReady = appearanceReadyRef.current;
+        appearanceReadyRef.current = true;
+        appearanceSyncErrorRef.current = false;
+        if (appearanceDirtyRef.current) {
+          const revision = appearanceRevisionRef.current;
+          await api('/api/appearance', { method: 'PUT', body: JSON.stringify(appearanceRef.current) });
+          if (appearanceRevisionRef.current === revision) appearanceDirtyRef.current = false;
+        } else if (!wasReady && !state.initialized) {
+          appearanceDirtyRef.current = true;
+          const revision = ++appearanceRevisionRef.current;
+          await api('/api/appearance', { method: 'PUT', body: JSON.stringify(appearanceRef.current) });
+          if (appearanceRevisionRef.current === revision) appearanceDirtyRef.current = false;
+        } else if (!wasReady
+          || remote.brightness !== appearanceRef.current.brightness
+          || remote.primaryHue !== appearanceRef.current.primaryHue
+          || remote.secondaryHue !== appearanceRef.current.secondaryHue) {
+          appearanceRef.current = remote;
+          setAppearance(remote);
+        }
+      } catch (failure) {
+        if (!appearanceSyncErrorRef.current) {
+          console.error('Could not synchronize shared appearance settings with the Gateway:', failure);
+          appearanceSyncErrorRef.current = true;
+        }
+      }
+    };
+    void synchronize();
+    const timer = window.setInterval(() => void synchronize(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!appearanceReadyRef.current || !appearanceDirtyRef.current) return;
+    const revision = appearanceRevisionRef.current;
+    const timer = window.setTimeout(() => {
+      void api('/api/appearance', { method: 'PUT', body: JSON.stringify(appearance) })
+        .then(() => {
+          appearanceSyncErrorRef.current = false;
+          if (appearanceRevisionRef.current === revision) appearanceDirtyRef.current = false;
+        })
+        .catch(failure => {
+          if (!appearanceSyncErrorRef.current) {
+            console.error('Could not save shared appearance settings to the Gateway:', failure);
+            appearanceSyncErrorRef.current = true;
+          }
+        });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [appearance]);
+
+  useEffect(() => {
+    const nextTheme: Theme = appearance.brightness >= 50 ? 'light' : 'dark';
+    setTheme(nextTheme);
+    const root = document.documentElement;
+    const brightness = appearance.brightness;
+    const primaryLightness = brightness * 0.85;
+    const primary = `hsl(${appearance.primaryHue} 32% ${primaryLightness}%)`;
+    const primaryInk = contrastInk(hslRgb(appearance.primaryHue, 32, primaryLightness));
+    const paperInk = contrastInk(hslRgb(0, 0, brightness));
+    const highlightLightness = brightness;
+    const highlightInk = contrastInk(hslRgb(0, 0, highlightLightness));
+    const iconLightness = 69 - brightness * 0.31;
+    const iconInk = contrastInk(hslRgb(appearance.secondaryHue, 72, iconLightness));
+    root.style.setProperty('--appearance-brightness', `${brightness}%`);
+    root.style.setProperty('--appearance-primary', primary);
+    root.style.setProperty('--appearance-primary-ink', primaryInk);
+    root.style.setProperty('--appearance-icon', `hsl(${appearance.secondaryHue} 72% ${iconLightness}%)`);
+    root.style.setProperty('--appearance-icon-ink', iconInk);
+    root.style.setProperty('--appearance-highlight', `hsl(0 0% ${highlightLightness}%)`);
+    root.style.setProperty('--appearance-highlight-hover', `hsl(0 0% ${Math.max(0, brightness - 8)}%)`);
+    root.style.setProperty('--appearance-paper-ink', paperInk);
+    root.style.setProperty('--appearance-paper-ink-soft', `color-mix(in srgb, ${paperInk} 90%, hsl(0 0% ${brightness}%) 10%)`);
+    root.style.setProperty('--appearance-paper-ink-muted', `color-mix(in srgb, ${paperInk} 82%, hsl(0 0% ${brightness}%) 18%)`);
+    root.style.setProperty('--ink', 'var(--appearance-paper-ink)');
+    root.style.setProperty('--ink-soft', 'var(--appearance-paper-ink-soft)');
+    root.style.setProperty('--ink-muted', 'var(--appearance-paper-ink-muted)');
+    root.style.setProperty('--appearance-sidebar-ink', primaryInk);
+    root.style.setProperty('--appearance-highlight-ink', highlightInk);
+    root.style.setProperty('--appearance-sidebar-muted', `color-mix(in srgb, ${primaryInk} 84%, ${primary} 16%)`);
+    root.style.setProperty('--appearance-sidebar-line', `color-mix(in srgb, ${primaryInk} 24%, transparent)`);
+    try {
+      window.localStorage.setItem('symbiote-appearance', JSON.stringify(appearance));
+    } catch {
+      // Appearance still updates for this page when persistence is unavailable.
+    }
+  }, [appearance]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.title = 'Control Room';
-    document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#171d19' : '#f3f2eb');
+    const primary = getComputedStyle(document.documentElement).getPropertyValue('--appearance-primary').trim();
+    document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute('content', primary || (theme === 'dark' ? '#080808' : '#f4f4f4'));
+    if (window.symbioteDesktop) {
+      void window.symbioteDesktop.setTheme(theme).catch(failure => {
+        console.error('Could not synchronize the Electron window theme:', failure);
+      });
+    }
     try {
       window.localStorage.setItem('symbiote-theme', theme);
     } catch {
       // The current page theme still works when persistent storage is unavailable.
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (!googleWorkspaceGrant) return;
+    const timer = window.setTimeout(() => setGoogleWorkspaceGrant(null), Math.max(0, googleWorkspaceGrant.expiresAt - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [googleWorkspaceGrant]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setRelativeTimeNow(Date.now()), 30_000);
@@ -684,6 +1135,20 @@ export default function App() {
     }
   }, []);
 
+  const installUpdate = async () => {
+    if (!window.symbioteDesktop || preparingUpdate) return;
+    setPreparingUpdate(true);
+    setError('');
+    try {
+      await api('/api/update/download', { method: 'POST', body: '{}' });
+      const started = await window.symbioteDesktop.installUpdate();
+      if (!started) throw new Error('Update installation was cancelled or could not be started.');
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not prepare the verified update installer.');
+      setPreparingUpdate(false);
+    }
+  };
+
   const refreshWork = useCallback(async () => {
     const [freshRuns, freshAgents] = await Promise.all([
       api<WorkspaceRun[]>('/api/runs'),
@@ -699,6 +1164,12 @@ export default function App() {
     const results = await Promise.allSettled([
       refreshStatus(),
       api<GatewayConfig>('/api/config').then(setConfig),
+      api<{ providers: CloudProviderStatus }>('/api/integrations').then(result => setCloudProviderStatus(result.providers)),
+      api<WorkspaceProject[]>('/api/projects').then(data => {
+        setProjects(data);
+        setWorkspaceProjectId(current => current && data.some(item => item.id === current) ? current : '');
+      }),
+      api<AgentProfile[]>('/api/workspace-agents').then(setWorkspaceAgents),
       api<SessionSummary[]>('/api/sessions').then(data => {
         setSessions(data);
         setActiveSessionId(current => current && data.some(item => item.id === current) ? current : data[0]?.id ?? '');
@@ -733,22 +1204,32 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    api<{ required: boolean; authenticated: boolean }>('/api/access')
-      .then(access => {
+    let retryDelay = 1000;
+    let retryTimer: number | undefined;
+    const checkAccess = async () => {
+      try {
+        const access = await api<{ required: boolean; authenticated: boolean }>('/api/access');
         if (cancelled) return;
         setAccessRequired(access.required);
         setAccessGranted(access.authenticated);
         setAccessChecked(true);
         if (access.authenticated) void refreshAll();
         else setLoading(false);
-      })
-      .catch(failure => {
+      } catch (failure) {
         if (cancelled) return;
         setAccessChecked(true);
         setLoading(false);
-        setError(failure instanceof Error ? failure.message : 'Could not check LAN access.');
-      });
-    return () => { cancelled = true; };
+        const reason = failure instanceof Error ? failure.message : 'Could not check LAN access.';
+        setError(`${reason} Reconnecting…`);
+        retryTimer = window.setTimeout(() => void checkAccess(), retryDelay);
+        retryDelay = Math.min(retryDelay * 2, 15_000);
+      }
+    };
+    void checkAccess();
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
   }, [refreshAll]);
 
   useEffect(() => {
@@ -771,6 +1252,25 @@ export default function App() {
       window.clearInterval(activityTimer);
     };
   }, [accessGranted, refreshStatus, refreshWork, view]);
+
+  useEffect(() => {
+    if (!accessGranted) {
+      setThreadHelpRequests([]);
+      return;
+    }
+    let cancelled = false;
+    const refreshHelpRequests = () => {
+      void api<ThreadUserHelpRequest[]>('/api/threads/requests')
+        .then(requests => { if (!cancelled) setThreadHelpRequests(requests); })
+        .catch(failure => { if (!cancelled) setError(failure instanceof Error ? failure.message : 'Agent help requests could not be loaded.'); });
+    };
+    refreshHelpRequests();
+    const timer = window.setInterval(refreshHelpRequests, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [accessGranted]);
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -834,6 +1334,11 @@ export default function App() {
   }, [tools, toolQuery]);
 
   const navigate = (destination: ViewId) => {
+    if (destination === 'agents') {
+      setWorkspaceDrawerRequest(request => request + 1);
+      setMobileNavOpen(false);
+      return;
+    }
     setView(destination);
     setMobileNavOpen(false);
     setError('');
@@ -845,7 +1350,11 @@ export default function App() {
     try {
       const created = await api<{ id: string }>('/api/sessions', {
         method: 'POST',
-        body: JSON.stringify({ name: 'New conversation' }),
+        body: JSON.stringify({
+          name: 'New conversation',
+          ...(workspaceProjectId ? { projectId: workspaceProjectId } : {}),
+          ...(workspaceAgentId ? { agentId: workspaceAgentId } : {}),
+        }),
       });
       await refreshAll();
       setActiveSessionId(created.id);
@@ -873,7 +1382,11 @@ export default function App() {
       }
       const run = await api<WorkspaceRun>('/api/runs', {
         method: 'POST',
-        body: JSON.stringify({ prompt, sessionId }),
+        body: JSON.stringify({
+          prompt,
+          sessionId,
+          ...(googleWorkspaceOnline && googleWorkspaceGrant ? { googleWorkspaceAccessToken: googleWorkspaceGrant.accessToken } : {}),
+        }),
       });
       setRuns(previous => [run, ...previous.filter(item => item.id !== run.id)]);
       void refreshWork().catch(failure => setError(failure instanceof Error ? failure.message : 'Could not load the new run.'));
@@ -884,6 +1397,69 @@ export default function App() {
     } finally {
       setStartingRun(false);
     }
+  };
+
+  const runProjectTask = async (projectId: string, prompt: string): Promise<boolean> => {
+    setError('');
+    try {
+      const created = await api<{ id: string }>('/api/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'IDE project task', projectId }),
+      });
+      await refreshAll();
+      return await launchRun(prompt, created.id);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not start the project task.');
+      return false;
+    }
+  };
+
+  const archiveProject = async (projectId: string): Promise<boolean> => {
+    if (!window.confirm('Archive this project and all of its conversations, agents, and subagents? The workspace files will be retained.')) return false;
+    try {
+      await api(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
+      await refreshAll();
+      if (workspaceProjectId === projectId) {
+        setWorkspaceProjectId('');
+        setWorkspaceAgentId('');
+        setActiveSessionId('');
+      }
+      return true;
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Project could not be archived.');
+      return false;
+    }
+  };
+
+  const restoreProject = async (projectId: string): Promise<void> => {
+    try {
+      await api(`/api/projects/${encodeURIComponent(projectId)}/restore`, { method: 'POST' });
+      await refreshAll();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Project could not be restored.');
+      throw failure;
+    }
+  };
+
+  const updateProject = (updated: WorkspaceProject) => {
+    setProjects(current => current.map(project => project.id === updated.id ? updated : project));
+  };
+
+  const permanentlyDeleteProject = async (projectId: string, projectName: string): Promise<boolean> => {
+    if (!window.confirm(`Permanently delete ${projectName} and all of its archived workspace files and sessions? This cannot be undone.`)) return false;
+    try {
+      await api(`/api/projects/${encodeURIComponent(projectId)}/permanent`, { method: 'DELETE' });
+      await refreshAll();
+      return true;
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Archived project could not be deleted.');
+      return false;
+    }
+  };
+
+  const openProjectDetails = (projectId: string) => {
+    setProjectToOpen(projectId);
+    setProjectOpenRequest(request => request + 1);
   };
 
   const stopRun = async (id: string) => {
@@ -918,7 +1494,7 @@ export default function App() {
     }
   };
 
-  const updateIdentity = async (identity: { name: string; emoji: string; soulContent: string; agentsContent: string; instructions: string }) => {
+  const updateIdentity = async (identity: { name: string; emoji: string; soulContent: string; agentsContent: string; instructions: string; avatarDataUrl: string | null }) => {
     try {
       const updated = await api<GatewayConfig>('/api/identity', {
         method: 'PUT',
@@ -945,7 +1521,47 @@ export default function App() {
     }
   };
 
+  const selectSession = (sessionId: string) => {
+    const session = sessions.find(item => item.id === sessionId);
+    const subagent = agents.find(item => item.sessionId === sessionId);
+    setWorkspaceProjectId(session?.projectId ?? subagent?.projectId ?? '');
+    setWorkspaceAgentId(session?.agentId ?? subagent?.agentId ?? '');
+    setActiveSessionId(sessionId);
+  };
+
   const openRunSession = (sessionId: string) => {
+    selectSession(sessionId);
+    navigate('chat');
+  };
+
+  const openProfileConversation = async (profile: AgentProfile) => {
+    try {
+      const savedConversation = sessions
+        .filter(session => session.projectId === profile.projectId && session.agentId === profile.id && session.sessionKind !== 'subagent')
+        .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+      if (savedConversation) {
+        setWorkspaceProjectId(profile.projectId);
+        setWorkspaceAgentId(profile.id);
+        setActiveSessionId(savedConversation.id);
+        navigate('chat');
+        return;
+      }
+      const created = await api<{ id: string }>('/api/sessions', {
+        method: 'POST',
+        body: JSON.stringify({ name: `${profile.name} conversation`, projectId: profile.projectId, agentId: profile.id }),
+      });
+      setActiveSessionId(created.id);
+      await refreshAll();
+      navigate('chat');
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not open the agent conversation.');
+    }
+  };
+
+  const openSubagentConversation = (sessionId: string) => {
+    const subagent = agents.find(agent => agent.sessionId === sessionId);
+    setWorkspaceProjectId(subagent?.projectId ?? '');
+    setWorkspaceAgentId(subagent?.agentId ?? '');
     setActiveSessionId(sessionId);
     navigate('chat');
   };
@@ -964,15 +1580,33 @@ export default function App() {
     }
   };
 
+  const createProject = async (name: string, scope = '') => {
+    const created = await api<WorkspaceProject>('/api/projects', {
+      method: 'POST',
+      body: JSON.stringify({ name, scope }),
+    });
+    setProjects(current => [...current, created]);
+  };
+
+  const createWorkspaceAgent = async (profile: { projectId: string; name: string; emoji: string; instructions: string }) => {
+    const created = await api<AgentProfile>('/api/workspace-agents', {
+      method: 'POST',
+      body: JSON.stringify(profile),
+    });
+    setWorkspaceAgents(current => [...current, created]);
+    setWorkspaceProjectId(created.projectId);
+    setWorkspaceAgentId(created.id);
+  };
+
   const sendMessage = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const text = sessionDraft.trim();
     if (!text || !activeSessionId || sending) return;
-    const userMessage: ChatMessage = { id: createClientId(), role: 'user', content: text, timestamp: Date.now() };
+    const userMessage: ChatMessage = { id: createClientId(), role: 'user', content: text, timestamp: Date.now(), tokensIn: Math.ceil(text.length / 4), tokenCountsEstimated: true };
     const assistantId = createClientId();
     let streamedText = '';
     activeTurnSessionId.current = activeSessionId;
-    setMessages(previous => [...previous, userMessage, { id: assistantId, role: 'assistant', content: '', timestamp: Date.now(), streaming: true }]);
+    setMessages(previous => [...previous, userMessage, { id: assistantId, role: 'assistant', content: '', timestamp: Date.now(), streaming: true, thinking: true }]);
     setSending(true);
     setSessionDrafts(previous => {
       const next = { ...previous };
@@ -985,8 +1619,14 @@ export default function App() {
         text: string;
         durationMs?: number;
         iterations?: number;
+        inputTokens?: number;
+        outputTokens?: number;
         toolCalls?: Array<{ name: string; input: Record<string, unknown>; result: string }>;
-      }>('/api/chat', { text, sessionId: activeSessionId }, streamed => {
+      }>('/api/chat', {
+        text,
+        sessionId: activeSessionId,
+        ...(googleWorkspaceOnline && googleWorkspaceGrant ? { googleWorkspaceAccessToken: googleWorkspaceGrant.accessToken } : {}),
+      }, streamed => {
         setMessages(previous => previous.map(message => {
           if (message.id !== assistantId) return message;
           if (streamed.type === 'text_delta') {
@@ -997,11 +1637,27 @@ export default function App() {
           if (streamed.type === 'thinking_delta') return { ...message, thinking: true };
           if (streamed.type === 'tool_start') {
             const name = String(streamed.name ?? 'tool');
-            return { ...message, thinking: false, activeTools: [...(message.activeTools ?? []), name] };
+            return {
+              ...message,
+              thinking: false,
+              activeTool: name,
+              activeTools: [...(message.activeTools ?? []), name],
+              toolActivity: [...(message.toolActivity ?? []), { name, status: 'running' as const }],
+            };
           }
           if (streamed.type === 'tool_end') {
             const name = String(streamed.name ?? 'tool');
-            return { ...message, activeTools: (message.activeTools ?? []).filter(tool => tool !== name) };
+            const toolActivity = [...(message.toolActivity ?? [])];
+            let runningIndex = -1;
+            for (let index = toolActivity.length - 1; index >= 0; index--) {
+              if (toolActivity[index].name === name && toolActivity[index].status === 'running') {
+                runningIndex = index;
+                break;
+              }
+            }
+            if (runningIndex >= 0) toolActivity[runningIndex] = { ...toolActivity[runningIndex], status: 'done' };
+            const activeTools = toolActivity.filter(tool => tool.status === 'running').map(tool => tool.name);
+            return { ...message, activeTools, activeTool: activeTools.at(-1), toolActivity, thinking: activeTools.length === 0 };
           }
           return message;
         }));
@@ -1019,6 +1675,8 @@ export default function App() {
             streaming: false,
             thinking: false,
             activeTools: [],
+            activeTool: undefined,
+            toolActivity: [],
             interrupted: true,
           } : message));
         }
@@ -1031,9 +1689,14 @@ export default function App() {
         streaming: false,
         thinking: false,
         activeTools: [],
+        activeTool: undefined,
+        toolActivity: [],
         timestamp: Date.now(),
         durationMs: response.durationMs,
         iterations: response.iterations,
+        tokensIn: response.inputTokens,
+        tokensOut: response.outputTokens,
+        tokenCountsEstimated: response.outputTokens === undefined,
         toolCalls: response.toolCalls ?? [],
       } : message));
       void api<SessionSummary[]>('/api/sessions').then(setSessions).catch(() => undefined);
@@ -1045,6 +1708,8 @@ export default function App() {
         streaming: false,
         thinking: false,
         activeTools: [],
+        activeTool: undefined,
+        toolActivity: [],
         interrupted: true,
       } : message));
     } finally {
@@ -1120,6 +1785,33 @@ export default function App() {
     }
   }, [deviceNotificationPermission, unreadNotifications, relativeTimeNow]);
 
+  useEffect(() => {
+    if (deviceNotificationPermission !== 'granted' || typeof Notification === 'undefined') return;
+    for (const request of threadHelpRequests) {
+      const notificationId = `thread-help-${request.id}`;
+      if (nativeNotifiedIds.current.has(notificationId) || relativeTimeNow - request.createdAt > 60 * 60 * 1000) continue;
+      nativeNotifiedIds.current.add(notificationId);
+      try {
+        const notification = new Notification('An agent needs your help', {
+          body: `${request.title}: ${request.body.replace(/\s+/g, ' ').slice(0, 220)}`,
+          tag: notificationId,
+        });
+        notification.onclick = () => {
+          window.focus();
+          setThreadToOpen(request.threadId);
+          setWorkspaceThreadOpenRequest(previous => previous + 1);
+        };
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : 'An agent help notification could not be shown.');
+      }
+    }
+    try {
+      window.localStorage.setItem('symbiote-device-notified', JSON.stringify([...nativeNotifiedIds.current].slice(-200)));
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Device notification state could not be saved.');
+    }
+  }, [deviceNotificationPermission, threadHelpRequests, relativeTimeNow]);
+
   const enableDeviceNotifications = async () => {
     if (typeof Notification === 'undefined' || !window.isSecureContext) {
       setError('Device notifications require a supported browser and a secure connection.');
@@ -1137,7 +1829,7 @@ export default function App() {
   }
 
   if (isMinimalMode && isDesktopApp) {
-    return <MinimalMode theme={theme} onThemeChange={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} />;
+    return <MinimalMode theme={theme} agentName={config?.agentName || config?.name} agentEmoji={config?.agentEmoji} agentAvatarDataUrl={config?.agentAvatarDataUrl} onThemeChange={() => changeAppearance({ ...appearance, brightness: appearance.brightness >= 50 ? 0 : 100 })} />;
   }
 
   return (
@@ -1152,9 +1844,8 @@ export default function App() {
 
         <button type="button" className="workspace-label" onClick={() => setIdentityOpen(true)} aria-label="Open agent identity and behavior settings">
           {(() => {
-            const AgentIcon = agentIcon(config?.agentEmoji);
             return <>
-              <span className="workspace-avatar"><AgentIcon size={16} aria-hidden="true" /></span>
+              <span className="workspace-avatar"><AgentAvatar emoji={config?.agentEmoji} image={config?.agentAvatarDataUrl} size={16} /></span>
               <span className="workspace-copy"><strong>{config?.agentName || config?.name || 'Agent'}</strong></span>
               <Settings2 size={14} className="muted-icon" />
             </>;
@@ -1165,7 +1856,7 @@ export default function App() {
           {['Work', 'Play', 'Runtime'].map(group => (
             <div className="nav-group" key={group}>
               <div className="nav-label">{group}</div>
-              {NAVIGATION.filter(item => item.group === group).map(item => {
+              {NAVIGATION.filter(item => item.group === group && item.id !== 'ide').map(item => {
                 const Icon = item.icon;
                 return (
                   <button
@@ -1187,16 +1878,26 @@ export default function App() {
         </nav>
 
         <div className="sidebar-session">
-          <div className="sidebar-section-heading"><span>RECENT THREADS</span><button className="icon-button small" onClick={() => void createSession()} aria-label="Start a new conversation"><Plus size={15} /></button></div>
-          {sessions.slice(0, 4).map(session => (
-            <button key={session.id} className={`recent-thread${activeSessionId === session.id && view === 'chat' ? ' recent-thread-active' : ''}`} onClick={() => { setActiveSessionId(session.id); navigate('chat'); }}>
-              <span className="thread-dot" />
-              <span className="recent-thread-copy"><strong>{session.label || 'Conversation'}</strong><small>{formatRelative(session.updatedAt)}</small></span>
+          <div className="sidebar-section-heading">
+            <button className="sidebar-thread-toggle" type="button" onClick={() => setRecentThreadsOpen(open => !open)} aria-expanded={recentThreadsOpen} aria-controls="sidebar-thread-list">
+              <span>RECENT THREADS</span><ChevronUp size={14} className={recentThreadsOpen ? 'thread-toggle-open' : ''} />
             </button>
-          ))}
-          {sessions.length === 0 && <p className="sidebar-empty">Your conversations will appear here.</p>}
+            <button className="icon-button small" onClick={() => void createSession()} aria-label="Start a new conversation"><Plus size={15} /></button>
+          </div>
+          <div id="sidebar-thread-list" className="sidebar-thread-popover" data-open={recentThreadsOpen} role="region" aria-label="Previous conversations" aria-hidden={!recentThreadsOpen} inert={!recentThreadsOpen}>
+            <div className="sidebar-thread-list">
+              {sessions.map(session => (
+                <button key={session.id} className={`recent-thread${activeSessionId === session.id && view === 'chat' ? ' recent-thread-active' : ''}`} onClick={() => { selectSession(session.id); navigate('chat'); setRecentThreadsOpen(false); }}>
+                  <span className="thread-dot" />
+                  <span className="recent-thread-copy"><strong>{session.label || 'Conversation'}</strong><small>{formatRelative(session.updatedAt)}</small></span>
+                </button>
+              ))}
+              {sessions.length === 0 && <p className="sidebar-empty">Your conversations will appear here.</p>}
+            </div>
+          </div>
         </div>
         <div className="sidebar-footer">
+          <img className="sidebar-footer-logo" src="/av-mark-white.png" alt="Artifact Virtual" />
           <span className="version-label">{__SYMBIOTE_VERSION__}</span>
         </div>
       </aside>
@@ -1217,9 +1918,7 @@ export default function App() {
             <button className="icon-button utility-button" onClick={() => { setCommandOpen(true); setCommandQuery(''); }} aria-label="Open command menu (Ctrl+K)" title="Command menu · Ctrl+K">
               <Command size={16} />
             </button>
-            <button className="icon-button utility-button" onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
-              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-            </button>
+            <AppearanceControl settings={appearance} onChange={changeAppearance} />
             <button className={`icon-button refresh-button${refreshing ? ' is-refreshing' : ''}`} onClick={() => void refreshAll(true)} aria-label="Refresh runtime data" disabled={refreshing}>
               <RefreshCw size={16} />
             </button>
@@ -1256,6 +1955,17 @@ export default function App() {
               <button className="icon-button small" onClick={() => void refreshAll(true)} aria-label="Retry"><RefreshCw size={14} /></button>
             </div>
           )}
+          {status?.update?.state === 'available' && status.update.latestVersion !== dismissedUpdateVersion && (
+            <div className="notice notice-update" role="status">
+              <span>Symbiote {status.update.latestVersion} is available. You are running {status.update.currentVersion}.</span>
+              {isDesktopApp
+                ? <button className="button button-secondary" onClick={() => void installUpdate()} disabled={preparingUpdate || status.update.download?.state === 'downloading'}>
+                    {preparingUpdate || status.update.download?.state === 'downloading' ? 'Preparing verified installer…' : 'Download and install'}
+                  </button>
+                : <a className="button button-secondary" href={status.update.releaseUrl} target="_blank" rel="noreferrer">Review update</a>}
+              <button className="icon-button small" onClick={() => setDismissedUpdateVersion(status.update?.latestVersion ?? null)} aria-label="Dismiss update notice"><X size={14} /></button>
+            </div>
+          )}
 
           {loading && !status ? (
             <div className="loading-state"><LoaderCircle size={22} className="spin" /><span>Connecting to your local runtime…</span></div>
@@ -1266,9 +1976,11 @@ export default function App() {
                   status={status}
                   config={config}
                   sessions={sessions}
+                  projects={projects}
+                  profiles={workspaceAgents}
                   activeSessionId={activeSessionId}
-                  runs={runs}
-                  agents={agents}
+                  runs={contextRuns}
+                  agents={contextAgents}
                   channels={channelList}
                   memoryHistory={memoryHistory}
                   hostHistory={hostHistory}
@@ -1277,14 +1989,28 @@ export default function App() {
                   onStartRun={launchRun}
                   startingRun={startingRun}
                   onNewSession={() => void createSession()}
-                  onOpenSession={id => { setActiveSessionId(id); navigate('chat'); }}
+                  onOpenSession={openRunSession}
+                  onOpenProject={openProjectDetails}
+                  onOpenProfile={profile => void openProfileConversation(profile)}
                   creatingSession={creatingSession}
+                  cloudIntegrations={cloudIntegrations}
                 />
+              )}
+              {view === 'ide' && (
+                <Suspense fallback={<div className="loading-state"><LoaderCircle size={20} className="spin" /><span>Loading the project IDE…</span></div>}>
+                  <ProjectIDE
+                    projects={projects}
+                    onArchiveProject={archiveProject}
+                    onRunTask={runProjectTask}
+                    request={api}
+                    dark={appearance.brightness < 50}
+                  />
+                </Suspense>
               )}
               {view === 'runs' && (
                 <RunsView
-                  runs={runs}
-                  agents={agents}
+                  runs={contextRuns}
+                  agents={contextAgents}
                   onStop={stopRun}
                   onRestart={restartRun}
                   onGuide={guideRun}
@@ -1299,13 +2025,16 @@ export default function App() {
                   session={activeSession}
                   sessions={sessions}
                   messages={messages}
+                  agentName={activeProfile?.name ?? config?.agentName ?? config?.name}
+                  agentEmoji={activeProfile?.emoji ?? config?.agentEmoji}
+                  agentAvatarDataUrl={activeProfile ? undefined : config?.agentAvatarDataUrl}
                   draft={sessionDraft}
                   sending={sending}
                   onDraft={value => setSessionDrafts(previous => ({ ...previous, [activeSessionId]: value }))}
                   onSubmit={sendMessage}
                   onStop={() => void interruptChat()}
                   onNewSession={() => void createSession()}
-                  onSelectSession={id => setActiveSessionId(id)}
+                  onSelectSession={selectSession}
                   onArchiveSession={archiveSession}
                   bottomRef={bottomRef}
                   creatingSession={creatingSession}
@@ -1317,12 +2046,13 @@ export default function App() {
                   sessions={filteredSessions}
                   query={sessionQuery}
                   onQuery={setSessionQuery}
-                  onOpen={id => { setActiveSessionId(id); navigate('chat'); }}
+                  onOpen={id => { selectSession(id); navigate('chat'); }}
                   onNew={() => void createSession()}
                   creating={creatingSession}
                 />
               )}
               {view === 'memory' && <Suspense fallback={<div className="loading-state">Loading memory map…</div>}><MemoryMap request={api} /></Suspense>}
+              {view === 'integrations' && <Suspense fallback={<div className="loading-state"><LoaderCircle size={20} className="spin" /><span>Loading integrations…</span></div>}><IntegrationsView grant={googleWorkspaceGrant} onGrantChange={setGoogleWorkspaceGrant} request={api} cloudStatus={cloudProviderStatus} onCloudStatusChange={(provider, configured) => setCloudProviderStatus(previous => ({ ...previous, [provider]: configured }))} /></Suspense>}
               {view === 'operations' && (
                 <OperationsView
                   status={status}
@@ -1344,6 +2074,34 @@ export default function App() {
           )}
         </main>
       </div>
+      <WorkspaceDrawer
+        openRequest={workspaceDrawerRequest}
+        projectOpenRequest={projectOpenRequest}
+        projectToOpen={projectToOpen}
+        openThreadRequest={workspaceThreadOpenRequest}
+        threadToOpen={threadToOpen}
+        currentView={view}
+        onOpenIDE={() => navigate('ide')}
+        projects={projects}
+        profiles={workspaceAgents}
+        subagents={agents}
+        selectedProjectId={workspaceProjectId}
+        selectedAgentId={workspaceAgentId}
+        onSelectProject={id => { setWorkspaceProjectId(id); setWorkspaceAgentId(''); setActiveSessionId(''); }}
+        onSelectAgent={id => setWorkspaceAgentId(id)}
+        onCreateProject={createProject}
+        onRestoreProject={restoreProject}
+        onArchiveProject={archiveProject}
+        onDeleteProject={permanentlyDeleteProject}
+        onProjectUpdated={updateProject}
+        onCreateAgent={createWorkspaceAgent}
+        onOpenProfile={profile => void openProfileConversation(profile)}
+        onOpenSubagent={openSubagentConversation}
+        onArchiveSubagent={id => void archiveSession(id)}
+        unreadThreadCount={threadHelpRequests.length}
+        onFailure={failure => setError(failure instanceof Error ? failure.message : 'Workspace change failed.')}
+        request={api}
+      />
       {notificationsOpen && <button className="notification-dismiss" aria-label="Close notifications" onClick={() => setNotificationsOpen(false)} />}
       {identityOpen && config && <AgentSettingsDialog config={config} onSave={updateIdentity} onClose={() => setIdentityOpen(false)} />}
       {commandOpen && <CommandPalette query={commandQuery} onQuery={setCommandQuery} onClose={() => setCommandOpen(false)} onNavigate={destination => { setCommandOpen(false); navigate(destination); }} onNewSession={() => { setCommandOpen(false); void createSession(); }} />}
@@ -1353,7 +2111,7 @@ export default function App() {
 
 function AgentSettingsDialog({ config, onSave, onClose }: {
   config: GatewayConfig;
-  onSave: (identity: { name: string; emoji: string; soulContent: string; agentsContent: string; instructions: string }) => Promise<void>;
+  onSave: (identity: { name: string; emoji: string; soulContent: string; agentsContent: string; instructions: string; avatarDataUrl: string | null }) => Promise<void>;
   onClose: () => void;
 }) {
   const [name, setName] = useState(config.agentName || config.name || '');
@@ -1361,6 +2119,7 @@ function AgentSettingsDialog({ config, onSave, onClose }: {
   const [soulContent, setSoulContent] = useState(config.soulContent || '');
   const [agentsContent, setAgentsContent] = useState(config.agentsContent || '');
   const [instructions, setInstructions] = useState(config.agentInstructions || '');
+  const [avatarDataUrl, setAvatarDataUrl] = useState<string | null>(config.agentAvatarDataUrl ?? null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const choices = [
@@ -1371,11 +2130,33 @@ function AgentSettingsDialog({ config, onSave, onClose }: {
     { emoji: '✨', label: 'Spark', icon: Sparkles },
   ];
   const AgentIcon = agentIcon(emoji);
+  const loadAvatar = (file?: File) => {
+    if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setError('Choose a PNG, JPEG, or WebP image.');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError('Agent avatar images must be 2 MiB or smaller.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => setError('The selected image could not be read.');
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        setError('The selected image could not be read as a supported image.');
+        return;
+      }
+      setAvatarDataUrl(reader.result);
+      setError('');
+    };
+    reader.readAsDataURL(file);
+  };
   return (
     <div className="identity-backdrop" onMouseDown={onClose}>
       <section className="identity-dialog" role="dialog" aria-modal="true" aria-labelledby="identity-title" onMouseDown={event => event.stopPropagation()}>
         <header className="identity-dialog-header">
-          <span className="identity-dialog-icon"><AgentIcon size={20} /></span>
+          <span className="identity-dialog-icon">{avatarDataUrl ? <img src={avatarDataUrl} alt="" /> : <AgentIcon size={20} />}</span>
           <div><div className="eyebrow">AGENT PROFILE</div><h2 id="identity-title">Identity & behavior</h2></div>
           <button className="icon-button small" type="button" onClick={onClose} aria-label="Close agent settings"><X size={16} /></button>
         </header>
@@ -1384,7 +2165,7 @@ function AgentSettingsDialog({ config, onSave, onClose }: {
           setSaving(true);
           setError('');
           try {
-            await onSave({ name: name.trim(), emoji, soulContent, agentsContent, instructions });
+            await onSave({ name: name.trim(), emoji, soulContent, agentsContent, instructions, avatarDataUrl });
           } catch (failure) {
             setError(failure instanceof Error ? failure.message : 'Settings could not be saved.');
           } finally {
@@ -1395,13 +2176,25 @@ function AgentSettingsDialog({ config, onSave, onClose }: {
             <span>Agent name</span>
             <input value={name} onChange={event => setName(event.target.value)} maxLength={80} required />
           </label>
-          <fieldset className="identity-icons">
-            <legend>Agent symbol</legend>
-            {choices.map(({ emoji: value, label, icon: Icon }) => (
-              <button key={value} type="button" className={emoji === value ? 'identity-icon-choice identity-icon-selected' : 'identity-icon-choice'} onClick={() => setEmoji(value)} aria-label={label} aria-pressed={emoji === value}>
-                <Icon size={18} /><span>{label}</span>
-              </button>
-            ))}
+          <fieldset className="identity-field identity-avatar-field">
+            <legend>Agent avatar</legend>
+            <div className="identity-avatar-selector">
+              <label className="identity-avatar-upload">
+                <input className="identity-avatar-file-input" type="file" accept="image/png,image/jpeg,image/webp" onChange={event => loadAvatar(event.currentTarget.files?.[0])} />
+                <span className="identity-avatar-preview">{avatarDataUrl ? <img src={avatarDataUrl} alt="" /> : <Upload size={16} />}</span>
+                <span>Upload image</span>
+              </label>
+              <span className="identity-avatar-or">or</span>
+              <div className="identity-icons" role="group" aria-label="Choose an agent symbol">
+                {choices.map(({ emoji: value, label, icon: Icon }) => (
+                  <button key={value} type="button" className={emoji === value && !avatarDataUrl ? 'identity-icon-choice identity-icon-selected' : 'identity-icon-choice'} onClick={() => { setEmoji(value); setAvatarDataUrl(null); }} aria-label={label} title={label} aria-pressed={emoji === value && !avatarDataUrl}>
+                    <Icon size={17} />
+                  </button>
+                ))}
+              </div>
+            </div>
+            <small>Used throughout the workspace and chat. Subagents keep their bot icon. PNG, JPEG, or WebP up to 2 MiB.</small>
+            {avatarDataUrl && <button className="button button-secondary identity-avatar-remove" type="button" onClick={() => setAvatarDataUrl(null)}>Remove custom avatar</button>}
           </fieldset>
           <label className="identity-field">
             <span>SOUL.md · agent identity and character</span>
@@ -1447,6 +2240,8 @@ function OverviewView(props: {
   status: GatewayStatus | null;
   config: GatewayConfig | null;
   sessions: SessionSummary[];
+  projects: WorkspaceProject[];
+  profiles: AgentProfile[];
   activeSessionId: string;
   runs: WorkspaceRun[];
   agents: WorkspaceAgent[];
@@ -1459,9 +2254,12 @@ function OverviewView(props: {
   startingRun: boolean;
   onNewSession: () => void;
   onOpenSession: (id: string) => void;
+  onOpenProject: (id: string) => void;
+  onOpenProfile: (profile: AgentProfile) => void;
   creatingSession: boolean;
+  cloudIntegrations: Array<{ id: string; label: string; online: boolean; view: ViewId; icon: ReactNode }>;
 }) {
-  const { status, config, sessions, activeSessionId, runs, agents, channels, memoryHistory, hostHistory, lastUpdated, onNavigate, onStartRun, startingRun, onNewSession, onOpenSession, creatingSession } = props;
+  const { status, config, sessions, projects, profiles, activeSessionId, runs, agents, channels, memoryHistory, hostHistory, lastUpdated, onNavigate, onStartRun, startingRun, onNewSession, onOpenSession, onOpenProject, onOpenProfile, creatingSession, cloudIntegrations } = props;
   const memory = status?.memory;
   const metrics = status?.metrics;
   const host = metrics?.system?.host;
@@ -1487,7 +2285,26 @@ function OverviewView(props: {
       <PageHeading
         title={(config?.agentName || config?.name || 'Agent').toLowerCase()}
         detail={<WorkspaceClock />}
-        action={<button className="button button-primary" onClick={onNewSession} disabled={creatingSession}><Plus size={16} />New conversation</button>}
+        action={
+          <div className="overview-primary-actions">
+            <button className="button button-primary" onClick={onNewSession} disabled={creatingSession}><Plus size={16} />New conversation</button>
+            <div className="workspace-integration-links" aria-label="Cloud integrations">
+              {cloudIntegrations.map(integration => (
+                <button
+                  key={integration.id}
+                  type="button"
+                  className={`workspace-integration-icon${integration.online ? ' workspace-integration-online' : ''}`}
+                  onClick={() => onNavigate(integration.view)}
+                  title={`${integration.label} ${integration.online ? 'online' : 'offline'}`}
+                  aria-label={`Open Integrations. ${integration.label} ${integration.online ? 'online' : 'offline'}`}
+                >
+                  {integration.icon}
+                  <span className="workspace-integration-light" aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+          </div>
+        }
       />
 
       <div className="workspace-context surface-card">
@@ -1498,6 +2315,7 @@ function OverviewView(props: {
         <div className="workspace-context-stats">
           <button onClick={() => onNavigate('runs')}><strong>{activeRuns}</strong><span>Active runs</span></button>
           <button onClick={() => onNavigate('agents')}><strong>{activeAgents}</strong><span>Active subagents</span></button>
+          <button onClick={() => onNavigate('workspace')}><strong>{projects.length}</strong><span>Active projects</span></button>
         </div>
       </div>
       <section className="overview-banner">
@@ -1508,7 +2326,15 @@ function OverviewView(props: {
           {status && <HeroTaskForm sessionId={activeSessionId} onStart={onStartRun} starting={startingRun} />}
           <button className="banner-link" onClick={() => onNavigate('operations')}>View runtime details <ArrowRight size={15} /></button>
         </div>
-        <WorkspaceGraph sessions={sessions} agents={agents} onOpenSession={onOpenSession} onViewAgents={() => onNavigate('agents')} />
+        <WorkspaceGraph
+          sessions={sessions}
+          projects={projects}
+          profiles={profiles}
+          agents={agents}
+          onOpenSession={onOpenSession}
+          onOpenProject={onOpenProject}
+          onOpenProfile={onOpenProfile}
+        />
         <div className="banner-index">SYS / 01</div>
       </section>
 
@@ -1529,25 +2355,33 @@ function OverviewView(props: {
       <section className="metric-grid system-metric-grid" aria-label="Computer resource usage">
         <MetricCard icon={Cpu} label="Host CPU" tone="orange">
           <div className="metric-reading"><strong className="metric-value">{host?.cpuPercent === null || host?.cpuPercent === undefined ? '—' : `${host.cpuPercent.toFixed(1)}%`}</strong><span>{host ? `${host.cpuLogicalCores} cores` : 'Waiting for sample'}</span></div>
-          <MetricPlot label="Host CPU utilization over time" series={[{ name: 'CPU', color: '#c8785e', values: hostHistory.map(sample => sample.cpuPercent ?? 0) }]} maxValue={100} />
+          <MetricPlot
+            label={`Host CPU utilization over time across ${host?.cpuLogicalCores ?? 0} logical cores`}
+            series={Array.from({ length: host?.cpuLogicalCores ?? 0 }, (_, index) => ({
+              name: `Core ${index + 1}`,
+              color: '',
+              values: hostHistory.map(sample => sample.cpuCorePercents?.[index] ?? (index === 0 ? sample.cpuPercent ?? 0 : 0)),
+            }))}
+            maxValue={100}
+          />
         </MetricCard>
         <MetricCard icon={MemoryStick} label="System RAM" tone="blue">
           <div className="metric-memory-reading"><strong>{host ? formatSystemBytes(host.memory.totalBytes - host.memory.freeBytes) : '—'}</strong><span>/ {host ? formatSystemBytes(host.memory.totalBytes) : '—'}</span></div>
           <div className="metric-reading-subtext">{host ? `${host.memory.usedPercent.toFixed(1)}% in use` : 'Waiting for sample'}</div>
-          <MetricPlot label="System RAM use over time" area series={[{ name: 'Used', color: '#7396a0', values: hostHistory.map(sample => sample.memory.totalBytes - sample.memory.freeBytes) }]} maxValue={host?.memory.totalBytes || 1} />
+          <MetricPlot label="System RAM use over time" area series={[{ name: 'Used', color: 'var(--appearance-icon)', values: hostHistory.map(sample => sample.memory.totalBytes - sample.memory.freeBytes) }]} maxValue={host?.memory.totalBytes || 1} />
         </MetricCard>
         <MetricCard icon={Network} label="Network I/O" tone="green">
           <div className="metric-dual-reading"><span><b>↓</b> {formatRate(host?.network.receiveBytesPerSecond)}</span><span><b>↑</b> {formatRate(host?.network.transmitBytesPerSecond)}</span></div>
           <MetricPlot label="Network receive and transmit rates" series={[
-            { name: 'Down', color: '#759b6c', values: hostHistory.map(sample => sample.network.receiveBytesPerSecond ?? 0) },
-            { name: 'Up', color: '#c8785e', values: hostHistory.map(sample => sample.network.transmitBytesPerSecond ?? 0) },
+            { name: 'Down', color: 'var(--appearance-icon)', values: hostHistory.map(sample => sample.network.receiveBytesPerSecond ?? 0) },
+            { name: 'Up', color: 'color-mix(in srgb, var(--appearance-icon) 48%, var(--ink))', values: hostHistory.map(sample => sample.network.transmitBytesPerSecond ?? 0) },
           ]} />
         </MetricCard>
         <MetricCard icon={HardDrive} label="Disk I/O" tone="neutral">
           <div className="metric-dual-reading"><span>Read {formatRate(host?.disk.readBytesPerSecond)}</span><span>Write {formatRate(host?.disk.writeBytesPerSecond)}</span></div>
           <MetricPlot label="Disk read and write rates" series={[
-            { name: 'Read', color: '#77949d', values: hostHistory.map(sample => sample.disk.readBytesPerSecond ?? 0) },
-            { name: 'Write', color: '#c8785e', values: hostHistory.map(sample => sample.disk.writeBytesPerSecond ?? 0) },
+            { name: 'Read', color: 'var(--appearance-icon)', values: hostHistory.map(sample => sample.disk.readBytesPerSecond ?? 0) },
+            { name: 'Write', color: 'color-mix(in srgb, var(--appearance-icon) 48%, var(--ink))', values: hostHistory.map(sample => sample.disk.writeBytesPerSecond ?? 0) },
           ]} />
         </MetricCard>
       </section>
@@ -1627,32 +2461,56 @@ function OverviewView(props: {
 }
 
 const TASK_PROMPTS = [
-  'Need something done?', 'How can I help?', 'What should we work on?', 'What would you like me to handle?',
-  'What can I take off your plate?', 'What needs your attention?', 'Where should we begin?', 'What would move this forward?',
-  'What should I look into?', 'What would you like to improve?', 'What needs building?', 'What can I help you solve?',
-  'Have a task in mind?', 'What should I take care of?', 'What would you like to explore?', 'What needs a closer look?',
-  'What should I investigate?', 'What would you like to change?', 'What is the next priority?', 'What should I review?',
-  'What would you like to ship?', 'What can I make simpler?', 'What is getting in the way?', 'What should I work through?',
-  'What needs a second set of eyes?', 'What should I prototype?', 'What do you want to understand?', 'What should I organize?',
-  'What would you like me to prepare?', 'What should I verify?', 'What needs to be documented?', 'What should I test?',
-  'What should I trace?', 'What would you like to automate?', 'What is the rough edge?', 'What should I untangle?',
-  'What is worth fixing first?', 'What can I clarify?', 'What should I compare?', 'What would you like to plan?',
-  'What should I map out?', 'What needs a careful read?', 'What should I validate?', 'What can I refine?',
-  'What is the current challenge?', 'What should I follow up on?', 'What would you like to make clearer?',
-  'What should I inspect?', 'What should I draft?', 'What deserves a deeper look?', 'What can I help move along?',
-  'What would you like to get unstuck?', 'What should I check for you?', 'What can I build around this?',
-  'What should I break down?', 'What is the next small step?', 'What can I help finish?', 'What should I clean up?',
-  'What would you like to make reliable?', 'What should I connect?', 'What should I try?', 'What is still unclear?',
-  'What needs to work better?', 'What should I search for?', 'What can I help you decide?', 'What should I improve first?',
-  'What should I look after?', 'What would you like to ship next?', 'What can I help prepare?', 'What needs to be checked?',
-  'What should I make easier?', 'What can I help maintain?', 'What would you like to get ready?', 'What should I reason through?',
-  'What is the key question?', 'What should I evaluate?', 'What would you like me to find?', 'What needs a clear answer?',
-  'What should I make consistent?', 'What needs a safer approach?', 'What should I compare closely?', 'What can I help unblock?',
-  'What would you like to get done today?', 'What should I focus on?', 'What needs to be ready?', 'What should I investigate next?',
-  'What is the best place to start?', 'What would you like me to check?', 'What should I sort out?', 'What should I make work?',
-  'What needs to be more dependable?', 'What should I trace through?', 'What can I help you understand?', 'What would you like to refine?',
-  'What can I take from here?', 'What should we tackle next?', 'What do you need from me?', 'What is on your mind?',
-  'What would make today easier?', 'What shall we figure out together?',
+  'What do you need done?',
+  'What would you like me to get done?',
+  'What task can I take care of?',
+  'What would you like me to handle?',
+  'What needs doing?',
+  'What should I get started on?',
+  'What would you like me to work on?',
+  'What can I help you accomplish?',
+  'What are we getting done today?',
+  'What would you like to make happen?',
+  'What should I take off your hands?',
+  'What can I take care of for you?',
+  'What do you want to tackle?',
+  'What would you like us to finish?',
+  'What needs your attention right now?',
+  'What would you like me to sort out?',
+  'What should I help you complete?',
+  'What are you looking to get done?',
+  'What do you need help with today?',
+  'What would you like me to take on?',
+  'What is the job you need done?',
+  'What should we work through?',
+  'What do you want me to take care of?',
+  'What would make your day easier?',
+  'What can I help move forward?',
+  'What needs to happen next?',
+  'What should I focus on for you?',
+  'What would you like me to sort?',
+  'What do you need help finishing?',
+  'What would you like to get off your list?',
+  'What should I help make progress on?',
+  'What can I do for you?',
+  'What would you like me to complete?',
+  'What needs to be taken care of?',
+  'What should I help you get across the line?',
+  'What can I help you get done?',
+  'What would you like me to make progress on?',
+  'What are we trying to accomplish?',
+  'What task should I pick up?',
+  'What do you want handled?',
+  'What should I help you get sorted?',
+  'What would you like to have finished?',
+  'What can I help you wrap up?',
+  'What do you want me to work through?',
+  'What needs to be done first?',
+  'What would you like me to take forward?',
+  'What should I get moving for you?',
+  'What do you need taken care of?',
+  'What would you like done next?',
+  'What can I get done on your behalf?',
 ];
 
 const TASK_HELP = 'Launch an agent run in this project. The agent can delegate independent work to subagents.';
@@ -1702,142 +2560,180 @@ function HeroTaskForm({ sessionId, onStart, starting }: {
 interface GraphNode {
   id: string;
   label: string;
-  kind: 'main' | 'conversation' | 'agent';
+  kind: 'main' | 'conversation' | 'project' | 'profile' | 'agent';
   parentId?: string;
   sessionId?: string;
+  projectId?: string;
+  agentId?: string;
   status?: WorkspaceAgent['status'];
 }
 
-interface GraphPoint { x: number; y: number; vx: number; vy: number; }
+interface GraphPoint { x: number; y: number; }
 
-function WorkspaceGraph({ sessions, agents, onOpenSession, onViewAgents }: {
+function WorkspaceGraph({ sessions, projects, profiles, agents, onOpenSession, onOpenProject, onOpenProfile }: {
   sessions: SessionSummary[];
+  projects: WorkspaceProject[];
+  profiles: AgentProfile[];
   agents: WorkspaceAgent[];
   onOpenSession: (id: string) => void;
-  onViewAgents: () => void;
+  onOpenProject: (id: string) => void;
+  onOpenProfile: (profile: AgentProfile) => void;
 }) {
   const nodes = useMemo<GraphNode[]>(() => {
-    const conversations = sessions.filter(session =>
-      session.sessionKind === 'conversation' || (session.id.startsWith('web-') && !session.id.startsWith('web-run-')),
-    );
+    const conversations = sessions
+      .filter(session => session.sessionKind === 'conversation' || (session.id.startsWith('web-') && !session.id.startsWith('web-run-')))
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, 24);
     const conversationIds = new Set(conversations.map(session => session.id));
+    const sessionById = new Map(sessions.map(session => [session.id, session]));
+    const activeAgents = agents.slice().sort((left, right) => right.startedAt - left.startedAt).slice(0, 16);
+    const agentNodeIds = new Set(activeAgents.map(agent => agent.sessionId));
+    const profileNodeIds = new Set(profiles.map(profile => profile.id));
     return [
       { id: 'main', label: 'Main agent', kind: 'main' },
+      ...projects.map(project => ({
+        id: `project:${project.id}`,
+        label: project.name,
+        kind: 'project' as const,
+        parentId: 'main',
+        projectId: project.id,
+      })),
+      ...profiles.map(profile => ({
+        id: `profile:${profile.id}`,
+        label: profile.name,
+        kind: 'profile' as const,
+        parentId: `project:${profile.projectId}`,
+        projectId: profile.projectId,
+        agentId: profile.id,
+      })),
       ...conversations.map(session => ({
         id: session.id,
         sessionId: session.id,
         label: session.label || 'Conversation',
         kind: 'conversation' as const,
-        parentId: 'main',
+        parentId: session.agentId && profileNodeIds.has(session.agentId)
+          ? `profile:${session.agentId}`
+          : session.projectId && projects.some(project => project.id === session.projectId)
+            ? `project:${session.projectId}`
+            : 'main',
       })),
-      ...agents.map(agent => ({
+      ...activeAgents.map(agent => {
+        const parentSession = agent.parentSessionId ? sessionById.get(agent.parentSessionId) : undefined;
+        const parentAgent = agent.parentSessionId && agentNodeIds.has(agent.parentSessionId);
+        const parentProfileId = parentSession?.agentId ?? agent.agentId;
+        const parentId = parentAgent
+          ? agent.parentSessionId
+          : parentProfileId && profileNodeIds.has(parentProfileId)
+            ? `profile:${parentProfileId}`
+            : agent.parentSessionId && conversationIds.has(agent.parentSessionId)
+              ? agent.parentSessionId
+              : agent.projectId && projects.some(project => project.id === agent.projectId)
+                ? `project:${agent.projectId}`
+                : 'main';
+        return {
         id: agent.sessionId,
         sessionId: agent.sessionId,
         label: agent.task,
         kind: 'agent' as const,
-        parentId: conversationIds.has(agent.parentSessionId ?? '') ? agent.parentSessionId : 'main',
+        parentId,
+        projectId: agent.projectId,
+        agentId: agent.agentId,
         status: agent.status,
-      })),
+        };
+      }),
     ];
-  }, [sessions, agents]);
-  const [points, setPoints] = useState<Record<string, GraphPoint>>({});
-  const pointsRef = useRef(points);
-  pointsRef.current = points;
-
-  useEffect(() => {
-    const next = { ...pointsRef.current };
-    const center = { x: 180, y: 130 };
-    for (const [index, node] of nodes.entries()) {
-      if (node.kind === 'main') {
-        next[node.id] = { ...center, vx: 0, vy: 0 };
-        continue;
-      }
-      if (next[node.id]) continue;
-      let hash = 0;
-      for (const char of node.id) hash = (hash * 31 + char.charCodeAt(0)) | 0;
-      const angle = (Math.abs(hash) % 360) * Math.PI / 180 + index * .41;
-      const radius = node.kind === 'agent' ? 116 : 84;
-      next[node.id] = {
-        x: center.x + Math.cos(angle) * radius,
-        y: center.y + Math.sin(angle) * radius * .72,
-        vx: Math.sin(angle) * .3,
-        vy: -Math.cos(angle) * .3,
-      };
+  }, [sessions, projects, profiles, agents]);
+  const points = useMemo(() => {
+    const center = { x: 280, y: 220 };
+    const positions: Record<string, GraphPoint> = { main: center };
+    const angles = new Map<string, number>();
+    const depths = new Map<string, number>([['main', 0]]);
+    const baseRadii = new Map<string, number>();
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    const children = new Map<string, GraphNode[]>();
+    for (const node of nodes) {
+      if (!node.parentId) continue;
+      const siblings = children.get(node.parentId) ?? [];
+      siblings.push(node);
+      children.set(node.parentId, siblings);
     }
-    const activeIds = new Set(nodes.map(node => node.id));
-    for (const id of Object.keys(next)) if (!activeIds.has(id)) delete next[id];
-    pointsRef.current = next;
-    setPoints(next);
-  }, [nodes]);
-
-  useEffect(() => {
-    let frame = 0;
-    let tick = 0;
-    const animate = () => {
-      const current = pointsRef.current;
-      const next = { ...current };
-      const dynamic = nodes.filter(node => node.kind !== 'main');
-      for (const node of dynamic) {
-        const point = next[node.id];
-        if (!point) continue;
-        let fx = 0;
-        let fy = 0;
-        const centerX = point.x - 180;
-        const centerY = point.y - 130;
-        const radius = Math.max(1, Math.hypot(centerX, centerY));
-        const desiredRadius = node.kind === 'agent' ? 114 : 78;
-        const radial = (desiredRadius - radius) * .0012;
-        fx += centerX / radius * radial;
-        fy += centerY / radius * radial;
-        for (const other of dynamic) {
-          if (other.id === node.id) continue;
-          const target = next[other.id];
-          if (!target) continue;
-          const dx = point.x - target.x;
-          const dy = point.y - target.y;
-          const distanceSquared = Math.max(100, dx * dx + dy * dy);
-          fx += dx / distanceSquared * 2.2;
-          fy += dy / distanceSquared * 2.2;
-        }
-        const parent = node.parentId && next[node.parentId];
-        if (parent) {
-          const dx = parent.x - point.x;
-          const dy = parent.y - point.y;
-          const distance = Math.max(1, Math.hypot(dx, dy));
-          const targetDistance = node.kind === 'agent' ? 42 : 82;
-          const spring = (distance - targetDistance) * .00075;
-          fx += dx / distance * spring;
-          fy += dy / distance * spring;
-        }
-        point.vx = (point.vx + fx) * .985;
-        point.vy = (point.vy + fy) * .985;
-        point.x = Math.min(340, Math.max(20, point.x + point.vx));
-        point.y = Math.min(248, Math.max(16, point.y + point.vy));
+    const rootConversations = children.get('main')?.filter(node => node.kind === 'conversation') ?? [];
+    const rootProjects = children.get('main')?.filter(node => node.kind === 'project') ?? [];
+    const place = (node: GraphNode, seen = new Set<string>()): GraphPoint => {
+      const existing = positions[node.id];
+      if (existing) return existing;
+      if (seen.has(node.id)) return positions.main;
+      const nextSeen = new Set(seen).add(node.id);
+      const parent = node.parentId && byId.get(node.parentId);
+      const siblings = children.get(node.parentId ?? '') ?? [];
+      const siblingIndex = siblings.findIndex(item => item.id === node.id);
+      let point: GraphPoint;
+      if (node.parentId === 'main' && node.kind === 'conversation') {
+        const index = rootConversations.findIndex(item => item.id === node.id);
+        const angle = -Math.PI / 2 + index / Math.max(1, rootConversations.length) * Math.PI * 2;
+        const radius = rootConversations.length === 1 ? 52 : 58;
+        angles.set(node.id, angle);
+        depths.set(node.id, 1);
+        baseRadii.set(node.id, radius);
+        point = { x: center.x + Math.cos(angle) * radius, y: center.y + Math.sin(angle) * radius };
+      } else if (node.parentId === 'main' && node.kind === 'project') {
+        const index = rootProjects.findIndex(item => item.id === node.id);
+        const angle = -Math.PI / 2 + index / Math.max(1, rootProjects.length) * Math.PI * 2;
+        angles.set(node.id, angle);
+        depths.set(node.id, 1);
+        baseRadii.set(node.id, 90);
+        point = { x: center.x + Math.cos(angle) * 90, y: center.y + Math.sin(angle) * 90 };
+      } else if (!parent) {
+        point = center;
+      } else {
+        place(parent, nextSeen);
+        const parentAngle = angles.get(parent.id) ?? -Math.PI / 2;
+        const rootRadius = baseRadii.get(parent.id) ?? baseRadii.get(parent.parentId ?? '') ?? 90;
+        const parentDepth = depths.get(parent.id) ?? 1;
+        const depth = parentDepth + 1;
+        const angleSpread = Math.min(1.25, Math.max(0.24, siblings.length * 0.17));
+        const siblingOffset = siblings.length <= 1 ? 0 : (siblingIndex / (siblings.length - 1) - 0.5) * angleSpread;
+        const angle = parentAngle + 0.12 + siblingOffset;
+        const radius = Math.min(190, rootRadius + (depth - 1) * 32);
+        angles.set(node.id, angle);
+        depths.set(node.id, depth);
+        baseRadii.set(node.id, rootRadius);
+        point = {
+          x: center.x + Math.cos(angle) * radius,
+          y: center.y + Math.sin(angle) * radius,
+        };
       }
-      tick++;
-      if (tick % 2 === 0) {
-        pointsRef.current = next;
-        setPoints({ ...next });
-      }
-      frame = window.requestAnimationFrame(animate);
+      positions[node.id] = point;
+      return point;
     };
-    frame = window.requestAnimationFrame(animate);
-    return () => window.cancelAnimationFrame(frame);
+    for (const node of nodes) place(node);
+    return positions;
   }, [nodes]);
 
   return (
-    <svg className="banner-illustration workspace-graph" viewBox="0 0 360 260" role="group" aria-label="Live workspace graph. Select a conversation or subagent to open it.">
+    <svg className="banner-illustration workspace-graph" viewBox="0 0 560 440" role="group" aria-label="Circular workspace graph. Conversations orbit the main agent, with projects, agents, and subagents expanding outward.">
       <defs>
-        <radialGradient id="agent-glow"><stop stopColor="#c8d98d" stopOpacity=".3" /><stop offset="1" stopColor="#c8d98d" stopOpacity="0" /></radialGradient>
+        <radialGradient id="agent-glow"><stop stopColor="var(--appearance-icon)" stopOpacity=".3" /><stop offset="1" stopColor="var(--appearance-icon)" stopOpacity="0" /></radialGradient>
       </defs>
       {nodes.filter(node => node.parentId).map(node => {
         const child = points[node.id];
-        const parent = node.parentId === 'main' ? { x: 180, y: 130 } : points[node.parentId!];
+        const parent = node.parentId === 'main' ? { x: 280, y: 220 } : points[node.parentId!];
         if (!child || !parent) return null;
-        return <line key={`link-${node.id}`} className={`graph-link graph-link-${node.kind}`} x1={parent.x} y1={parent.y} x2={child.x} y2={child.y} />;
+        const dx = child.x - parent.x;
+        const dy = child.y - parent.y;
+        const distance = Math.max(1, Math.hypot(dx, dy));
+        const bend = Math.min(9, distance * 0.08);
+        const controlX = (parent.x + child.x) / 2 - dy / distance * bend;
+        const controlY = (parent.y + child.y) / 2 + dx / distance * bend;
+        const edgePath = `M ${parent.x} ${parent.y} Q ${controlX} ${controlY} ${child.x} ${child.y}`;
+        return <path
+          key={`link-${node.id}`}
+          className={`graph-link graph-link-${node.kind}${node.status === 'running' ? ' graph-link-active' : ''}`}
+          d={edgePath}
+        />;
       })}
       {nodes.map(node => {
-        const point = node.kind === 'main' ? { x: 180, y: 130 } : points[node.id];
+        const point = node.kind === 'main' ? { x: 280, y: 220 } : points[node.id];
         if (!point) return null;
         if (node.kind === 'main') return (
           <g key={node.id} className="graph-main-node">
@@ -1846,24 +2742,39 @@ function WorkspaceGraph({ sessions, agents, onOpenSession, onViewAgents }: {
             <circle className="graph-core" cx={point.x} cy={point.y} r="7" />
           </g>
         );
-        const conversation = node.kind === 'conversation';
+        const description = node.kind === 'conversation' ? 'Open conversation'
+          : node.kind === 'project' ? 'Open project details'
+            : node.kind === 'profile' ? 'Open agent conversation'
+              : 'Open subagent conversation';
+        const activate = () => {
+          if (node.kind === 'conversation' || node.kind === 'agent') onOpenSession(node.sessionId!);
+          else if (node.kind === 'project') onOpenProject(node.projectId!);
+          else if (node.kind === 'profile') {
+            const profile = profiles.find(item => item.id === node.agentId);
+            if (profile) onOpenProfile(profile);
+          }
+        };
         return (
           <g
             key={node.id}
             className={`graph-node graph-node-${node.kind}${node.status === 'running' ? ' graph-node-active' : ''}`}
             role="button"
             tabIndex={0}
-            aria-label={`${conversation ? 'Open conversation' : 'View subagent'}: ${node.label}`}
-            onClick={() => conversation ? onOpenSession(node.sessionId!) : onViewAgents()}
+            aria-label={`${description}: ${node.label}`}
+            onClick={activate}
             onKeyDown={event => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                conversation ? onOpenSession(node.sessionId!) : onViewAgents();
+                activate();
               }
             }}
           >
             <title>{node.label}</title>
-            <circle cx={point.x} cy={point.y} r={conversation ? 5.5 : 4} />
+            {node.kind === 'project'
+              ? <rect x={point.x - 6} y={point.y - 6} width="12" height="12" rx="2" />
+              : node.kind === 'conversation'
+                ? <rect x={point.x - 4} y={point.y - 5} width="8" height="10" rx="1.5" />
+                : <circle cx={point.x} cy={point.y} r={node.kind === 'profile' ? 5 : 4} />}
           </g>
         );
       })}
@@ -1952,6 +2863,236 @@ function TaskCard({ run, runAgents, onStop, onRestart, onGuide, onOpenSession }:
           </>}
       </div>
     </article>
+  );
+}
+
+function WorkspaceDrawer({ openRequest, projectOpenRequest, projectToOpen, openThreadRequest, threadToOpen, currentView, onOpenIDE, projects, profiles, subagents, selectedProjectId, selectedAgentId, onSelectProject, onSelectAgent, onCreateProject, onCreateAgent, onOpenProfile, onOpenSubagent, onArchiveSubagent, onRestoreProject, onArchiveProject, onDeleteProject, onProjectUpdated, unreadThreadCount, onFailure, request }: {
+  openRequest: number;
+  projectOpenRequest: number;
+  projectToOpen: string;
+  openThreadRequest: number;
+  threadToOpen: string;
+  currentView: ViewId;
+  onOpenIDE: () => void;
+  projects: WorkspaceProject[];
+  profiles: AgentProfile[];
+  subagents: WorkspaceAgent[];
+  selectedProjectId: string;
+  selectedAgentId: string;
+  onSelectProject: (id: string) => void;
+  onSelectAgent: (id: string) => void;
+  onCreateProject: (name: string) => Promise<void>;
+  onCreateAgent: (profile: { projectId: string; name: string; emoji: string; instructions: string }) => Promise<void>;
+  onOpenProfile: (profile: AgentProfile) => void;
+  onOpenSubagent: (id: string) => void;
+  onArchiveSubagent: (id: string) => void;
+  onRestoreProject: (id: string) => Promise<void>;
+  onArchiveProject: (id: string) => Promise<boolean>;
+  onDeleteProject: (id: string, name: string) => Promise<boolean>;
+  onProjectUpdated: (project: WorkspaceProject) => void;
+  unreadThreadCount: number;
+  onFailure: (failure: unknown) => void;
+  request: typeof api;
+}) {
+  const [section, setSection] = useState<'agents' | 'projects' | 'cron' | 'threads' | null>(null);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [projectName, setProjectName] = useState('');
+  const [agentName, setAgentName] = useState('');
+  const [emoji, setEmoji] = useState('🤖');
+  const [instructions, setInstructions] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [archivedProjects, setArchivedProjects] = useState<WorkspaceProject[]>([]);
+  const [showArchivedProjects, setShowArchivedProjects] = useState(false);
+  const [projectDetailsId, setProjectDetailsId] = useState('');
+  useEffect(() => {
+    if (openRequest > 0) setSection('agents');
+  }, [openRequest]);
+  useEffect(() => {
+    if (projectOpenRequest > 0) {
+      setSection('projects');
+      setProjectDetailsId(projectToOpen);
+    }
+  }, [projectOpenRequest, projectToOpen]);
+  useEffect(() => {
+    if (openThreadRequest > 0) setSection('threads');
+  }, [openThreadRequest]);
+  useEffect(() => {
+    if (projectDetailsId && !projects.some(project => project.id === projectDetailsId)) setProjectDetailsId('');
+  }, [projectDetailsId, projects]);
+  const selectedProject = projects.find(project => project.id === selectedProjectId);
+  const projectProfiles = profiles.filter(profile => profile.projectId === selectedProjectId);
+  const projectSubagents = subagents.filter(agent => selectedProjectId ? agent.projectId === selectedProjectId : !agent.projectId);
+  const toggleArchivedProjects = async () => {
+    const show = !showArchivedProjects;
+    setShowArchivedProjects(show);
+    if (!show) return;
+    setFormError('');
+    try {
+      const allProjects = await request<WorkspaceProject[]>('/api/projects?includeArchived=true');
+      setArchivedProjects(allProjects.filter(project => Boolean(project.archivedAt)));
+    } catch (failure) {
+      setFormError(failure instanceof Error ? failure.message : 'Archived projects could not be loaded.');
+      onFailure(failure);
+    }
+  };
+  const restoreArchivedProject = async (id: string) => {
+    setSaving(true);
+    setFormError('');
+    try {
+      await onRestoreProject(id);
+      setArchivedProjects(current => current.filter(project => project.id !== id));
+    } catch (failure) {
+      setFormError(failure instanceof Error ? failure.message : 'Project could not be restored.');
+      onFailure(failure);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const deleteArchivedProject = async (project: WorkspaceProject) => {
+    setSaving(true);
+    setFormError('');
+    try {
+      if (await onDeleteProject(project.id, project.name)) {
+        setArchivedProjects(current => current.filter(item => item.id !== project.id));
+      }
+    } catch (failure) {
+      setFormError(failure instanceof Error ? failure.message : 'Archived project could not be deleted.');
+      onFailure(failure);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const addProject = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setFormError('');
+    try {
+      await onCreateProject(projectName);
+      setProjectName('');
+    } catch (failure) {
+      setFormError(failure instanceof Error ? failure.message : 'Project could not be created.');
+      onFailure(failure);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const addAgent = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedProjectId) {
+      setFormError('Create or select a project first.');
+      return;
+    }
+    setSaving(true);
+    setFormError('');
+    try {
+      await onCreateAgent({ projectId: selectedProjectId, name: agentName, emoji, instructions });
+      setAgentName('');
+      setInstructions('');
+      setBuilderOpen(false);
+    } catch (failure) {
+      setFormError(failure instanceof Error ? failure.message : 'Agent could not be created.');
+      onFailure(failure);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <>
+      <aside className="workspace-rail" aria-label="Agents and projects">
+        <button type="button" className={section === 'agents' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'agents' ? null : 'agents')} aria-label="Open agents" aria-expanded={section === 'agents'} title="Agents"><Users size={17} /></button>
+        <button type="button" className={section === 'projects' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'projects' ? null : 'projects')} aria-label="Open projects" aria-expanded={section === 'projects'} title="Projects"><FolderOpen size={17} /></button>
+        <button type="button" className={`workspace-rail-button${currentView === 'ide' ? ' rail-active' : ''}`} onClick={() => { setSection(null); onOpenIDE(); }} aria-label="Open Agent IDE" aria-current={currentView === 'ide' ? 'page' : undefined} title="Agent IDE"><TerminalSquare size={17} /></button>
+        <button type="button" className={section === 'cron' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'cron' ? null : 'cron')} aria-label="Open cron jobs and reminders" aria-expanded={section === 'cron'} title="Cron and reminders"><Clock3 size={17} /></button>
+        <button type="button" className={section === 'threads' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'threads' ? null : 'threads')} aria-label={`Open agent collaboration threads${unreadThreadCount ? `, ${unreadThreadCount} unread help requests` : ''}`} aria-expanded={section === 'threads'} title="Agent threads"><MessagesSquare size={17} />{unreadThreadCount > 0 && <span className="workspace-rail-unread-dot" aria-label={`${unreadThreadCount} unread help requests`} />}</button>
+      </aside>
+      <section className={`workspace-drawer${section === 'cron' || section === 'threads' ? ' workspace-drawer-wide' : ''}`} data-open={section !== null} aria-label={section === 'projects' ? 'Projects' : section === 'cron' ? 'Cron and reminders' : section === 'threads' ? 'Agent threads' : 'Agents'} aria-hidden={section === null} inert={section === null}>
+        <header className="workspace-drawer-header">
+          <div><span className="eyebrow">{section === 'projects' ? 'WORKSPACES' : section === 'cron' ? 'AUTONOMOUS OPERATIONS' : section === 'threads' ? 'MULTI-AGENT COLLABORATION' : 'WORKSPACE AGENTS'}</span><h2>{section === 'projects' ? 'Projects' : section === 'cron' ? 'Cron' : section === 'threads' ? 'Threads' : 'Agents'}</h2></div>
+          <button className="icon-button small" type="button" onClick={() => setSection(null)} aria-label="Close workspace drawer"><X size={15} /></button>
+        </header>
+        {section === 'cron' ? <CronPanel request={request} /> : section === 'projects' ? (
+          projectDetailsId && projects.some(project => project.id === projectDetailsId) ? (
+            <>
+              <button type="button" className="text-button project-management-back" onClick={() => setProjectDetailsId('')}><ArrowRight size={13} />All projects</button>
+              {projects.filter(project => project.id === projectDetailsId).map(project => <ProjectsPanel
+                key={project.id}
+                project={project}
+                profiles={profiles.filter(profile => profile.projectId === project.id)}
+                agents={subagents}
+                request={request}
+                onArchive={onArchiveProject}
+                onOpenIDE={() => { setSection(null); onOpenIDE(); }}
+                onProjectUpdated={onProjectUpdated}
+              />)}
+            </>
+          ) : <>
+            <div className="workspace-drawer-list">
+              {projects.map(project => <button key={project.id} className={`drawer-project${project.id === selectedProjectId ? ' drawer-item-active' : ''}`} type="button" onClick={() => setProjectDetailsId(project.id)}>
+                <FolderOpen size={16} /><span><strong>{project.name}</strong><small>{profiles.filter(profile => profile.projectId === project.id).length} agents</small></span>
+              </button>)}
+              {projects.length === 0 && <p className="drawer-empty">No projects yet. Create one to give agents a dedicated workspace.</p>}
+            </div>
+            <button className="text-button drawer-archived-toggle" type="button" onClick={() => void toggleArchivedProjects()} aria-expanded={showArchivedProjects}>
+              {showArchivedProjects ? 'Hide archived projects' : 'Show archived projects'}
+            </button>
+            {showArchivedProjects && <div className="workspace-drawer-list archived-project-list">
+              {archivedProjects.map(project => <div key={project.id} className="drawer-archived-project">
+                <span><strong>{project.name}</strong><small>Archived {formatRelative(project.archivedAt ?? project.createdAt)}</small></span>
+                <button type="button" className="icon-button small" onClick={() => void restoreArchivedProject(project.id)} disabled={saving} aria-label={`Restore ${project.name}`} title="Restore project"><RefreshCw size={14} /></button>
+                <button type="button" className="icon-button small" onClick={() => void deleteArchivedProject(project)} disabled={saving} aria-label={`Permanently delete ${project.name}`} title="Permanently delete project"><X size={14} /></button>
+              </div>)}
+              {archivedProjects.length === 0 && <p className="drawer-empty">No archived projects.</p>}
+            </div>}
+            <form className="drawer-create-form" onSubmit={event => void addProject(event)}>
+              <label htmlFor="new-project-name">New project</label>
+              <div><input id="new-project-name" value={projectName} onChange={event => setProjectName(event.target.value)} maxLength={80} placeholder="Project name" required /><button className="button button-primary" type="submit" disabled={saving || !projectName.trim()} aria-label="Create project"><Plus size={15} /></button></div>
+              {formError && <p role="alert">{formError}</p>}
+            </form>
+          </>
+        ) : section === 'threads' ? (
+          <ThreadsPanel request={request} projects={projects} profiles={profiles} selectedProjectId={selectedProjectId} requestedThreadId={threadToOpen} />
+        ) : (
+          <>
+            <div className="drawer-project-picker">
+              <label htmlFor="agent-project-select">Project workspace</label>
+              <select id="agent-project-select" value={selectedProjectId} onChange={event => onSelectProject(event.target.value)}>
+                <option value="">Home · default workspace</option>
+                {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>
+            </div>
+            <div className="workspace-drawer-list">
+              {projectProfiles.map(profile => <button key={profile.id} className={`drawer-agent${profile.id === selectedAgentId ? ' drawer-item-active' : ''}`} type="button" onClick={() => { onSelectAgent(profile.id); onOpenProfile(profile); }}>
+                <span className="drawer-agent-avatar">{profile.emoji}</span><span><strong>{profile.name}</strong><small>{selectedProject?.name ?? 'Project agent'}</small></span><ArrowRight size={14} />
+              </button>)}
+              {projectProfiles.length === 0 && <p className="drawer-empty">No agents in this project. Use + to create one.</p>}
+            </div>
+            <section className="drawer-subagents">
+              <h3>Subagents</h3>
+              {projectSubagents.map(agent => <div className="drawer-subagent" key={agent.sessionId}>
+                <button type="button" className="drawer-subagent-open" onClick={() => onOpenSubagent(agent.sessionId)} title="Open subagent conversation"><Bot size={15} /><span><strong>{agent.task}</strong><small>{agent.status}</small></span></button>
+                {agent.status !== 'running' && <button type="button" className="icon-button small" onClick={() => onArchiveSubagent(agent.sessionId)} aria-label={`Archive ${agent.task}`} title="Archive subagent"><Archive size={14} /></button>}
+              </div>)}
+              {projectSubagents.length === 0 && <p className="drawer-empty">Subagents created by these project sessions appear here.</p>}
+            </section>
+            <button className="workspace-agent-add" type="button" onClick={() => { setFormError(''); setBuilderOpen(true); }} disabled={!selectedProjectId} aria-label="Create agent" title="Create agent"><Plus size={20} /></button>
+          </>
+        )}
+      </section>
+      {builderOpen && <div className="identity-backdrop" onMouseDown={() => setBuilderOpen(false)}>
+        <section className="identity-dialog agent-builder-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-builder-title" onMouseDown={event => event.stopPropagation()}>
+          <header className="identity-dialog-header"><span className="identity-dialog-icon"><Users size={19} /></span><div><div className="eyebrow">NEW WORKSPACE AGENT</div><h2 id="agent-builder-title">Build an agent</h2></div><button className="icon-button small" type="button" onClick={() => setBuilderOpen(false)} aria-label="Close agent builder"><X size={16} /></button></header>
+          <form onSubmit={event => void addAgent(event)}>
+            <label className="identity-field"><span>Agent name</span><input value={agentName} onChange={event => setAgentName(event.target.value)} maxLength={80} required /></label>
+            <fieldset className="identity-field"><legend>Avatar</legend><div className="identity-icons" role="group" aria-label="Choose agent avatar">{['🤖', '🧠', '🧭', '🌿', '✨'].map(icon => <button key={icon} className={`identity-icon-choice${emoji === icon ? ' identity-icon-selected' : ''}`} type="button" onClick={() => setEmoji(icon)} aria-label={`Choose ${icon}`} aria-pressed={emoji === icon}>{icon}</button>)}</div></fieldset>
+            <label className="identity-field"><span>Role, behavior, and operating instructions</span><textarea value={instructions} onChange={event => setInstructions(event.target.value)} maxLength={20_000} rows={12} required placeholder="Describe what this agent does, how it should work, and its boundaries." /></label>
+            <p className="drawer-builder-note">Creates a project-scoped workspace and a separate conversation history. The gateway’s configured tool and security policy still applies.</p>
+            {formError && <div className="notice notice-error" role="alert">{formError}</div>}
+            <footer className="identity-dialog-actions"><button className="button button-secondary" type="button" onClick={() => setBuilderOpen(false)}>Cancel</button><button className="button button-primary" type="submit" disabled={saving || !agentName.trim() || !instructions.trim()}>{saving ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{saving ? 'Creating' : 'Create agent'}</button></footer>
+          </form>
+        </section>
+      </div>}
+    </>
   );
 }
 
@@ -2060,7 +3201,7 @@ function MemoryInUseCard({ host, processRssMb }: { host?: HostResourceSnapshot; 
   const available = Math.max(0, total - used);
   const circumference = 2 * Math.PI * 22;
   const segments = [
-    { name: 'Symbiote', value: process, color: '#789771' },
+    { name: 'Symbiote', value: process, color: 'var(--appearance-icon)' },
     { name: 'Other used', value: other, color: '#d18a68' },
     { name: 'Available', value: available, color: '#c9cabe' },
   ];
@@ -2096,6 +3237,15 @@ function MetricPlot({ series, maxValue, area, label }: {
   const height = 48;
   const values = series.flatMap(item => item.values.slice(-60)).filter(Number.isFinite);
   const maximum = Math.max(1, maxValue ?? Math.max(0, ...values) * 1.1);
+  const colorForSeries = (name: string, index: number) => {
+    if (index === 0) return 'var(--appearance-primary)';
+    if (index === 1) return 'var(--appearance-icon)';
+    let hash = 2166136261;
+    for (let character = 0; character < name.length; character++) {
+      hash = Math.imul(hash ^ name.charCodeAt(character), 16777619);
+    }
+    return `hsl(${(hash >>> 0) % 360} 68% 58%)`;
+  };
   const pathFor = (samples: number[], closeArea = false) => {
     const points = samples.slice(-60).map((value, index, all) => {
       const x = all.length < 2 ? width : index / (all.length - 1) * width;
@@ -2110,12 +3260,15 @@ function MetricPlot({ series, maxValue, area, label }: {
     <div className="metric-plot">
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img" aria-label={label}>
         {[12, 24, 36].map(y => <line key={y} x1="0" y1={y} x2={width} y2={y} className="metric-plot-grid" />)}
-        {series.map((item, index) => <g key={item.name}>
-          {area && index === 0 && <path d={pathFor(item.values, true)} fill={item.color} fillOpacity=".15" />}
-          <path d={pathFor(item.values)} fill="none" stroke={item.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-        </g>)}
+        {series.map((item, index) => {
+          const color = colorForSeries(item.name, index);
+          return <g key={item.name}>
+            {area && index === 0 && <path d={pathFor(item.values, true)} fill={color} fillOpacity=".15" />}
+            <path d={pathFor(item.values)} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+          </g>;
+        })}
       </svg>
-      {series.length > 1 && <div className="metric-plot-legend">{series.map(item => <span key={item.name}><i style={{ background: item.color }} />{item.name}</span>)}</div>}
+      {series.length > 1 && <div className="metric-plot-legend">{series.map((item, index) => <span key={item.name}><i style={{ background: colorForSeries(item.name, index) }} />{item.name}</span>)}</div>}
     </div>
   );
 }
@@ -2135,6 +3288,9 @@ function ChatView(props: {
   session?: SessionSummary;
   sessions: SessionSummary[];
   messages: ChatMessage[];
+  agentName?: string;
+  agentEmoji?: string;
+  agentAvatarDataUrl?: string;
   draft: string;
   sending: boolean;
   onDraft: (value: string) => void;
@@ -2146,7 +3302,7 @@ function ChatView(props: {
   bottomRef: RefObject<HTMLDivElement | null>;
   creatingSession: boolean;
 }) {
-  const { session, sessions, messages, draft, sending, onDraft, onSubmit, onStop, onNewSession, onSelectSession, onArchiveSession, bottomRef, creatingSession } = props;
+  const { session, sessions, messages, agentName, agentEmoji, agentAvatarDataUrl, draft, sending, onDraft, onSubmit, onStop, onNewSession, onSelectSession, onArchiveSession, bottomRef, creatingSession } = props;
   const exportSession = () => {
     const transcript = [
       `# ${session?.label || 'Symbiote conversation'}`,
@@ -2180,29 +3336,46 @@ function ChatView(props: {
             {!sessions.length && <option value="">No saved sessions</option>}
             {sessions.map(item => <option key={item.id} value={item.id}>{item.label || item.id}</option>)}
           </select>
-          <button className="button button-secondary export-button" onClick={exportSession} disabled={!session || !messages.length} title="Download this conversation as Markdown"><Download size={15} /><span className="button-label">Export</span></button>
-          <button className="button button-secondary" onClick={() => session && void onArchiveSession(session.id)} disabled={!session} title="Move this conversation to the archive"><Archive size={15} /><span className="button-label">Archive</span></button>
-          <button className="button button-primary" onClick={onNewSession} disabled={creatingSession}><Plus size={16} /><span className="button-label">New</span></button>
+          <button className="button button-secondary export-button" onClick={exportSession} disabled={!session || !messages.length} title="Export conversation" aria-label="Export conversation"><Download size={15} /></button>
+          <button className="button button-secondary" onClick={() => session && void onArchiveSession(session.id)} disabled={!session} title="Archive conversation" aria-label="Archive conversation"><Archive size={15} /></button>
+          <button className="button button-primary" onClick={onNewSession} disabled={creatingSession} title="New conversation" aria-label="New conversation"><Plus size={16} /></button>
         </div>}
       />
       <section className="chat-shell" aria-label="Conversation">
         <div className="chat-stream" aria-live="polite" aria-relevant="additions text">
           {messages.length ? messages.map(message => (
             <article key={message.id} className={`message-row message-${message.role}`}>
-              <div className={`message-avatar${message.role === 'assistant' ? ' message-avatar-agent' : ''}`} aria-hidden="true">{message.role === 'assistant' ? <Bot size={17} /> : 'A'}</div>
+              <div className={`message-avatar${message.role === 'assistant' ? ' message-avatar-agent' : ''}`} aria-hidden="true">
+                {message.role === 'assistant'
+                  ? session?.sessionKind === 'subagent' ? <Bot size={17} /> : <AgentAvatar emoji={agentEmoji} image={agentAvatarDataUrl} size={17} />
+                  : 'A'}
+              </div>
               <div className="message-main">
-                <div className="message-meta"><strong>{message.role === 'assistant' ? configLabel() : 'You'}</strong><span>{message.timestamp ? formatRelative(message.timestamp) : ''}</span>{message.role === 'assistant' && message.iterations !== undefined && <span>{message.iterations} {message.iterations === 1 ? 'step' : 'steps'}</span>}</div>
+                <div className="message-meta"><strong>{message.role === 'assistant' ? configLabel(agentName, session?.sessionKind === 'subagent') : 'You'}</strong><span>{message.timestamp ? formatRelative(message.timestamp) : ''}</span>{message.role === 'assistant' && message.iterations !== undefined && <span>{message.iterations} {message.iterations === 1 ? 'step' : 'steps'}</span>}</div>
                 {message.content && <MessageBody content={message.content} />}
                 {message.interrupted && <div className="message-interrupted" role="status">This reply did not finish. Your message is preserved; you can try again.</div>}
-                {!!message.toolCalls?.length && (
+                {message.role === 'user' && message.tokensIn !== undefined && <div className="message-usage" title={message.tokenCountsEstimated ? 'Approximate count based on message length.' : 'Input tokens'}>
+                  <span><Sparkles size={12} />{message.tokenCountsEstimated ? '~' : ''}{message.tokensIn} input tokens</span>
+                </div>}
+                {message.role === 'assistant' && !message.streaming && <div className="message-usage" aria-label="Response usage">
+                  <span><Clock3 size={12} />{formatChatElapsed(message.durationMs)}</span>
+                  {message.tokensOut !== undefined && <span title={message.tokenCountsEstimated ? 'Approximate count based on response length.' : 'Provider-reported output token count'}><Sparkles size={12} />{message.tokenCountsEstimated ? '~' : ''}{message.tokensOut} output tokens</span>}
+                  <span><Wrench size={12} />{message.toolCalls?.length ?? 0} tool {(message.toolCalls?.length ?? 0) === 1 ? 'call' : 'calls'}</span>
+                </div>}
+                {message.streaming && message.toolActivity?.length ? (
+                  <details className="tool-activity">
+                    <summary><span className="thinking-pulse" />{message.activeTool ? <Activity size={14} /> : message.thinking ? <Brain size={14} /> : <Wrench size={14} />}{message.activeTool ? `Using ${message.activeTool}` : message.thinking ? 'Thinking' : `${message.toolActivity.length} tool ${message.toolActivity.length === 1 ? 'action' : 'actions'}`}<ChevronDown size={14} /></summary>
+                    <div className="tool-activity-list">{message.toolActivity.map((tool, index) => <div key={`${tool.name}-${index}`}><code>{tool.name}</code><span>{tool.status === 'running' ? 'Running now' : 'Completed'}</span></div>)}</div>
+                  </details>
+                ) : !!message.toolCalls?.length && (
                   <details className="tool-activity">
                     <summary><Wrench size={14} />{message.toolCalls.length} {message.toolCalls.length === 1 ? 'tool action' : 'tool actions'}<ChevronDown size={14} /></summary>
                     <div className="tool-activity-list">{message.toolCalls.map((call, index) => <div key={`${call.name}-${index}`}><code>{call.name}</code><span>{call.result.slice(0, 280) || 'Completed'}</span></div>)}</div>
                   </details>
                 )}
-                {message.streaming && (message.thinking || message.activeTools?.length) && <div className="message-live-activity" aria-live="polite">
+                {message.streaming && message.thinking && !message.toolActivity?.length && <div className="message-live-activity" aria-live="polite">
                   <span className="thinking-pulse" />
-                  {message.activeTools?.length ? `Using ${message.activeTools.join(', ')}` : 'Thinking'}
+                  Thinking
                 </div>}
               </div>
             </article>
@@ -2218,7 +3391,7 @@ function ChatView(props: {
               </div>
             </div>
           )}
-          {sending && <div className="thinking-row"><span className="thinking-pulse" /><span>Agent is working</span></div>}
+          {sending && !messages.some(message => message.role === 'assistant' && message.streaming) && <div className="thinking-row"><span className="thinking-pulse" /><span>Agent is working</span></div>}
           <div ref={bottomRef} />
         </div>
         <form className="composer" onSubmit={onSubmit}>
@@ -2260,52 +3433,69 @@ interface BrowserFrame {
   image: string;
 }
 
+const DEFAULT_BROWSER_HOMEPAGE = 'https://symbiote.artifactvirtual.com';
+
 function BrowserView() {
   const [frame, setFrame] = useState<BrowserFrame | null>(null);
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState(DEFAULT_BROWSER_HOMEPAGE);
   const [inputText, setInputText] = useState('');
   const [key, setKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const lastMoveAt = useRef(0);
   const imageRef = useRef<HTMLImageElement>(null);
   const currentFrame = useRef<BrowserFrame | null>(null);
+  const actionInFlight = useRef(false);
+  const snapshotInFlight = useRef(false);
+  const loadingRef = useRef(loading);
   currentFrame.current = frame;
+  loadingRef.current = loading;
 
   const capture = useCallback(async () => {
-    const next = await api<BrowserFrame>('/api/browser/snapshot');
-    setFrame(next);
-    setAddress(next.url);
-    setError('');
+    if (snapshotInFlight.current) return;
+    snapshotInFlight.current = true;
+    try {
+      const next = await api<BrowserFrame>('/api/browser/snapshot');
+      setFrame(next);
+      setAddress(next.url);
+      setError('');
+    } finally {
+      snapshotInFlight.current = false;
+    }
   }, []);
 
   useEffect(() => {
     void capture().catch(failure => setError(failure instanceof Error ? failure.message : 'Browser is not available.'));
-    const timer = window.setInterval(() => void capture().catch(failure => setError(failure instanceof Error ? failure.message : 'Could not refresh browser.')), 5000);
+    const timer = window.setInterval(() => {
+      if (!loadingRef.current) void capture().catch(failure => setError(failure instanceof Error ? failure.message : 'Could not refresh browser.'));
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [capture]);
 
-  const navigateTo = async (event?: FormEvent) => {
+  const navigateTo = async (event?: FormEvent, requestedAddress?: string) => {
     event?.preventDefault();
-    if (!address.trim() || loading) return;
+    const targetAddress = (requestedAddress ?? address).trim();
+    if (!targetAddress || loading || actionInFlight.current) return;
+    actionInFlight.current = true;
     setLoading(true);
     setError('');
     try {
       const next = await api<Pick<BrowserFrame, 'url' | 'title'>>('/api/browser/navigate', {
         method: 'POST',
-        body: JSON.stringify({ url: address.trim() }),
+        body: JSON.stringify({ url: targetAddress }),
       });
       setAddress(next.url);
       await capture();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Browser navigation failed.');
     } finally {
+      actionInFlight.current = false;
       setLoading(false);
     }
   };
 
   const act = async (action: string, values: Record<string, unknown>) => {
-    if (loading) return;
+    if (loading || actionInFlight.current) return;
+    actionInFlight.current = true;
     setLoading(true);
     setError('');
     try {
@@ -2318,6 +3508,7 @@ function BrowserView() {
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Browser action failed.');
     } finally {
+      actionInFlight.current = false;
       setLoading(false);
     }
   };
@@ -2362,20 +3553,13 @@ function BrowserView() {
           <button className="icon-button" type="submit" disabled={loading || !address.trim()} aria-label="Go to address" title="Go">{loading ? <LoaderCircle size={15} className="spin" /> : <ArrowRight size={16} />}</button>
         </form>
         <div className="browser-titlebar"><span className="browser-status-dot" /><strong>{frame?.title || 'Browser session'}</strong><span>{frame?.viewport ? `${frame.viewport.width} × ${frame.viewport.height}` : ''}</span><button className="icon-button small" onClick={() => void capture().catch(failure => setError(failure instanceof Error ? failure.message : 'Could not capture the page.'))} aria-label="Refresh screenshot" title="Refresh"><RefreshCw size={14} /></button></div>
-        {error && <div className="browser-error" role="alert"><span>{error}</span><button className="button button-secondary" onClick={() => { setAddress('https://example.com'); void api<Pick<BrowserFrame, 'url' | 'title'>>('/api/browser/navigate', { method: 'POST', body: JSON.stringify({ url: 'https://example.com' }) }).then(capture).catch(failure => setError(failure instanceof Error ? failure.message : 'Could not open the browser.')); }}>Open browser</button></div>}
+        {error && <div className="browser-error" role="alert"><span>{error}</span><button className="button button-secondary" onClick={() => void navigateTo(undefined, DEFAULT_BROWSER_HOMEPAGE)}>Open homepage</button></div>}
         <div className="browser-viewport">
           {frame
             ? <img ref={imageRef} src={frame.image} alt={`Interactive browser page: ${frame.title}`} draggable={false}
               onClick={event => { const point = viewportPoint(event); if (point) void act('click', point); }}
-              onPointerMove={event => {
-                if (event.buttons) return;
-                const now = Date.now();
-                if (now - lastMoveAt.current < 180) return;
-                lastMoveAt.current = now;
-                const point = viewportPoint(event);
-                if (point) void act('move', point);
-              }} />
-            : <div className="browser-empty"><Globe size={25} /><span>{loading ? 'Loading page…' : 'Open a website to begin browsing.'}</span><button className="button button-secondary" onClick={() => { setAddress('https://example.com'); void api('/api/browser/navigate', { method: 'POST', body: JSON.stringify({ url: 'https://example.com' }) }).then(capture).catch(failure => setError(failure instanceof Error ? failure.message : 'Could not open the browser.')); }}>Open example.com</button></div>}
+              />
+            : <div className="browser-empty"><Globe size={25} /><span>{loading ? 'Loading page…' : 'Open a website to begin browsing.'}</span><button className="button button-secondary" onClick={() => void navigateTo(undefined, DEFAULT_BROWSER_HOMEPAGE)}>Open Symbiote homepage</button></div>}
         </div>
         <div className="browser-controls">
           <form onSubmit={event => { event.preventDefault(); if (inputText) { void act('type', { text: inputText }); setInputText(''); } }}>
@@ -2395,8 +3579,8 @@ function BrowserView() {
   );
 }
 
-function configLabel(): string {
-  return 'Symbiote';
+function configLabel(name?: string, subagent = false): string {
+  return subagent ? 'Subagent' : name || 'Symbiote';
 }
 
 function SessionsView(props: {
@@ -2613,7 +3797,7 @@ function SettingsView({ config, status }: { config: GatewayConfig | null; status
           {firewallStatus && <p className="settings-token-error" role="status">{firewallStatus}</p>}
         </div>}
       </section>
-      <div className="notice notice-info"><ShieldCheck size={16} /><span>Credentials are never sent to the browser. For safety, configuration changes are made in your local config file—not through this page.</span></div>
+      <div className="notice notice-info"><ShieldCheck size={16} /><span>Runtime configuration secrets are never revealed here. Configuration changes remain in the local config file; Google Workspace authorization is managed separately in Integrations.</span></div>
     </div>
   );
 }

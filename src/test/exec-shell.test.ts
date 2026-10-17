@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { execTool } from '../tools/builtin/exec.js';
 import { ProcessManager } from '../tools/builtin/process.js';
-import { classifySession } from '../tools/sandbox.js';
+import { classifySession, configureSandbox, createSandboxedRegistry } from '../tools/sandbox.js';
 import { hintForFailure } from '../runtime/platform.js';
 
 test('exec runs a shell command on this host', async () => {
@@ -20,12 +23,60 @@ test('exec does not block commands that mention the project name', async () => {
   assert.doesNotMatch(String(out), /Cannot restart\/kill/);
 });
 
-test('sandbox grants full access by default', () => {
-  const tier = classifySession({
-    sessionId: 's', adapterId: 'discord-main', channelType: 'discord', chatType: 'group',
+test('sandbox defaults to configured tiers and grants admin access only to owners', () => {
+  configureSandbox(undefined);
+  const context = {
+    sessionId: 's', adapterId: 'discord-main', channelType: 'discord', chatType: 'group' as const,
     senderId: 'x', isOwner: false,
-  });
-  assert.equal(tier, 'admin');
+  };
+  assert.equal(classifySession(context), 'restricted');
+  assert.equal(classifySession({ ...context, isOwner: true }), 'admin');
+  assert.equal(classifySession({ ...context, adapterId: 'subagent', channelType: 'internal' }), 'standard');
+});
+
+test('sandbox config can tighten owner and internal-session access', () => {
+  configureSandbox({ enabled: true, ownerAccess: false, internalTier: 'restricted', nonOwnerTier: 'restricted' });
+  const context = {
+    sessionId: 's', adapterId: 'discord-main', channelType: 'discord', chatType: 'direct' as const,
+    senderId: 'owner', isOwner: true,
+  };
+  assert.equal(classifySession(context), 'restricted');
+  assert.equal(classifySession({ ...context, adapterId: 'subagent', channelType: 'internal' }), 'restricted');
+  configureSandbox(undefined);
+});
+
+test('project sandbox defaults shell workdir to the workspace and rejects outside paths', async () => {
+  configureSandbox(undefined);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-project-sandbox-'));
+  const outside = path.dirname(root);
+  const context = {
+    sessionId: 'project-session',
+    adapterId: 'project-ide',
+    channelType: 'internal',
+    chatType: 'direct' as const,
+    senderId: 'webapp-user',
+    isOwner: false,
+    workspaceRoot: root,
+  };
+  let executedWorkdir = '';
+  const inner = {
+    list: () => [],
+    toProviderFormat: () => [],
+    execute: async (_name: string, input: Record<string, unknown>) => {
+      executedWorkdir = String(input.workdir);
+      return 'ok';
+    },
+  };
+  try {
+    const sandbox = createSandboxedRegistry(inner, context);
+    assert.equal(await sandbox.execute('exec', { command: 'git status' }), 'ok');
+    assert.equal(executedWorkdir, root);
+    const denied = JSON.parse(await sandbox.execute('exec', { command: 'git status', workdir: outside })) as { sandbox: boolean };
+    assert.equal(denied.sandbox, true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    configureSandbox(undefined);
+  }
 });
 
 test('POSIX-style commands work whichever shell the host defaults to', async () => {

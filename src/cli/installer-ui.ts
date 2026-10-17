@@ -29,9 +29,15 @@ function json(res: http.ServerResponse, data: unknown, status = 200): void {
   res.end(JSON.stringify(data));
 }
 
-function toSetupInput(payload: Record<string, unknown>): SetupInput {
-  const existing = fs.existsSync(path.resolve('symbiote.json')) ? loadConfig(path.resolve('symbiote.json')) : undefined;
-  const defaults = defaultSetupInput(existing);
+function toSetupInput(payload: Record<string, unknown>, configDirectory: string): SetupInput {
+  const configPath = path.join(configDirectory, 'symbiote.json');
+  const envPath = path.join(configDirectory, '.env');
+  const existing = fs.existsSync(configPath) ? loadConfig(configPath) : undefined;
+  const defaults = defaultSetupInput(existing, envPath);
+  if (!existing) {
+    defaults.workspace = path.join(configDirectory, 'workspace');
+    defaults.whatsappAuthDir = path.join(configDirectory, '.whatsapp-auth');
+  }
   const bool = (value: unknown, fallback = false) => value === true || value === 'true' || (value === undefined ? fallback : false);
   const num = (value: unknown, fallback: number) => {
     const parsed = Number(value);
@@ -97,9 +103,20 @@ function clientErrorMessage(err: unknown): string {
   return 'Installer request failed. Check the terminal for details.';
 }
 
-export async function startInstallerUi(port = 3010): Promise<http.Server> {
-  const existing = fs.existsSync(path.resolve('symbiote.json')) ? loadConfig(path.resolve('symbiote.json')) : undefined;
-  const defaults = defaultSetupInput(existing);
+export async function startInstallerUi(
+  port = 3010,
+  configDirectory = process.cwd(),
+  launchBrowser = true,
+): Promise<http.Server> {
+  const resolvedConfigDirectory = path.resolve(configDirectory);
+  const configPath = path.join(resolvedConfigDirectory, 'symbiote.json');
+  const envPath = path.join(resolvedConfigDirectory, '.env');
+  const existing = fs.existsSync(configPath) ? loadConfig(configPath) : undefined;
+  const defaults = defaultSetupInput(existing, envPath);
+  if (!existing) {
+    defaults.workspace = path.join(resolvedConfigDirectory, 'workspace');
+    defaults.whatsappAuthDir = path.join(resolvedConfigDirectory, '.whatsapp-auth');
+  }
   const htmlPath = installerHtmlCandidates.find(candidate => fs.existsSync(candidate));
   if (!htmlPath) {
     throw new Error('installer.html not found');
@@ -121,7 +138,7 @@ export async function startInstallerUi(port = 3010): Promise<http.Server> {
 
       if (method === 'POST' && pathname === '/api/setup') {
         const payload = JSON.parse(await readBody(req) || '{}') as Record<string, unknown>;
-        const result = writeSetupFiles(toSetupInput(payload));
+        const result = writeSetupFiles(toSetupInput(payload, resolvedConfigDirectory), configPath, envPath);
         return json(res, {
           ok: true,
           configPath: result.configPath,
@@ -149,8 +166,10 @@ export async function startInstallerUi(port = 3010): Promise<http.Server> {
     server.listen(port, '127.0.0.1', () => resolve());
   });
 
-  const url = `http://127.0.0.1:${port}`;
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Installer UI did not bind to a TCP port.');
+  const url = `http://127.0.0.1:${address.port}`;
   console.log(`Installer UI → ${url}`);
-  openBrowser(url);
+  if (launchBrowser) openBrowser(url);
   return server;
 }
