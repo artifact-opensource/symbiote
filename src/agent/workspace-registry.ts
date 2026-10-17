@@ -43,7 +43,6 @@ export interface WorkspaceAgentProfile {
   createdAt: number;
 }
 
-const MAX_PROJECT_FILE_BYTES = 1_000_000;
 const MAX_PROJECT_FILES = 10_000;
 const BLOCKED_PROJECT_PATH_SEGMENTS = new Set(['.agents', '.git', '.session', 'node_modules']);
 
@@ -196,14 +195,12 @@ export class WorkspaceRegistry {
     this.assertNoSymlink(root, relativePath);
     const stat = fs.statSync(absolutePath);
     if (!stat.isFile()) throw new Error('Only regular project files can be opened.');
-    if (stat.size > MAX_PROJECT_FILE_BYTES) throw new Error('Project files larger than 1 MB cannot be opened in the editor.');
     return { path: relativePath.replace(/\\/g, '/'), content: fs.readFileSync(absolutePath, 'utf8'), size: stat.size };
   }
 
   writeProjectFile(projectId: string, relativePath: string, content: string): { path: string; size: number; modifiedAt: number } {
     const { root, absolutePath, parts } = this.resolveProjectPath(projectId, relativePath);
     const size = Buffer.byteLength(content, 'utf8');
-    if (size > MAX_PROJECT_FILE_BYTES) throw new Error('Project files are limited to 1 MB.');
     const parent = this.ensureProjectParent(root, parts);
     try {
       const stat = fs.lstatSync(absolutePath);
@@ -226,7 +223,6 @@ export class WorkspaceRegistry {
   createProjectFile(projectId: string, relativePath: string, content = ''): { path: string; size: number; modifiedAt: number } {
     const { root, absolutePath, parts } = this.resolveProjectPath(projectId, relativePath);
     const size = Buffer.byteLength(content, 'utf8');
-    if (size > MAX_PROJECT_FILE_BYTES) throw new Error('Project files are limited to 1 MB.');
     this.ensureProjectParent(root, parts);
     const fd = fs.openSync(absolutePath, 'wx', 0o600);
     try {

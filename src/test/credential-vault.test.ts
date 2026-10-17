@@ -46,3 +46,31 @@ test('credential vault refuses to decrypt with a changed external key', () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('Discord credentials are encrypted in the vault while preserving the env fallback', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'symbiote-discord-vault-'));
+  const adminEnvPath = path.join(directory, '.admin', '.env');
+  const envPath = path.join(directory, '.env');
+  const vaultPath = path.join(directory, '.symbiote', 'vault', 'integrations.enc');
+  const environmentText = 'KEEP_SETTING=keep-this\nDISCORD_BOT_TOKEN=discord-token-value\nDISCORD_CLIENT_ID=123456789012345678\nANOTHER_SETTING=also-keep\n\n';
+  mkdirSync(path.dirname(adminEnvPath), { recursive: true });
+  writeFileSync(envPath, environmentText);
+  const vault = new CredentialVault({ adminEnvPath, vaultPath });
+
+  try {
+    assert.deepEqual(vault.migrateDiscordCredentials(envPath), {
+      token: 'discord-token-value',
+      clientId: '123456789012345678',
+    });
+
+    const stored = readFileSync(vaultPath, 'utf8');
+    assert.doesNotMatch(stored, /discord-token-value|123456789012345678/);
+    assert.deepEqual(vault.get('discord'), {
+      token: 'discord-token-value',
+      clientId: '123456789012345678',
+    });
+    assert.equal(readFileSync(envPath, 'utf8'), environmentText);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

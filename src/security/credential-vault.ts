@@ -6,6 +6,7 @@ import { parse } from 'dotenv';
 import { appPath } from '../runtime/platform.js';
 
 export type IntegrationProvider = 'azure' | 'oci' | 'n8n' | 'kaggle';
+export type CredentialProvider = IntegrationProvider | 'discord';
 export type IntegrationCredentials = Record<string, string>;
 
 interface EncryptedVault {
@@ -36,16 +37,16 @@ export class CredentialVault {
     return this.vaultPath;
   }
 
-  has(provider: IntegrationProvider): boolean {
+  has(provider: CredentialProvider): boolean {
     return Object.keys(this.read()[provider] ?? {}).length > 0;
   }
 
-  get(provider: IntegrationProvider): IntegrationCredentials | null {
+  get(provider: CredentialProvider): IntegrationCredentials | null {
     const credentials = this.read()[provider];
     return credentials && Object.keys(credentials).length ? { ...credentials } : null;
   }
 
-  set(provider: IntegrationProvider, credentials: IntegrationCredentials): void {
+  set(provider: CredentialProvider, credentials: IntegrationCredentials): void {
     const vault = this.read();
     const previous = vault[provider] ?? {};
     const merged = { ...previous };
@@ -58,13 +59,31 @@ export class CredentialVault {
     this.write(vault);
   }
 
-  delete(provider: IntegrationProvider): void {
+  migrateDiscordCredentials(envPath: string): IntegrationCredentials | null {
+    if (!fs.existsSync(envPath)) return null;
+    const environmentText = fs.readFileSync(envPath, 'utf8');
+    const environment = parse(environmentText);
+    const credentials: IntegrationCredentials = {};
+    if (environment.DISCORD_BOT_TOKEN?.trim()) credentials.token = environment.DISCORD_BOT_TOKEN.trim();
+    if (environment.DISCORD_CLIENT_ID?.trim()) credentials.clientId = environment.DISCORD_CLIENT_ID.trim();
+    if (!Object.keys(credentials).length) return null;
+
+    this.set('discord', credentials);
+    const stored = this.get('discord');
+    if (!stored || Object.entries(credentials).some(([key, value]) => stored[key] !== value)) {
+      throw new Error('Discord credentials could not be verified in the encrypted vault; the environment file was not changed.');
+    }
+
+    return stored;
+  }
+
+  delete(provider: CredentialProvider): void {
     const vault = this.read();
     delete vault[provider];
     this.write(vault);
   }
 
-  private read(): Partial<Record<IntegrationProvider, IntegrationCredentials>> {
+  private read(): Partial<Record<CredentialProvider, IntegrationCredentials>> {
     const key = this.loadKey();
     if (!fs.existsSync(this.vaultPath)) return {};
     const raw = fs.readFileSync(this.vaultPath, 'utf8');
@@ -88,13 +107,13 @@ export class CredentialVault {
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         throw new Error('Vault payload must be an object.');
       }
-      return value as Partial<Record<IntegrationProvider, IntegrationCredentials>>;
+      return value as Partial<Record<CredentialProvider, IntegrationCredentials>>;
     } catch (failure) {
       throw new Error(`Could not decrypt the integration vault. Check ${KEY_NAME} in the external admin environment file; encrypted data was not changed.`, { cause: failure });
     }
   }
 
-  private write(value: Partial<Record<IntegrationProvider, IntegrationCredentials>>): void {
+  private write(value: Partial<Record<CredentialProvider, IntegrationCredentials>>): void {
     const key = this.loadKey();
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);

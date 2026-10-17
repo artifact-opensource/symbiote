@@ -359,6 +359,13 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
       body: JSON.stringify({ path: 'src/index.ts', content: 'export const value = 1;' }),
     });
     assert.equal(savedProjectFile.status, 200);
+    const largeProjectFile = await fetch(`${baseUrl}/api/projects/project-1/file`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: 'data/large.json', content: 'x'.repeat(1_250_000) }),
+    });
+    assert.equal(largeProjectFile.status, 201);
+    assert.equal((await largeProjectFile.json() as { size: number }).size, 1_250_000);
     const deletedProjectFile = await fetch(`${baseUrl}/api/projects/project-1/file`, {
       method: 'DELETE',
       headers: { 'content-type': 'application/json' },

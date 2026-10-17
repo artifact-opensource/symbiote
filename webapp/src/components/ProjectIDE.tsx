@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Editor from '@monaco-editor/react';
 import { Archive, ChevronDown, File, FilePlus2, Folder, FolderPlus, GitBranch, HardDrive, ListTodo, LoaderCircle, Pencil, Play, Plus, RefreshCw, Save, Terminal, Trash2, X } from 'lucide-react';
-import type { WorkspaceFile, WorkspaceProject } from '../types';
+import type { AgentProfile, WorkspaceFile, WorkspaceProject } from '../types';
 
 type Request = <T>(endpoint: string, options?: RequestInit) => Promise<T>;
 type ProjectFileContent = { path: string; content: string; size: number };
@@ -27,17 +27,20 @@ function formatStorage(bytes: number): string {
 function languageForPath(filePath: string): string {
   const extension = filePath.split('.').pop()?.toLowerCase();
   const languages: Record<string, string> = {
-    c: 'c', cjs: 'javascript', css: 'css', go: 'go', h: 'cpp', hpp: 'cpp', html: 'html', java: 'java',
-    js: 'javascript', json: 'json', jsx: 'javascript', md: 'markdown', mjs: 'javascript', py: 'python',
-    rs: 'rust', sh: 'shell', sql: 'sql', ts: 'typescript', tsx: 'typescript', txt: 'plaintext', yaml: 'yaml', yml: 'yaml',
+    c: 'c', cc: 'cpp', cjs: 'javascript', cpp: 'cpp', cs: 'csharp', css: 'css', dart: 'dart', dockerfile: 'dockerfile',
+    go: 'go', graphql: 'graphql', h: 'cpp', hpp: 'cpp', html: 'html', java: 'java', js: 'javascript', json: 'json',
+    jsx: 'javascript', kt: 'kotlin', less: 'less', lua: 'lua', md: 'markdown', mjs: 'javascript', php: 'php',
+    pl: 'perl', py: 'python', r: 'r', rb: 'ruby', rs: 'rust', scss: 'scss', sh: 'shell', sql: 'sql', swift: 'swift',
+    ts: 'typescript', tsx: 'typescript', txt: 'plaintext', xml: 'xml', yaml: 'yaml', yml: 'yaml',
   };
   return extension ? languages[extension] ?? 'plaintext' : 'plaintext';
 }
 
-export default function ProjectIDE({ projects, onArchiveProject, onRunTask, request, dark }: {
+export default function ProjectIDE({ projects, profiles, onArchiveProject, onRunTask, request, dark }: {
   projects: WorkspaceProject[];
+  profiles: AgentProfile[];
   onArchiveProject: (projectId: string) => Promise<boolean>;
-  onRunTask: (projectId: string, prompt: string) => Promise<boolean>;
+  onRunTask: (projectId: string, prompt: string, agentId?: string) => Promise<boolean>;
   request: Request;
   dark: boolean;
 }) {
@@ -53,6 +56,7 @@ export default function ProjectIDE({ projects, onArchiveProject, onRunTask, requ
   const [content, setContent] = useState('');
   const [savedContent, setSavedContent] = useState('');
   const [taskPrompt, setTaskPrompt] = useState('Inspect the project, identify its test command, run the relevant tests, and report failures with actionable fixes.');
+  const [taskAgentId, setTaskAgentId] = useState('');
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [loadingFile, setLoadingFile] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -70,6 +74,10 @@ export default function ProjectIDE({ projects, onArchiveProject, onRunTask, requ
   selectedProjectIdRef.current = selectedProjectId;
   const dirty = content !== savedContent;
   const selectedProject = projects.find(project => project.id === selectedProjectId);
+  const projectProfiles = useMemo(
+    () => profiles.filter(profile => profile.projectId === selectedProjectId),
+    [profiles, selectedProjectId],
+  );
   const refreshFiles = useCallback(async (projectId: string) => {
     setLoadingFiles(true);
     setError('');
@@ -108,6 +116,7 @@ export default function ProjectIDE({ projects, onArchiveProject, onRunTask, requ
     setSelectedEntryPath('');
     setCollapsedDirectories([]);
     setProjectTasks([]);
+    setTaskAgentId('');
     const firstTerminal = createTerminalTab('Terminal 1');
     setTerminalTabs([firstTerminal]);
     setActiveTerminalId(firstTerminal.id);
@@ -137,7 +146,7 @@ export default function ProjectIDE({ projects, onArchiveProject, onRunTask, requ
           setTerminalTabs(current => current.map(item => item.id === tab.id
             ? {
               ...item,
-              output: `${item.output}${result.truncated ? '\n[Earlier terminal output was truncated.]\n' : ''}${result.output}`.slice(-100_000),
+              output: `${item.output}${result.truncated ? '\n[Earlier terminal output was truncated.]\n' : ''}${result.output}`,
               running: result.running,
               busy: result.running ? item.busy : false,
             }
@@ -364,7 +373,7 @@ export default function ProjectIDE({ projects, onArchiveProject, onRunTask, requ
       return;
     }
     try {
-      const started = await onRunTask(selectedProjectId, taskPrompt.trim());
+      const started = await onRunTask(selectedProjectId, taskPrompt.trim(), taskAgentId || undefined);
       if (started) setNotice('Agent task started. Follow its progress in Tasks.');
       else setError('The agent task could not be started.');
     } catch (failure) {
@@ -438,11 +447,11 @@ export default function ProjectIDE({ projects, onArchiveProject, onRunTask, requ
         body: JSON.stringify({ action: 'input', terminalId, input: `${trimmed}\n` }),
       });
       setTerminalTabs(current => current.map(tab => tab.id === activeTerminalId
-        ? { ...tab, command: '', output: `${tab.output}${tab.output ? '\n' : ''}$ ${trimmed}\n`.slice(-100_000) }
+        ? { ...tab, command: '', output: `${tab.output}${tab.output ? '\n' : ''}$ ${trimmed}\n` }
         : tab));
     } catch (failure) {
       setTerminalTabs(current => current.map(tab => tab.id === activeTerminalId
-        ? { ...tab, output: `${tab.output}${tab.output ? '\n\n' : ''}$ ${trimmed}\n${failure instanceof Error ? failure.message : 'Command failed.'}`.slice(-100_000) }
+        ? { ...tab, output: `${tab.output}${tab.output ? '\n\n' : ''}$ ${trimmed}\n${failure instanceof Error ? failure.message : 'Command failed.'}` }
         : tab));
     } finally {
       setTerminalTabs(current => current.map(tab => tab.id === activeTerminalId ? { ...tab, busy: false } : tab));
@@ -517,6 +526,24 @@ export default function ProjectIDE({ projects, onArchiveProject, onRunTask, requ
 
       {error && <div className="project-ide-feedback project-ide-error" role="alert">{error}</div>}
       {notice && <div className="project-ide-feedback" role="status">{notice}</div>}
+      <form className="project-ide-task" onSubmit={event => void submitTask(event)}>
+        <div className="project-ide-task-heading">
+          <label htmlFor="project-ide-task"><Play size={13} /> Agent task</label>
+          <small>Run a project-scoped task. Unsaved editor changes are saved first.</small>
+        </div>
+        <textarea id="project-ide-task" value={taskPrompt} onChange={event => setTaskPrompt(event.target.value)} rows={2} />
+        <div className="project-ide-task-controls">
+          <label className="sr-only" htmlFor="project-ide-agent">Run as</label>
+          <select id="project-ide-agent" value={taskAgentId} onChange={event => setTaskAgentId(event.target.value)}>
+            <option value="">Symbiant · Main agent</option>
+            {projectProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.emoji} {profile.name}</option>)}
+          </select>
+          <button className="button button-primary" type="submit" disabled={runningTask || !taskPrompt.trim()}>
+            {runningTask ? <LoaderCircle size={15} className="spin" /> : <Play size={14} />}
+            <span>{runningTask ? 'Starting…' : 'Run'}</span>
+          </button>
+        </div>
+      </form>
       {entryDialog && <div className="project-ide-dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setEntryDialog(null); }}>
         <section className="project-ide-dialog" role="dialog" aria-modal="true" aria-labelledby="project-ide-entry-dialog-title">
           <header><h2 id="project-ide-entry-dialog-title">{entryDialog.kind === 'file' ? 'Create file' : entryDialog.kind === 'directory' ? 'Create folder' : 'Move or rename entry'}</h2><button type="button" className="icon-button small" onClick={() => setEntryDialog(null)} aria-label="Close dialog"><X size={15} /></button></header>
@@ -599,15 +626,6 @@ export default function ProjectIDE({ projects, onArchiveProject, onRunTask, requ
               {!projectTasks.length && <p className="project-ide-muted">Project plans stay here and update live as agents work.</p>}
             </div>
           </div>}
-          <form className="project-ide-task" onSubmit={event => void submitTask(event)}>
-            <label htmlFor="project-ide-task">AGENT TASK</label>
-            <textarea id="project-ide-task" value={taskPrompt} onChange={event => setTaskPrompt(event.target.value)} maxLength={20_000} rows={5} />
-            <button className="button button-primary" type="submit" disabled={runningTask || !taskPrompt.trim()}>
-              {runningTask ? <LoaderCircle size={15} className="spin" /> : <Play size={14} />}
-              <span>{runningTask ? 'Starting…' : 'Ask agent to run'}</span>
-            </button>
-            <small>Runs within this project’s agent session and configured tool sandbox.</small>
-          </form>
         </aside>
 
         <div className="project-ide-editor-pane">
@@ -628,7 +646,7 @@ export default function ProjectIDE({ projects, onArchiveProject, onRunTask, requ
                 height="100%"
                 path={selectedPath}
                 language={languageForPath(selectedPath)}
-                theme={dark ? 'light' : 'vs-dark'}
+                theme={dark ? 'vs-dark' : 'light'}
                 value={content}
                 onChange={value => setContent(value ?? '')}
                 options={{
