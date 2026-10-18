@@ -1,0 +1,56 @@
+# Installation
+
+## Requirements
+
+- **Node.js 20+** — [Download](https://nodejs.org/)
+- **npm** (ships with Node.js)
+- **Git** (for cloning from source)
+
+## From npm
+
+```bash
+npm i @symbiote-agi/symbiote
+```
+
+## From Source
+
+```bash
+git clone https://github.com/Artifact-Virtual/symbiote.git
+cd symbiote
+npm install
+npm run build
+```
+
+## Verify
+
+```bash
+npx symbiote --version
+```
+
+## What's Included
+
+The package ships with:
+
+- **`.env.example`** — template for all environment variables (API keys, tokens)
+- **`symbiote.example.json`** — template for agent configuration
+- **`symbiote-gateway.service`** — systemd unit file for Linux deployments
+- **`symbiote.sh` / `symbiote.ps1`** — start scripts for Linux/macOS and Windows
+
+Environment variables are auto-loaded from `.env` via the built-in dotenv loader — no manual `source` or `dotenv` package needed.
+
+## Next Steps
+
+1. Run the [guided setup flow](wizard.md): `npx symbiote init` or double-click `install.command` / `install.cmd`
+2. Follow the [Quick Start](quick-start.md)
+
+## Platform Support
+
+| Platform | Status |
+|----------|--------|
+| Linux (x64, arm64) | ✅ Supported |
+| macOS (Intel, Apple Silicon) | ✅ Supported |
+| Windows (x64) | ✅ Supported |
+
+Symbiote resolves temp, home, config, and credential paths through platform-aware runtime helpers. Legacy `symbiote` paths remain supported for compatibility, while new installs use the current Symbiote runtime assets.
+
+For Windows MSI packaging, service deployment, and Linux/macOS daemon guidance, see [Production Deployment](../advanced/production.md).

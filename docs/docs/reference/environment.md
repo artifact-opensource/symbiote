@@ -1,0 +1,80 @@
+# Environment Variables
+
+All environment variables used by Symbiote. Set these in `.env` (auto-loaded at startup) or your shell environment.
+
+## LLM Providers
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GROQ_API_KEY` | If using Groq | Groq API key (`gsk_...`). [Get one](https://console.groq.com/keys) |
+| `ANTHROPIC_API_KEY` | If using Anthropic | Anthropic API key (`sk-ant-...`) |
+| `OPENAI_API_KEY` | If using OpenAI | OpenAI API key (`sk-...`) |
+| `GEMINI_API_KEY` | If using Gemini | Google Gemini API key (`AIza...`). [Get one](https://aistudio.google.com/apikey) |
+| `XAI_API_KEY` | If using xAI | xAI API key (`xai-...`) |
+| `COPILOT_GITHUB_TOKEN` | No | GitHub Copilot token (auto-resolved if `gh` CLI is authenticated) |
+| `GH_TOKEN` | No | GitHub token (fallback for Copilot) |
+| `GITHUB_TOKEN` | No | GitHub token (fallback for Copilot) |
+
+## Discord
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DISCORD_BOT_TOKEN` | If using Discord | Discord bot token |
+| `DISCORD_CLIENT_ID` | If using Discord | Discord bot application ID |
+
+## HTTP API
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SYMBIOTE_API_KEY` | If using HTTP API | API key for HTTP API authentication |
+
+## Web Control Room
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SYMBIOTE_WEB_HOST` | No | Control Room bind host (default: `0.0.0.0`) |
+| `SYMBIOTE_WEB_TOKEN` | No | Custom bearer token for LAN Control Room requests; use a secret of at least 32 characters |
+
+Set HTTP API and Control Room ports in `symbiote.json` (`apiPort` and `webPort`). The current runtime does not apply `SYMBIOTE_API_HOST`, `SYMBIOTE_API_PORT`, or `SYMBIOTE_PORT` over its default configuration.
+
+## Workspace
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SYMBIOTE_WORKSPACE` | No | Override workspace path (default: `cwd()`) |
+| `SYMBIOTE_HOME` | No | Override the app home directory (default: `~/.symbiote`) |
+
+## Runtime and Security
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SYMBIOTE_SANDBOX` | No | Set to `1` to enable owner/non-owner tool restrictions (default: off, every session has full access) |
+| `SYMBIOTE_INJECTION_GUARD` | No | `standard` (default), `strict` or `off` |
+| `SYMBIOTE_TOOL_TIMEOUT_MS` | No | Per-tool-call timeout (default: 900000) |
+| `SYMBIOTE_STREAM_IDLE_MS` | No | Silent-stream timeout before retry (default: 180000) |
+| `SYMBIOTE_SHELL` | No | Shell used by `exec` and background processes |
+| `SYMBIOTE_PYTHON` | No | Python interpreter used for sidecars |
+
+## Resolution Order
+
+Environment variables can be set in:
+
+1. **`.env` file** - auto-loaded at startup via built-in dotenv loader (recommended for secrets)
+2. **Shell environment** - `export VAR=value`
+3. **systemd service** - `Environment=VAR=value`
+4. **`symbiote.json`** - via `${VAR}` interpolation in string values
+
+`.env` values do not override existing shell environment variables.
+
+## Provider-Specific Auth
+
+| Provider | Key Variable | Fallback |
+|----------|-------------|----------|
+| Groq | `GROQ_API_KEY` | None - required |
+| Anthropic | `ANTHROPIC_API_KEY` | None - required |
+| OpenAI | `OPENAI_API_KEY` | None - required |
+| Gemini | `GEMINI_API_KEY` | None - required |
+| xAI | `XAI_API_KEY` | None - required |
+| GitHub Copilot | `COPILOT_GITHUB_TOKEN` | `GH_TOKEN` > `GITHUB_TOKEN` > `gh auth token` CLI > config files |
+| Ollama | None | No auth needed (local) |
+| Gladius | None | No auth needed (local) |
