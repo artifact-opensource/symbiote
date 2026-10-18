@@ -1,0 +1,11 @@
+$schema: https://api.gitbook.com/gitbook-docs.yaml
+site:
+  title: SYMBIOTE
+  structure:
+    - type: space
+      key: space-1
+      title: Mach6
+      path: mach6
+      default: true
+      content:
+        directory: ./docs
