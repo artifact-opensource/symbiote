@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Chess, type Color, type Move, type PieceSymbol, type Square } from 'chess.js';
 import { ArrowRight, ChessKnight, CircleCheck, CircleDashed, Crown, RotateCcw, Trophy, Undo2, Zap } from 'lucide-react';
+import ActivityOrb from './ActivityOrb';
 
 type GameTab = 'chess';
 type Difficulty = 'adaptive' | '1' | '2' | '3' | '4' | '5';
@@ -255,7 +256,7 @@ function GamesView({ request }: { request: <T>(endpoint: string, options?: Reque
 
       <section className="game-section" aria-label={active.label}>
         {!loaded
-          ? <div className="loading-state"><span>Restoring saved match…</span></div>
+          ? <div className="loading-state"><ActivityOrb label="Restoring saved match" loading /><span>Restoring saved match…</span></div>
           : activeGame === 'chess' && <ChessGame state={state} onStateChange={saveState} storageWarning={storageWarning} />}
       </section>
     </div>
@@ -463,7 +464,7 @@ function ChessGame({ state, onStateChange, storageWarning }: {
         <div className="chess-opponent">
           <div className="opponent-emblem"><Crown size={17} /></div>
           <div><span className="eyebrow">OPPONENT · LEVEL {level}</span><h3>The Quiet Strategist</h3></div>
-          <span className={`thinking-indicator${thinking ? ' thinking-active' : ''}`} title={thinking ? 'Thinking' : 'Waiting'}><CircleDashed size={15} /></span>
+          <span className={`thinking-indicator${thinking ? ' thinking-active' : ''}`} title={thinking ? 'Thinking' : 'Waiting'}>{thinking ? <ActivityOrb state="solving" label="Opponent thinking" compact /> : <CircleDashed size={15} />}</span>
         </div>
         <div className={`chess-status${result ? ` chess-status-${result.outcome}` : ''}`} aria-live="polite">
           <span className="status-mark">{result?.outcome === 'win' ? <Trophy size={15} /> : result ? <CircleCheck size={15} /> : <Zap size={15} />}</span>

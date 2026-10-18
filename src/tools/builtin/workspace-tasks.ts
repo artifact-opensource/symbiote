@@ -4,8 +4,8 @@ import type { ProjectTask, ProjectTaskStatus } from '../../agent/workspace-regis
 export interface WorkspaceTaskControls {
   listRuns: () => unknown[];
   stopRun: (id: string) => boolean;
-  restartRun: (id: string) => unknown | null;
-  guideRun: (id: string, message: string) => unknown | null;
+  restartRun: (id: string, trustedAdminContext?: boolean) => unknown | null;
+  guideRun: (id: string, message: string, trustedAdminContext?: boolean) => unknown | null;
   getProjectId: (sessionId?: string) => string | undefined;
   listProjectTasks: (projectId: string) => ProjectTask[];
   addProjectTask: (projectId: string, title: string, description?: string) => ProjectTask;
@@ -75,7 +75,7 @@ export function createWorkspaceTaskTool(controls: WorkspaceTaskControls): ToolDe
         return JSON.stringify({ stopped: true, runId });
       }
       if (action === 'restart') {
-        const run = controls.restartRun(runId);
+        const run = controls.restartRun(runId, options?.sessionTier === 'admin');
         if (!run) throw new Error(`Task ${runId} is missing, active, or its session is unavailable.`);
         return JSON.stringify(run);
       }
@@ -83,7 +83,7 @@ export function createWorkspaceTaskTool(controls: WorkspaceTaskControls): ToolDe
         const message = typeof input.message === 'string' ? input.message.trim() : '';
         if (!message) throw new Error('The guide action requires a non-empty message.');
         if (message.length > 2_000) throw new Error('Task guidance must be 2,000 characters or fewer.');
-        const run = controls.guideRun(runId, message);
+        const run = controls.guideRun(runId, message, options?.sessionTier === 'admin');
         if (!run) throw new Error(`Task ${runId} could not be guided because its session is unavailable.`);
         return JSON.stringify(run);
       }

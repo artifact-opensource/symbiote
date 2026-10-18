@@ -47,6 +47,12 @@ DISCORD_CLIENT_ID=your-bot-client-id
 | Message splitting (2000 char limit) | ✅ |
 | Rate limiting (token bucket) | ✅ |
 
+## Turn progress and presence
+
+When `toolProgress` is enabled (default), Symbiote uses one progress message that is edited in place as tools start. Each operation is listed once with no per-tool completion checkmark; updates are coalesced and throttled to keep the bubble responsive without flooding Discord. It does not stream assistant text into this message. At the end of a turn it is reduced to a one-line tool-count and outcome summary; the final answer is sent as a separate ordinary response.
+
+The bot's Discord activity changes between thinking, `🧩 Reasoning...` when the provider emits a reasoning-step event, tool-specific activity, and writing a response. Discord bot accounts cannot publish user-style Custom Status activities, so Symbiote uses a supported Playing activity whose name is the phase label. The status reflects the phase only; it never includes reasoning text. This presence indicator is independent of the progress message.
+
 ## Policies
 
 ### DM Policy

@@ -36,7 +36,8 @@ test('run metadata and colon-containing agent sessions survive a manager restart
 });
 
 test('workspace APIs validate tasks and expose real run and agent controls', async () => {
-  const started: Array<{ name?: string; prompt: string; sessionId: string }> = [];
+  const started: Array<{ name?: string; prompt: string; sessionId: string; trustedAdminContext?: boolean }> = [];
+  const chatAdminContexts: boolean[] = [];
   const controlled: Array<{ id: string; action: 'stop' | 'steer'; message?: string }> = [];
   const guided: Array<{ id: string; message: string }> = [];
   const identityUpdates: Array<{ name: string; emoji: string; soulContent: string; agentsContent: string; instructions: string }> = [];
@@ -44,6 +45,8 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   let browserUrl = 'https://example.com/';
   let chessState: Record<string, unknown> | null = null;
   let stoppedRun = '';
+  let archivedRun = '';
+  let restoredRun = '';
   let configuredProvider = '';
   let includedArchivedProjects = false;
   let integrationTests = 0;
@@ -163,7 +166,8 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
       posts: [{ id: 'post-external', author: { type: 'external', id: 'contact-1' }, body: 'Follow up', mentions: [], createdAt: 2 }],
     }),
     retryThreadNotification: id => ({ id, status: 'pending' }),
-    chat: async (_request, emit) => {
+    chat: async (request, emit) => {
+      chatAdminContexts.push(request.trustedAdminContext === true);
       emit?.({ type: 'text_delta', text: 'Hello' });
       return { text: 'Hello' };
     },
@@ -175,6 +179,14 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
     },
     stopRun: id => {
       stoppedRun = id;
+      return true;
+    },
+    archiveRun: id => {
+      archivedRun = id;
+      return true;
+    },
+    restoreRun: id => {
+      restoredRun = id;
       return true;
     },
     restartRun: id => id === 'run-1' ? { id: 'run-3', status: 'running' } : null,
@@ -510,8 +522,18 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
     assert.equal(chatResponse.status, 200);
     assert.match(chatResponse.headers.get('content-type') || '', /text\/event-stream/);
     const chatEvents = await chatResponse.text();
-    assert.match(chatEvents, /"type":"text_delta","text":"Hello"/);
-    assert.match(chatEvents, /"type":"done"/);
+    assert.doesNotMatch(chatEvents, /"type":"text_delta"/);
+    assert.match(chatEvents, /"type":"done","result":\{"text":"Hello"\}/);
+    assert.deepEqual(chatAdminContexts, [true]);
+
+    const crossOriginChat = await fetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: 'http://attacker.example' },
+      body: JSON.stringify({ text: 'Hello', sessionId: 'web-session', trustedAdminContext: true }),
+    });
+    assert.equal(crossOriginChat.status, 200);
+    await crossOriginChat.text();
+    assert.deepEqual(chatAdminContexts, [true, false]);
 
     const interruptResponse = await fetch(`${baseUrl}/api/sessions/web-session/interrupt`, { method: 'POST' });
     assert.equal(interruptResponse.status, 200);
@@ -541,7 +563,13 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
       body: JSON.stringify({ name: '  API review  ', prompt: '  Review the API.  ', sessionId: 'web-session' }),
     });
     assert.equal(startedRun.status, 201);
-    assert.deepEqual(started[0], { name: 'API review', prompt: 'Review the API.', sessionId: 'web-session' });
+    assert.equal(started.at(-1)?.trustedAdminContext, true);
+    assert.deepEqual(started[0], {
+      name: 'API review',
+      prompt: 'Review the API.',
+      sessionId: 'web-session',
+      trustedAdminContext: true,
+    });
 
     const archiveResponse = await fetch(`${baseUrl}/api/sessions/web-session`, { method: 'DELETE' });
     assert.equal(archiveResponse.status, 200);
@@ -553,6 +581,16 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
     const stopResponse = await fetch(`${baseUrl}/api/runs/run-2/stop`, { method: 'POST' });
     assert.equal(stopResponse.status, 200);
     assert.equal(stoppedRun, 'run-2');
+
+    const archiveRunResponse = await fetch(`${baseUrl}/api/runs/run-2/archive`, { method: 'POST' });
+    assert.equal(archiveRunResponse.status, 200);
+    assert.deepEqual(await archiveRunResponse.json(), { archived: true });
+    assert.equal(archivedRun, 'run-2');
+
+    const restoreRunResponse = await fetch(`${baseUrl}/api/runs/run-2/restore`, { method: 'POST' });
+    assert.equal(restoreRunResponse.status, 200);
+    assert.deepEqual(await restoreRunResponse.json(), { restored: true });
+    assert.equal(restoredRun, 'run-2');
 
     const restartResponse = await fetch(`${baseUrl}/api/runs/run-1/restart`, { method: 'POST' });
     assert.equal(restartResponse.status, 201);
@@ -569,12 +607,12 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
     const identityResponse = await fetch(`${baseUrl}/api/identity`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: '  Pathfinder  ', emoji: '🧭', soulContent: '# Soul\n- Name: old', agentsContent: '# Rules\n- Name: old', instructions: 'Be precise.' }),
+      body: JSON.stringify({ name: '  Pathfinder  ', emoji: 'terminal', soulContent: '# Soul\n- Name: old', agentsContent: '# Rules\n- Name: old', instructions: 'Be precise.' }),
     });
     assert.equal(identityResponse.status, 200);
     assert.deepEqual(identityUpdates, [{
       name: 'Pathfinder',
-      emoji: '🧭',
+      emoji: 'terminal',
       soulContent: '# Soul\n- Name: old',
       agentsContent: '# Rules\n- Name: old',
       instructions: 'Be precise.',

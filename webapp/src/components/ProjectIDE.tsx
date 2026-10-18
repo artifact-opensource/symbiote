@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Editor from '@monaco-editor/react';
-import { Archive, ChevronDown, File, FilePlus2, Folder, FolderPlus, GitBranch, HardDrive, ListTodo, LoaderCircle, Pencil, Play, Plus, RefreshCw, Save, Terminal, Trash2, X } from 'lucide-react';
+import { Archive, ChevronDown, File, FilePlus2, Folder, FolderPlus, GitBranch, HardDrive, ListTodo, Pencil, Play, Plus, RefreshCw, Save, Terminal, Trash2, X } from 'lucide-react';
 import type { AgentProfile, WorkspaceFile, WorkspaceProject } from '../types';
+import ActivityOrb from './ActivityOrb';
 
 type Request = <T>(endpoint: string, options?: RequestInit) => Promise<T>;
 type ProjectFileContent = { path: string; content: string; size: number };
@@ -536,10 +537,10 @@ export default function ProjectIDE({ projects, profiles, onArchiveProject, onRun
           <label className="sr-only" htmlFor="project-ide-agent">Run as</label>
           <select id="project-ide-agent" value={taskAgentId} onChange={event => setTaskAgentId(event.target.value)}>
             <option value="">Symbiant · Main agent</option>
-            {projectProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.emoji} {profile.name}</option>)}
+            {projectProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
           </select>
           <button className="button button-primary" type="submit" disabled={runningTask || !taskPrompt.trim()}>
-            {runningTask ? <LoaderCircle size={15} className="spin" /> : <Play size={14} />}
+            {runningTask ? <ActivityOrb label="Starting project task" compact loading /> : <Play size={14} />}
             <span>{runningTask ? 'Starting…' : 'Run'}</span>
           </button>
         </div>
@@ -584,7 +585,7 @@ export default function ProjectIDE({ projects, profiles, onArchiveProject, onRun
             </div>
           </div>
           {idePanel === 'files' ? <div className="project-ide-file-list">
-            {loadingFiles && <span className="project-ide-muted"><LoaderCircle className="spin" size={14} /> Loading files</span>}
+            {loadingFiles && <span className="project-ide-muted"><ActivityOrb label="Loading files" compact loading /> Loading files</span>}
             {!loadingFiles && visibleEntries.map(entry => {
               const depth = entry.path.split('/').length - 1;
               const isDirectory = entry.type === 'directory';
@@ -634,14 +635,14 @@ export default function ProjectIDE({ projects, profiles, onArchiveProject, onRun
             <div className="project-ide-actions">
               {notice && <span className="project-ide-muted">{notice}</span>}
               <button type="button" className="icon-button small" onClick={() => void saveFile()} disabled={!dirty || saving} aria-label="Save file" title="Save (Ctrl/Cmd+S)">
-                {saving ? <LoaderCircle size={15} className="spin" /> : <Save size={15} />}
+                {saving ? <ActivityOrb label="Saving file" compact loading /> : <Save size={15} />}
               </button>
               <button type="button" className="icon-button small" onClick={() => openEntryDialog('move', selectedEntryPath.split('/').at(-1) ?? selectedEntryPath)} disabled={!selectedEntryPath || saving} aria-label="Rename or move selected entry" title="Rename or move"><Pencil size={14} /></button>
               <button type="button" className="icon-button small" onClick={() => setConfirmation({ message: `Delete ${selectedEntryPath}? Folder contents will also be removed.`, onConfirm: () => void deleteEntry() })} disabled={!selectedEntryPath || saving} aria-label="Delete selected entry" title="Delete file or folder"><Trash2 size={15} /></button>
             </div>
           </div>
           <div className="project-ide-editor">
-            {loadingFile ? <div className="project-ide-editor-loading"><LoaderCircle size={17} className="spin" /> Opening file…</div>
+            {loadingFile ? <div className="project-ide-editor-loading"><ActivityOrb label="Opening file" loading /> Opening file…</div>
               : selectedPath ? <Editor
                 height="100%"
                 path={selectedPath}
@@ -696,7 +697,7 @@ export default function ProjectIDE({ projects, profiles, onArchiveProject, onRun
                     maxLength={20_000}
                   />
                   <button type="submit" className="icon-button small" disabled={activeTerminal?.busy || !activeTerminal?.command.trim()} aria-label="Run command" title="Run (Ctrl/Cmd+Enter)">
-                    {activeTerminal?.busy ? <LoaderCircle size={14} className="spin" /> : <Play size={13} />}
+                    {activeTerminal?.busy ? <ActivityOrb label="Running terminal command" compact loading /> : <Play size={13} />}
                   </button>
                 </form>
                 <pre className="project-ide-terminal-output" aria-live="polite">{terminalTabs.find(tab => tab.id === activeTerminalId)?.output || 'Run shell commands in the project workspace. Commands use the configured shell and sandbox.'}</pre>

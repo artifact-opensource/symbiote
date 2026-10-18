@@ -1,20 +1,23 @@
 # HTTP API
 
-Symbiote exposes a REST API for programmatic access. The same agent pipeline handles HTTP requests as Discord and WhatsApp messages.
+Symbiote exposes an authenticated HTTP API and a separate browser Control Room. The API server defaults to `127.0.0.1:3006`; the Control Room defaults to `0.0.0.0:3009`. Configure these with `apiHost`/`apiPort` and `webHost`/`webPort` in `symbiote.json`.
+
+## Authentication
+
+Set `SYMBIOTE_API_KEY` in `.env` and send it as a bearer token for API requests:
+
+```http
+Authorization: Bearer your-secret-key
+```
+
+`GET /api/v1/health` and `GET /api/status` do not require API authentication. Other API endpoints return `401 Unauthorized` without a valid token. The Control Room has separate access handling: local loopback use does not require a token; remote/LAN control requires the web access token. See [Web Control Room](webchat.md#access).
 
 ## Endpoints
 
-### POST `/api/v1/chat`
+### `POST /api/v1/chat`
 
-Send a message and receive the agent's response.
+Send a message through the agent pipeline. The default response is JSON. Set `Accept: text/event-stream` for SSE. Request fields include:
 
-**Headers:**
-```
-Authorization: Bearer <SYMBIOTE_API_KEY>
-Content-Type: application/json
-```
-
-**Request:**
 ```json
 {
   "text": "What files are in the workspace?",
@@ -23,46 +26,19 @@ Content-Type: application/json
 }
 ```
 
-**Response (JSON):**
-```json
-{
-  "text": "Here are the files in your workspace:\n- README.md\n- src/\n- package.json",
-  "sessionId": "my-session",
-  "toolCalls": [
-    { "name": "exec", "input": { "command": "ls" } }
-  ]
-}
-```
+The JSON response includes the final text, session ID, and tool calls. SSE can include text deltas, tool lifecycle, reasoning, and completion events, depending on the configured provider.
 
-**Response (SSE):**
+### `POST /api/chat`
 
-Add `Accept: text/event-stream` for streaming:
+SSE endpoint used by the Control Room. It accepts the same message fields as `/api/v1/chat` and always returns `text/event-stream`. Partial answer text is not streamed; reasoning and tool activity events may be sent, followed by a completion event containing the final response.
 
-```
-data: {"type":"text_delta","content":"Here are"}
-data: {"type":"text_delta","content":" the files"}
-data: {"type":"tool_start","name":"exec"}
-data: {"type":"tool_end","name":"exec","result":"README.md\nsrc/\npackage.json"}
-data: {"type":"done"}
-```
+### `GET /api/v1/health`
 
-### GET `/api/v1/health`
+Returns the gateway health payload. The exact fields depend on enabled providers and channels.
 
-Gateway health check.
+### `POST /api/v1/relay`
 
-```json
-{
-  "status": "ok",
-  "uptime": 3600,
-  "channels": { "discord": "connected", "whatsapp": "connected" },
-  "provider": "github-copilot",
-  "model": "claude-opus-4-6"
-}
-```
-
-### POST `/api/v1/relay`
-
-Relay a message to WhatsApp (bridge mode).
+Relays a message through the configured WhatsApp adapter:
 
 ```json
 {
@@ -71,36 +47,12 @@ Relay a message to WhatsApp (bridge mode).
 }
 ```
 
-## Authentication
+Returns `501` if relay is not configured.
 
-Set `SYMBIOTE_API_KEY` in your `.env` file. All API requests require a valid Bearer token.
+## Web Control Room
 
-```bash
-SYMBIOTE_API_KEY=your-secret-key
-```
-
-## Web UI
-
-The built-in web interface is served at the same port (`http://localhost:3006`):
-
-- Session management — create, switch, delete
-- Streaming responses with tool call visualization
-- Config panel — change provider, model, temperature live
-- Sub-agent monitoring — view and kill running sub-agents
-- Generative UI — file reads, exec outputs render as rich cards
-
-No build step. No npm dependencies. Single static HTML file.
+The React/Vite Control Room is served on `webPort` (default `3009`), not `apiPort`. Its project management, Agent IDE, project plan, terminal, and run-monitoring features use the gateway's web control API. The UI is built with `npm run build`; it is not a single static HTML file.
 
 ## CORS
 
-Configure allowed origins:
-
-```jsonc
-{
-  "api": {
-    "allowedOrigins": ["https://yourdomain.com"]
-  }
-}
-```
-
-Default: `["*"]` (all origins allowed).
+Configure browser origins with `allowedOrigins`; the default configuration permits the local Control Room origins. CORS is not authentication and should not be treated as an access-control boundary.

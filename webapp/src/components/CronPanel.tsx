@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Bell, CalendarClock, Check, Clock3, LoaderCircle, Pause, Play, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { Bell, CalendarClock, Check, Clock3, Pause, Play, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
+import ActivityOrb from './ActivityOrb';
 
 type CronSchedule = { type: 'cron'; expression: string } | { type: 'once'; runAt: number };
 type CronJob = {
@@ -167,14 +168,24 @@ export default function CronPanel({ request }: { request: CronRequest }) {
 
   return (
     <div className="cron-panel">
-      <div className="cron-panel-toolbar">
-        <p>Scheduled work runs through the configured agent and sandbox. Times use this machine’s local timezone.</p>
-        <button className="icon-button small" type="button" onClick={() => void refresh()} aria-label="Refresh cron data" title="Refresh"><RefreshCw size={14} /></button>
+      <div className="page-panel-toolbar cron-panel-toolbar">
+        <div className="page-panel-toolbar-copy">
+          <span className="eyebrow">SCHEDULED OPERATIONS</span>
+          <p>Automate reminders and recurring work. Runs use the configured agent and sandbox, in this machine’s local timezone.</p>
+        </div>
+        <div className="page-panel-toolbar-actions">
+          <div className="page-panel-counts" aria-label="Cron summary">
+            <span><strong>{state.jobs.length}</strong> jobs</span>
+            <span><strong>{state.jobs.filter(job => job.enabled).length}</strong> active</span>
+            <span><strong>{state.alerts.length}</strong> runs</span>
+          </div>
+          <button className="icon-button refresh-button" type="button" onClick={() => void refresh()} aria-label="Refresh cron data" title="Refresh"><RefreshCw size={14} /></button>
+        </div>
       </div>
       {error && <div className="notice notice-error cron-error" role="alert">{error}</div>}
-      {loading ? <div className="loading-state"><LoaderCircle size={18} className="spin" />Loading scheduled jobs…</div> : (
+      {loading ? <div className="loading-state"><ActivityOrb label="Loading scheduled jobs" loading /><span>Loading scheduled jobs…</span></div> : (
         <>
-          <section className="cron-section">
+          <section className="cron-section page-panel-section">
             <header className="cron-section-heading"><span><CalendarClock size={15} />Jobs</span><small>{state.jobs.length}</small></header>
             {state.jobs.length === 0 && <p className="drawer-empty">No scheduled work. Add a reminder or a recurring job below.</p>}
             <div className="cron-job-list">
@@ -192,7 +203,7 @@ export default function CronPanel({ request }: { request: CronRequest }) {
                 </div>
               </article>)}
             </div>
-            <form className="cron-form" onSubmit={event => void submitJob(event)}>
+            <form className="cron-form page-panel-card" onSubmit={event => void submitJob(event)}>
               <header className="cron-section-heading"><span><Plus size={15} />{editingId ? 'Edit job' : 'Add scheduled work'}</span></header>
               <label className="cron-field"><span>Name</span><input value={name} onChange={event => setName(event.target.value)} maxLength={80} required placeholder="Check download progress" /></label>
               <label className="cron-field"><span>Task instructions</span><textarea value={prompt} onChange={event => setPrompt(event.target.value)} maxLength={20_000} rows={4} required placeholder="Check whether the download completed, verify the output, then report or continue." /></label>
@@ -202,11 +213,11 @@ export default function CronPanel({ request }: { request: CronRequest }) {
                 : <label className="cron-field"><span>Run at · local time</span><input type="datetime-local" value={runAt} onChange={event => setRunAt(event.target.value)} required /></label>}
               <div className="cron-form-actions">
                 {editingId && <button className="button button-secondary" type="button" onClick={resetForm}>Cancel edit</button>}
-                <button className="button button-primary" type="submit" disabled={saving || !name.trim() || !prompt.trim()}>{saving ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{editingId ? 'Save changes' : 'Create job'}</button>
+                <button className="button button-primary" type="submit" disabled={saving || !name.trim() || !prompt.trim()}>{saving ? <ActivityOrb label="Saving scheduled work" compact loading /> : <Check size={14} />}{editingId ? 'Save changes' : 'Create job'}</button>
               </div>
             </form>
           </section>
-          <section className="cron-section cron-alerts">
+          <section className="cron-section cron-alerts page-panel-section">
             <header className="cron-section-heading"><span><Bell size={15} />Alerts &amp; runs</span><small>{state.alerts.length}</small></header>
             {state.alerts.slice(0, 30).map(alert => <article className="cron-alert" key={alert.id}>
               <div><strong>{alert.jobName}</strong><small>{formatTime(alert.scheduledAt)} · {alert.status} · {alert.attempts} attempt{alert.attempts === 1 ? '' : 's'}</small></div>
@@ -215,7 +226,7 @@ export default function CronPanel({ request }: { request: CronRequest }) {
             </article>)}
             {state.alerts.length === 0 && <p className="drawer-empty">Completed and failed autonomous runs will appear here.</p>}
           </section>
-          <form className="cron-form cron-agent-prompt" onSubmit={event => void saveDefaultPrompt(event)}>
+          <form className="cron-form cron-agent-prompt page-panel-card" onSubmit={event => void saveDefaultPrompt(event)}>
             <header className="cron-section-heading"><span><Clock3 size={15} />Default agent instructions</span></header>
             <p>Dedicated system prompt applied to scheduled runs. Tool and sandbox restrictions still apply.</p>
             <textarea value={defaultPrompt} onChange={event => setDefaultPrompt(event.target.value)} maxLength={30_000} rows={7} required aria-label="Autonomous default agent system prompt" />

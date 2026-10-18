@@ -12,7 +12,7 @@ The setup flow writes every section below. Values shown are the defaults.
   "configVersion": 2,
 
   "name": "Symbiote",
-  "emoji": "",
+  "emoji": "bot",
 
   // Model
   "defaultProvider": "openrouter",
@@ -20,7 +20,7 @@ The setup flow writes every section below. Values shown are the defaults.
   "fallbackProviders": [],
   "temperature": 0.7,
   "maxTokens": 8192,
-  "maxIterations": 50,
+  "maxIterations": 100,
   "adaptiveTemperature": { "adaptive": false, "default": 0.5, "logChanges": false },
 
   // Paths are relative to this file
@@ -38,6 +38,12 @@ The setup flow writes every section below. Values shown are the defaults.
   // Runtime
   "toolProgress": true,
   "tools": { "enabled": true },
+  "sandbox": {
+    "enabled": true,
+    "ownerAccess": true,
+    "internalTier": "standard",
+    "nonOwnerTier": "restricted"
+  },
   "timeouts": { "llmRequestMs": 900000 },
   "heartbeat": { "activeIntervalMin": 30, "idleIntervalMin": 120, "sleepingIntervalMin": 360, "quietHoursStart": 23, "quietHoursEnd": 8 },
 
@@ -75,6 +81,12 @@ All string values in `symbiote.json` support `${ENV_VAR}` syntax:
 ```
 
 Variables are resolved from `process.env` at load time. The `.env` file is auto-loaded by the built-in dotenv loader.
+
+### Sandbox and owner access
+
+`ownerIds` identifies trusted users; channel allowlists control who may interact but do not by themselves grant owner privileges. With the sandbox enabled, verified owners can receive admin-tier tool access when `ownerAccess` is true. Other users use `nonOwnerTier`, internal runs use `internalTier`, and sub-agents inherit their parent's tier. Both tier settings accept `standard` or `restricted`.
+
+Setting `sandbox.enabled` to `false` gives internal sessions and their agents admin-tier tool access, with shell commands defaulting to the agent's assigned workspace. Verified channel owners retain admin access. External non-owners remain restricted; this is an application policy layer, not an OS container. Use this configuration only for a trusted, single-operator deployment.
 
 ## Environment file (`.env`)
 
@@ -119,7 +131,7 @@ SYMBIOTE_WEB_TOKEN=
 | `defaultProvider` | string | `"openrouter"` | Active LLM provider |
 | `defaultModel` | string | `"openrouter/free"` | Active model |
 | `maxTokens` | number | `8192` | Max tokens per response |
-| `maxIterations` | number | `50` | Max tool-call loops per turn |
+| `maxIterations` | number | `100` | Starting iteration budget per runner invocation; Pulse expands sustained work to 1,000 and Blink continues across invocations |
 | `temperature` | number | `0.7` | Response temperature (0.0–1.2) |
 | `workspace` | string | `cwd()` | Agent's file system root |
 | `sessionsDir` | string | `".session"` | Session persistence directory; runtime session files are kept in `<workspace>/.session` |

@@ -66,7 +66,7 @@ Creates parent directories if they don't exist.
 { "command": "npm test", "timeout": 30, "workdir": "/home/user/project" }
 ```
 
-Returns stdout + stderr combined. Default timeout is 600 seconds. Commands run in PowerShell on Windows (`pwsh`, then `powershell`, then `cmd`) and `sh` elsewhere; set `SYMBIOTE_SHELL` to override. Supports `background` mode for long-running processes and `pty` for pseudo-TTY wrapping.
+Returns stdout + stderr combined. Default foreground timeout is 5 seconds; set `timeout` explicitly for longer foreground commands or use `background` for long-running processes. Commands run in PowerShell on Windows (`pwsh`, then `powershell`, then `cmd`) and `sh` elsewhere; set `SYMBIOTE_SHELL` to override. Supports `pty` for pseudo-TTY wrapping.
 
 ## Process Management
 
@@ -111,6 +111,22 @@ Accepts local file paths or URLs. Returns the vision model's analysis.
 
 Generates audio files from text. Returns the path to the generated audio file. Speed range: 0.25–4.0.
 
+## Native Desktop Control
+
+The `computer_use` tool routes actions through the cross-platform CUA Driver runtime rather than the Playwright browser viewport. Its action catalog is loaded from the native driver at startup and includes screen/window inspection, mouse and keyboard input, clipboard, app/window management, and native browser automation. Check availability with:
+
+```json
+{ "action": "status", "arguments": {} }
+```
+
+Call a native action by name and pass its action-specific input in `arguments`, for example:
+
+```json
+{ "action": "get_desktop_state", "arguments": {} }
+```
+
+In gateway sessions, desktop control is visible and executable only for admin sessions; standard and restricted sessions cannot discover or invoke it. CLI and MCP processes are local trusted runtimes and should be protected accordingly. The operating system may require screen-recording, accessibility, or input-control permissions. Use a vision-capable configured model: screenshots are forwarded in-memory to that model, excluded from saved conversation checkpoints and transcripts, and are subject to the model provider's own request-retention policies.
+
 ## Memory (VDB)
 
 | Tool | Description |
@@ -143,7 +159,7 @@ Run once to bootstrap memory from session archives. Auto-ingestion handles new s
 {}
 ```
 
-Returns document count, term count, disk usage, last indexed timestamp, and per-source breakdown.
+Returns VDB document/term counts and disk usage, JSONL archive record count, and Memograph shard/hash-verification counts.
 
 ## Memory Search Compatibility Alias
 
@@ -163,18 +179,19 @@ Uses the same embedded VDB as `memory_recall`; no external memory daemon or embe
 
 | Tool | Description |
 |------|-------------|
-| `comb_recall` | Recall persistent cross-session memory |
-| `comb_stage` | Stage information for future sessions |
+| `comb_recall` | Recall recent notes or similarity-match durable memories |
+| `comb_stage` | Stage a concise memory for future sessions |
+| `memory_offload` | Persist a distilled memory to JSONL, Memograph, and VDB |
 
-COMB (Cross-session Observation Memory Bank) provides lossless persistence across agent restarts. See [COMB documentation](../core/comb.md) for details.
+COMB uses VDB for warm searchable continuity. Explicit distilled offloads are also written to the append-only JSONL archive and Memograph topology. See [COMB documentation](../core/comb.md) for details.
 
 ### comb_recall
 
 ```json
-{}
+{ "query": "deployment key rotation deadline", "k": 5 }
 ```
 
-Returns staged entries from previous sessions — today's and yesterday's context.
+With a query, searches durable memories by sparse BM25/TF-IDF relevance. Without a query, returns recent staged COMB notes.
 
 ### comb_stage
 
@@ -182,7 +199,15 @@ Returns staged entries from previous sessions — today's and yesterday's contex
 { "content": "Deploy key expires March 15, 2026. Needs rotation." }
 ```
 
-Stages text for the next session. Entries accumulate daily and auto-roll into archives.
+Stages a concise memory for future sessions. When the durable backend is initialized, the note also flows through the JSONL, Memograph, and VDB offload path.
+
+### memory_offload
+
+```json
+{ "summary": "The deployment key expires March 15, 2026; rotate it before that date.", "sessionId": "deployment-task-42" }
+```
+
+Stores one coherent memory record in `.symbiote/memory.jsonl`, adds a SHA-256-addressed LIVE shard to `symbiote_live.json`, and indexes that shard in VDB. Use for distilled, durable knowledge—not raw transcripts, secrets, or transient operational status.
 
 ## Communication
 

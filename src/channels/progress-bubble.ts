@@ -1,33 +1,86 @@
 /**
  * Tool Progress Bubble — live "what am I doing" message for chat channels.
  *
- * Mirrors Hermes' tool-progress rendering: each tool call becomes a line
- * (emoji + tool name + primary argument preview) accumulated into ONE
- * editable Discord message that is updated in place as work progresses.
- * Edits are throttled (>=1.5s apart); when the text outgrows the platform
- * limit the oldest lines roll off.
+ * Tool starts are accumulated into one editable message. The message collapses
+ * to a one-line count when the turn finishes.
  *
- * Enabled via symbiote.json -> communication.discord.toolProgress = true.
+ * Enabled via symbiote.json -> toolProgress = true.
  */
 
-const EMOJI: Record<string, string> = {
-    terminal: '💻', bash: '💻', shell: '💻', exec: '⚡',
-    read_file: '📖', read: '📖', write_file: '✏️', write: '✏️',
-    edit_file: '✏️', patch: '🩹', apply_patch: '🩹',
-    search_files: '🔎', grep: '🔎', glob: '🔎', find: '🔎',
-    web_search: '🌐', web: '🌐', fetch: '🌐', http: '🌐',
-    browser: '🌍', memory_search: '🧠', memory: '🧠',
-    message: '💬', send_message: '💬', list: '📋', ls: '📋',
+export const TOOL_EMOJI: Readonly<Record<string, string>> = {
+    read: '📖',
+    write: '✍️',
+    edit: '✏️',
+    exec: '⚡',
+    image: '🖼️',
+    image_gen: '🎨',
+    process_start: '🚀',
+    process_poll: '📊',
+    process_kill: '🛑',
+    process_list: '📋',
+    tts: '🔊',
+    stt: '🎙️',
+    web_fetch: '🌐',
+    memory_search: '🧠',
+    comb_recall: '🔮',
+    comb_stage: '💾',
+    memory_offload: '📦',
+    memory_recall: '🧭',
+    memory_ingest: '🧬',
+    memory_stats: '📈',
+    google_workspace: '📅',
+    azure_cloud: '☁️',
+    oci_cloud: '🏗️',
+    n8n_cloud: '🔗',
+    kaggle_cloud: '🧪',
+    kaggle_kernel_push: '🧫',
+    web_browse: '🌍',
+    web_click: '🖱️',
+    web_type: '⌨️',
+    web_screenshot: '📸',
+    web_extract: '🧾',
+    web_scroll: '📜',
+    web_wait: '⏳',
+    web_session: '🗂️',
+    web_tab_open: '🆕',
+    web_tab_switch: '🔀',
+    web_tab_close: '🚪',
+    web_tabs: '🪟',
+    web_download: '⬇️',
+    web_upload: '⬆️',
+    cua_screenshot: '👁️',
+    cua_click: '👆',
+    cua_move: '🫳',
+    cua_type: '🔤',
+    cua_press: '🎛️',
+    cua_scroll: '↕️',
+    computer_use: '🤖',
+    persona_digest: '🧙',
+    fs: '🗃️',
+    hardware: '🔧',
+    todo: '✅',
+    cron_manage: '⏰',
+    threads_manage: '🧵',
+    message: '💬',
+    typing: '📝',
+    presence: '🟢',
+    delete_message: '🗑️',
+    mark_read: '👀',
+    spawn: '🪺',
+    subagent_status: '🔍',
+    workspace_tasks: '🗒️',
+    workspace_manage: '🏢',
 };
 
-const EDIT_THROTTLE_MS = 1500;
+const EDIT_THROTTLE_MS = 1000;
 const TEXT_BUDGET = 1900;
 const PREVIEW_CAP = 60;
+type ProgressOutcome = 'done' | 'interrupted' | 'failed';
 
 export interface ProgressDeps {
     enabled: boolean;
     /** Send a new message; must resolve to the platform SendResult (messageId optional). */
-    send: (adapterId: string, chatId: string, content: string) => Promise<{ messageId?: string } | null>;
+    send: (adapterId: string, chatId: string, content: string) => Promise<{ success?: boolean; messageId?: string; error?: string } | null>;
     /** Edit an existing message. Null when the adapter lacks edit support. */
     edit: ((adapterId: string, chatId: string, messageId: string, content: string) => Promise<unknown>) | null;
 }
@@ -70,12 +123,10 @@ export class ToolProgressBubble {
     private timer: ReturnType<typeof setTimeout> | null = null;
     private closed = false;
     private totalCount = 0;
-    private done = false;
-    private streamedText = '';
-    private currentTool = '';
     private flushPromise: Promise<boolean> | null = null;
     private flushPending = false;
     private forcePending = false;
+    private outcome: ProgressOutcome = 'done';
 
     constructor(
         private deps: ProgressDeps,
@@ -87,65 +138,59 @@ export class ToolProgressBubble {
     async toolLine(name: string, args?: Record<string, unknown>): Promise<void> {
         if (this.closed || !this.deps.enabled) return;
         try {
-            const emoji = EMOJI[name] || '⚙️';
             const prev = previewOf(name, args);
+            const emoji = TOOL_EMOJI[name] ?? '🧰';
             this.totalCount++;
-            this.currentTool = name;
             this.lines.push(prev ? `${emoji} **${name}** \`${prev}\`` : `${emoji} **${name}**`);
             if (this.lines.length > 40) this.lines.splice(0, this.lines.length - 40);
             await this.flush(false);
         }
-        catch { /* never break an agent turn over cosmetics */ }
+        catch (error) {
+            console.error(`[progress] Could not record ${name} activity for ${this.adapterId}/${this.chatId}:`, error);
+        }
     }
 
-    async toolDone(name: string): Promise<void> {
-        if (this.closed || this.currentTool !== name) return;
-        this.currentTool = '';
-        try { await this.flush(false); } catch { /* cosmetic only */ }
+    async todoLine(progressText: string): Promise<void> {
+        if (this.closed || !this.deps.enabled) return;
+        const escaped = redactSensitiveValues(progressText)
+            .replaceAll('\\', '\\\\')
+            .replaceAll('"', '\\"')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!escaped) return;
+        const maxTextLength = TEXT_BUDGET - '⚙️ **Working…**\n✅ todo [completed]: ""'.length;
+        const text = escaped.length > maxTextLength ? `${escaped.slice(0, maxTextLength - 3)}...` : escaped;
+        this.lines.push(`✅ todo [completed]: "${text}"`);
+        if (this.lines.length > 40) this.lines.splice(0, this.lines.length - 40);
+        await this.flush(false);
     }
 
-    /** Stream assistant text into the same editable channel message. */
-    async streamText(delta: string): Promise<void> {
-        if (this.closed || !delta || !this.deps.edit) return;
-        this.streamedText += delta;
-        try { await this.flush(false); } catch { /* never break an agent turn over cosmetics */ }
-    }
-
-    /** Force a final edit (turn finished). Returns true when finalText was delivered in-place. */
-    async finalize(finalText?: string): Promise<boolean> {
-        if (this.closed) return false;
+    /** Force a final edit (turn finished), collapsing the bubble to one line. */
+    async finalize(outcome: ProgressOutcome = 'done'): Promise<void> {
+        if (this.closed) return;
         // Never posted a message and no tool lines — don't create a stray
         // "Working…" bubble for tool-less turns.
-        if (this.messageId === null && this.lines.length === 0 && !this.streamedText) { this.closed = true; return false; }
+        if (this.messageId === null && this.totalCount === 0) { this.closed = true; return; }
         this.closed = true;
-        this.done = true;
+        this.outcome = outcome;
         if (this.timer) { clearTimeout(this.timer); this.timer = null; }
         if (this.flushPromise) await this.flushPromise;
         if (this.timer) { clearTimeout(this.timer); this.timer = null; }
-        const canDeliverFinal = typeof finalText === 'string'
-            && finalText.length <= TEXT_BUDGET
-            && this.messageId !== null
-            && this.messageId !== ''
-            && this.deps.edit !== null;
-        if (canDeliverFinal) this.streamedText = finalText;
-        else if (typeof finalText === 'string' && finalText.length > TEXT_BUDGET) this.streamedText = '';
         try {
-            const flushed = await this.flush(true);
-            return canDeliverFinal && flushed;
-        } catch { /* fall back to the regular channel send */ }
-        return false;
+            if (!await this.flush(true) && this.totalCount > 0) {
+                console.error(`[progress] Final activity summary was not delivered for ${this.adapterId}/${this.chatId}.`);
+            }
+        } catch (error) {
+            console.error(`[progress] Could not finalize activity for ${this.adapterId}/${this.chatId}:`, error);
+        }
     }
 
     private render(): string {
-        if (this.streamedText) {
-            let text = this.streamedText;
-            if (text.length > TEXT_BUDGET) text = '…' + text.slice(-(TEXT_BUDGET - 1));
-            const activity = !this.done && this.currentTool ? `\n\n⚙️ **Using ${this.currentTool}…**` : '';
-            return text + activity;
+        if (this.closed) {
+            const prefix = this.outcome === 'done' ? '✅ **Done' : this.outcome === 'interrupted' ? '⏸️ **Interrupted' : '⚠️ **Failed';
+            return `${prefix} — ${this.totalCount} tool call${this.totalCount === 1 ? '' : 's'}**`;
         }
-        const header = this.done
-            ? `✅ **Done — ${this.totalCount} tool call${this.totalCount === 1 ? '' : 's'}**`
-            : '⚙️ **Working…**';
+        const header = '⚙️ **Working…**';
         let ls = this.lines.slice();
         while (ls.length > 1 && ((header + '\n').length + ls.join('\n').length) > TEXT_BUDGET) {
             ls.shift();
@@ -193,17 +238,25 @@ export class ToolProgressBubble {
         try {
             if (this.messageId === null) {
                 const r = await this.deps.send(this.adapterId, this.chatId, text);
+                if (!r || r.success === false) {
+                    throw new Error(r?.error ?? 'Channel send returned no successful delivery result.');
+                }
                 // '' sentinel = sent but not editable (no messageId back)
                 this.messageId = r && r.messageId ? r.messageId : '';
                 if (this.deps.edit === null) this.closed = false;
             }
             else if (this.messageId !== '' && this.deps.edit) {
                 const edited = await this.deps.edit(this.adapterId, this.chatId, this.messageId, text);
-                if (edited === null) return false;
+                if (edited === null || edited === false) {
+                    throw new Error('Channel did not confirm the progress-message edit.');
+                }
             }
             this.lastEdit = Date.now();
             return this.messageId !== '';
         }
-        catch { return false; }
+        catch (error) {
+            console.error(`[progress] Delivery failed for ${this.adapterId}/${this.chatId}:`, error);
+            return false;
+        }
     }
 }

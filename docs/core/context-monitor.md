@@ -9,7 +9,7 @@ The context monitor tracks estimated token usage across the conversation and tak
 | Threshold | Level | Action |
 |-----------|-------|--------|
 | **70%** | ⚠️ Warning | Logs a warning. No modification. |
-| **80%** | 🔄 Compacting | Stages context to COMB, then summarizes old messages. Keeps system prompt + recent 40%. |
+| **80%** | 🔄 Compacting | Stages a deterministic context snapshot to warm VDB, then compacts old messages. Keeps system prompt + recent 40%. |
 | **90%** | 🚨 Emergency | Saves full transcript to disk, hard-truncates to last 10 messages. |
 
 ## Architecture
@@ -22,7 +22,7 @@ Every Agent Turn:
                     ↓
          ok → pass through unchanged
          warning → log, pass through
-         compacting → COMB stage + summarize old messages
+         compacting → warm VDB snapshot + excerpt compaction
          emergency → save transcript + hard truncate
 ```
 
@@ -36,9 +36,9 @@ For structured message content (tool calls, multi-part messages), the monitor es
 
 When the context hits 80%, the monitor performs intelligent compaction:
 
-1. **COMB stage** — the current conversation is summarized and staged via `comb_stage` so the next session retains the context
+1. **Warm snapshot** — a deterministic excerpt of the current conversation is indexed in VDB for recovery. This is not an LLM-generated summary and is not promoted to cold Memograph memory.
 2. **System prompt preserved** — system messages are never compacted
-3. **Summary injection** — old messages are replaced with a condensed summary (max 2000 chars)
+3. **Excerpt injection** — old messages are replaced with role-labeled snippets (max 2000 chars)
 4. **Recent messages kept** — the most recent 40% of non-system messages are preserved verbatim
 
 This means the agent keeps its instructions and recent context while older conversation history is compressed.

@@ -61,9 +61,9 @@ export class ProcessManager {
     return managed;
   }
 
-  poll(id: string, _timeout?: number): { output: string; running: boolean; exitCode: number | null } | null {
+  poll(id: string, sessionId?: string): { output: string; running: boolean; exitCode: number | null } | null {
     const p = this.processes.get(id);
-    if (!p) return null;
+    if (!p || p.sessionId !== sessionId) return null;
 
     const newOutput = p.output.slice(p.outputOffset).join('');
     p.outputOffset = p.output.length;
@@ -72,9 +72,9 @@ export class ProcessManager {
     return { output: newOutput, running, exitCode: p.exitCode };
   }
 
-  kill(id: string): boolean {
+  kill(id: string, sessionId?: string): boolean {
     const p = this.processes.get(id);
-    if (!p) return false;
+    if (!p || p.sessionId !== sessionId) return false;
     p.killed = true;
     if (process.platform === 'win32') {
       killProcessTree(p.proc);
@@ -85,8 +85,8 @@ export class ProcessManager {
     return true;
   }
 
-  list(): Array<{ id: string; command: string; pid: number; running: boolean; startedAt: number; sessionId?: string }> {
-    return [...this.processes.values()].map(p => ({
+  list(sessionId?: string): Array<{ id: string; command: string; pid: number; running: boolean; startedAt: number; sessionId?: string }> {
+    return [...this.processes.values()].filter(p => p.sessionId === sessionId).map(p => ({
       id: p.id,
       command: p.command,
       pid: p.pid,
@@ -142,9 +142,9 @@ export const processStartTool: ToolDefinition = {
     },
     required: ['command'],
   },
-  async execute(input) {
+  async execute(input, options) {
     const mgr = getProcessManager();
-    const p = mgr.start(input.command as string, input.workdir as string | undefined);
+    const p = mgr.start(input.command as string, input.workdir as string | undefined, options?.sessionId);
     return JSON.stringify({ processId: p.id, pid: p.pid, command: p.command });
   },
 };
@@ -160,22 +160,23 @@ export const processPollTool: ToolDefinition = {
     },
     required: ['processId'],
   },
-  async execute(input) {
+  async execute(input, options) {
     const mgr = getProcessManager();
+    const sessionId = options?.sessionId;
     const timeout = input.timeout as number | undefined;
 
     // If timeout specified, wait for output
     if (timeout && timeout > 0) {
       const start = Date.now();
       while (Date.now() - start < timeout) {
-        const result = mgr.poll(input.processId as string);
+        const result = mgr.poll(input.processId as string, sessionId);
         if (!result) return JSON.stringify({ error: 'Unknown process ID' });
         if (result.output || !result.running) return JSON.stringify(result);
         await new Promise(r => setTimeout(r, 200));
       }
     }
 
-    const result = mgr.poll(input.processId as string);
+    const result = mgr.poll(input.processId as string, sessionId);
     if (!result) return JSON.stringify({ error: 'Unknown process ID' });
     return JSON.stringify(result);
   },
@@ -191,9 +192,9 @@ export const processKillTool: ToolDefinition = {
     },
     required: ['processId'],
   },
-  async execute(input) {
+  async execute(input, options) {
     const mgr = getProcessManager();
-    const ok = mgr.kill(input.processId as string);
+    const ok = mgr.kill(input.processId as string, options?.sessionId);
     return ok ? 'Process killed' : 'Unknown process ID';
   },
 };
@@ -202,9 +203,9 @@ export const processListTool: ToolDefinition = {
   name: 'process_list',
   description: 'List all background processes.',
   parameters: { type: 'object', properties: {}, required: [] },
-  async execute() {
+  async execute(_input, options) {
     const mgr = getProcessManager();
-    const procs = mgr.list();
+    const procs = mgr.list(options?.sessionId);
     if (procs.length === 0) return 'No background processes running.';
     return JSON.stringify(procs, null, 2);
   },

@@ -11,6 +11,7 @@ import { buildSystemPrompt } from '../agent/system-prompt.js';
 import { createSandboxedRegistry, type SessionContext } from '../tools/sandbox.js';
 import { PolicyEngine } from '../tools/policy.js';
 import { BlinkController } from '../agent/blink.js';
+import { EXPANDED_CAP as PULSE_EXPANDED_CAP } from '../agent/pulse.js';
 
 const MAX_DEPTH = 3;
 
@@ -90,6 +91,8 @@ export class SubAgentManager {
       chatType: 'direct',
       senderId: config.parentSessionId,
       isOwner: false,
+      workspaceRoot: workspace,
+      ...(config.parentTier ? { inheritedTier: config.parentTier } : {}),
     };
     const sandboxedTools = createSandboxedRegistry(toolRegistry, subagentCtx);
 
@@ -98,7 +101,7 @@ export class SubAgentManager {
       tools: sandboxedTools.list().map(t => t.name),
       extraContext: `You are a sub-agent spawned for a specific task. Complete it and provide a concise result.
 
-IMPORTANT: You have a maximum of ${config.maxIterations ?? 25} iterations. When you see a warning about approaching the limit, immediately wrap up and return your best result so far. Do NOT let yourself hit the wall — provide partial results rather than nothing.
+IMPORTANT: Your iteration cap per runner pass is ${config.maxIterations ?? 100}.${config.maxIterations === undefined ? ` PULSE may expand it up to ${PULSE_EXPANDED_CAP}; BLINK continues across budget boundaries until you finish.` : ' BLINK continues across passes unless the run is stopped or cancelled.'} Do not stop early solely because the current pass is approaching its limit. Continue the task, validate the work, and report only genuine blockers.
 
 Task: ${config.task}`,
     });
@@ -119,14 +122,14 @@ Task: ${config.task}`,
     providerConfig: ProviderConfig,
     toolRegistry: ToolExecutor,
   ): Promise<void> {
-    const maxIter = config.maxIterations ?? 25;
-    const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
+    const maxIter = config.maxIterations ?? 100;
+    const blinkCtrl = new BlinkController({ enabled: true, prepareAt: 3, cooldownMs: 1000 });
     const todoScope = `subagent-${randomUUID()}`;
     const policyEngine = new PolicyEngine();
     policyEngine.setSessionPolicy({
       sessionId: session.id,
       tools: {},
-      maxIterations: maxIter,
+      maxIterations: config.maxIterations ?? PULSE_EXPANDED_CAP,
     });
 
     try {
@@ -159,6 +162,45 @@ Task: ${config.task}`,
           policyEngine,
           abortSignal: runtime.abortController.signal,
           blinkController: blinkCtrl,
+          onEvent: event => {
+            if (event.type === 'thinking_delta') {
+              this.recordActivity(handle, 'reasoning', 'Reasoning');
+            } else if (event.type === 'text_delta') {
+              this.recordActivity(handle, 'writing', 'Writing response');
+            }
+          },
+          onToolStart: name => {
+            handle.activity = `Executing ${name}`;
+            handle.activeTool = name;
+            handle.operations = [...(handle.operations ?? []), { name, status: 'running' as const, startedAt: Date.now() }].slice(-12);
+            handle.activityLog = [...(handle.activityLog ?? []), {
+              timestamp: Date.now(),
+              kind: 'tool' as const,
+              label: `Started ${name}`,
+              toolName: name,
+              status: 'running' as const,
+            }].slice(-80);
+          },
+          onToolEnd: name => {
+            const operations = [...(handle.operations ?? [])];
+            for (let index = operations.length - 1; index >= 0; index--) {
+              if (operations[index].name === name && operations[index].status === 'running') {
+                operations[index] = { ...operations[index], status: 'done', completedAt: Date.now() };
+                break;
+              }
+            }
+            handle.operations = operations;
+            delete handle.activeTool;
+            const activityLog = [...(handle.activityLog ?? [])];
+            for (let index = activityLog.length - 1; index >= 0; index--) {
+              if (activityLog[index].kind === 'tool' && activityLog[index].toolName === name && activityLog[index].status === 'running') {
+                activityLog[index] = { ...activityLog[index], label: `Completed ${name}`, status: 'done' };
+                break;
+              }
+            }
+            handle.activityLog = activityLog.slice(-80);
+            this.recordActivity(handle, 'reasoning', 'Reasoning');
+          },
         });
 
         session.messages = result.messages;
@@ -207,6 +249,11 @@ Task: ${config.task}`,
         handle.status = 'completed';
         handle.result = result.text;
         handle.completedAt = Date.now();
+        handle.activityLog = [...(handle.activityLog ?? []), {
+          timestamp: Date.now(),
+          kind: 'writing' as const,
+          label: 'Run completed',
+        }].slice(-80);
         this.sessionManager.save(session);
         this.onComplete?.(config.parentSessionId, handle);
         return;
@@ -223,6 +270,18 @@ Task: ${config.task}`,
     } finally {
       this.runtimes.delete(session.id);
     }
+  }
+
+  private recordActivity(handle: SubAgentHandle, kind: 'reasoning' | 'writing', label: string): void {
+    if (handle.activity === label) return;
+    handle.activity = label;
+    delete handle.activeTool;
+    const activityLog = handle.activityLog ?? [];
+    const latest = activityLog[activityLog.length - 1];
+    if (latest?.kind !== kind || latest.label !== label) {
+      activityLog.push({ timestamp: Date.now(), kind, label });
+    }
+    handle.activityLog = activityLog.slice(-80);
   }
 
   kill(sessionId: string): boolean {

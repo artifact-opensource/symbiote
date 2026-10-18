@@ -19,7 +19,7 @@
 
 export interface BlinkConfig {
   enabled: boolean;
-  maxDepth: number;        // Max consecutive blinks per conversation (default: 5)
+  maxDepth: number;        // Max consecutive blinks per conversation (default: unlimited)
   prepareAt: number;       // Mark continuation state at N iterations remaining (default: 3)
   cooldownMs: number;      // Delay between blink and resume (default: 1000)
   checkpointInterval: number;  // Record a runtime checkpoint every N iterations (default: 25, 0 = disabled)
@@ -27,7 +27,7 @@ export interface BlinkConfig {
 
 export const DEFAULT_BLINK_CONFIG: BlinkConfig = {
   enabled: true,
-  maxDepth: 5,
+  maxDepth: Number.POSITIVE_INFINITY,
   prepareAt: 3,
   cooldownMs: 1000,
   checkpointInterval: 25,
@@ -61,7 +61,7 @@ function freshState(): BlinkState {
 
 export function isBlinkControlMessage(content: unknown): boolean {
   return typeof content === 'string'
-    && (/^\s*(?:⚡ BLINK APPROACHING —|🔖 CHECKPOINT —|⚡ BLINK COMPLETE —|⚠️ SYSTEM WARNING:)/.test(content)
+    && (/^\s*(?:(?:\u{26A1}\s*)?BLINK APPROACHING —|(?:\u{1F516}\s*)?CHECKPOINT —|(?:\u{26A1}\s*)?BLINK COMPLETE —|(?:\u{26A0}\u{FE0F}\s*)?SYSTEM WARNING:)/u.test(content)
       || /^\s*Internal completion review:\s*/i.test(content));
 }
 
@@ -164,6 +164,7 @@ export class BlinkController {
     this.state.totalIterations += iterations;
     this.state.totalToolCalls += toolCalls;
     this.state.blinkTimestamps.push(Date.now());
+    if (this.state.blinkTimestamps.length > 100) this.state.blinkTimestamps.shift();
     this.state.prepared = false;  // Reset for next cycle
     this.state.lastCheckpointAt = 0;  // Reset checkpoint counter for new cycle
     this.state.phase = 'blinking';

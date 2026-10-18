@@ -8,19 +8,26 @@
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
 import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 import { fetchWithRetry } from './retry.js';
+import { createDesktopImageMessage, extractOpenAIImages, extractToolText } from './openai-images.js';
 
 const DEFAULT_BASE_URL = 'https://integrate.api.nvidia.com';
 const DEFAULT_MODEL = 'meta/llama-4-maverick-17b-128e-instruct';
 
 function convertMessages(messages: Message[]): unknown[] {
   const out: unknown[] = [];
+  let pendingToolImages: unknown[] = [];
   for (const msg of messages) {
+    if (msg.role !== 'tool' && pendingToolImages.length > 0) {
+      out.push(createDesktopImageMessage(pendingToolImages));
+      pendingToolImages = [];
+    }
     if (msg.role === 'system') {
       out.push({ role: 'system', content: typeof msg.content === 'string' ? msg.content : msg.content.map(b => b.text ?? '').join('') });
       continue;
     }
     if (msg.role === 'tool') {
-      out.push({ role: 'tool', tool_call_id: msg.tool_call_id, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) });
+      out.push({ role: 'tool', tool_call_id: msg.tool_call_id, content: extractToolText(msg.content) });
+      pendingToolImages.push(...extractOpenAIImages(msg.content));
       continue;
     }
     if (msg.role === 'assistant' && msg.tool_calls?.length) {
@@ -38,6 +45,7 @@ function convertMessages(messages: Message[]): unknown[] {
     }
     out.push({ role: msg.role, content: typeof msg.content === 'string' ? msg.content : msg.content.map(b => b.text ?? '').join('') });
   }
+  if (pendingToolImages.length > 0) out.push(createDesktopImageMessage(pendingToolImages));
   return out;
 }
 

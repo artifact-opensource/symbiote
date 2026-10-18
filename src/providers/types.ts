@@ -6,6 +6,7 @@ export interface Message {
   name?: string;
   tool_call_id?: string;
   tool_calls?: ToolCall[];
+  is_error?: boolean;
 }
 
 export interface ContentBlock {

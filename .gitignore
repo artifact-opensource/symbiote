@@ -32,6 +32,19 @@ symbiote.json
 whatsapp-auth/
 .wwebjs_auth/
 .mcp/
+/.projects/
+/.sessions/
+/.agents/
+/.subagents/
+.cache/
+.tmp*/
+/memory/
+/sessions/
+/archive/
+/staging/
+*.jsonl
+*.pid
+*.sock
 
 # ── Runtime state, memory & user data ───────────────────
 .symbiote/
@@ -46,14 +59,6 @@ whatsapp-auth/
 .pulse/*.log
 .pulse/*.pid
 .cache/
-.tmp*/
-/memory/
-/sessions/
-/archive/
-/staging/
-*.jsonl
-*.pid
-*.sock
 
 # ── Agent identity & workspace files (per-instance) ─────
 /IDENTITY.md
@@ -102,12 +107,8 @@ Thumbs.db
 desktop.ini
 tmp_review_section.txt
 launchers/start_subagent.bat
-.gitignore
-.gitignore
-.gitignore
-.gitignore
+launcher/start_subagent.sh
 skills/subagents/autonomous-monitor/SKILL.md
-launchers/start_subagent.sh
 skills/subagents/master-developer/SKILL.md
 skills/subagents/research-agent/SKILL.md
 scripts/rollback-ops-memory.ps1
@@ -120,13 +121,13 @@ package.json
 .models/vosk-model-small-en-us-0.15/conf/model.conf
 .models/vosk-model-small-en-us-0.15/graph/disambig_tid.int
 .models/vosk-model-small-en-us-0.15/graph/Gr.fst
-.models/vosk-model-small-en-us-0.15/graph/HCLr.fst
+.models/vosk-model-small-en-us-0.15/graph/HClr.fst
 .models/vosk-model-small-en-us-0.15/graph/phones/word_boundary.int
 .models/vosk-model-small-en-us-0.15/ivector/final.dubm
 .models/vosk-model-small-en-us-0.15/ivector/final.ie
 .models/vosk-model-small-en-us-0.15/ivector/final.mat
-.models/vosk-model-small-en-us-0.15/ivector/global_cmvn.stats
 .models/vosk-model-small-en-us-0.15/ivector/online_cmvn.conf
 .models/vosk-model-small-en-us-0.15/ivector/splice.conf
 test_sample.wav
 .models/vosk-model-small-en-us-0.15
+.admin

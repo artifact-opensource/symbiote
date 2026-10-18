@@ -230,7 +230,7 @@ export function ok(msg: string): string {
 }
 
 export function warn(msg: string): string {
-  return `  ${palette.yellow}⚠${palette.reset} ${msg}`;
+  return `  ${palette.yellow}Warning:${palette.reset} ${msg}`;
 }
 
 export function fail(msg: string): string {

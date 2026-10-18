@@ -64,7 +64,7 @@ export class CronBudgetManager {
   async executeJob(jobId: string): Promise<{ ran: boolean; reason?: string }> {
     const check = this.canRun(jobId);
     if (!check.allowed) {
-      console.warn(`⛔ Job "${jobId}" blocked: ${check.reason}`);
+      console.warn(`Job "${jobId}" blocked: ${check.reason}`);
       return { ran: false, reason: check.reason };
     }
 
@@ -78,7 +78,7 @@ export class CronBudgetManager {
       // Warn at 80%
       const pct = tracker.used / tracker.dailyLimit;
       if (pct >= 0.8) {
-        console.warn(`⚠️  Resource "${r.resource}" at ${Math.round(pct * 100)}% (${tracker.used}/${tracker.dailyLimit})`);
+        console.warn(`Warning: resource "${r.resource}" at ${Math.round(pct * 100)}% (${tracker.used}/${tracker.dailyLimit})`);
       }
     }
 

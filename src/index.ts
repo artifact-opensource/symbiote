@@ -37,18 +37,21 @@ import { webFetchTool } from './tools/builtin/web-fetch.js';
 import { memorySearchTool } from './tools/builtin/memory.js';
 import { ingestWorkspaceSessions, vdbSearchTool, vdbIngestTool, vdbStatsTool } from './tools/builtin/memory-vdb.js';
 import { cuaTools } from './tools/builtin/web-browser.js';
-import { combRecallTool, combStageTool, setCombVdbHook } from './tools/builtin/comb.js';
+import { combRecallTool, combStageTool, memoryOffloadTool, setCombVdbHook, setMemoryOffloadHook } from './tools/builtin/comb.js';
 import { todoTool } from './tools/shared-todo.js';
 import { createWorkspaceSessionManager } from './sessions/manager.js';
 import { SubAgentManager } from './sessions/sub-agent.js';
 import { buildSystemPrompt } from './agent/system-prompt.js';
-import { DEFAULT_MAX_CONTEXT_TOKENS, runAgent } from './agent/runner.js';
+import { DEFAULT_MAX_CONTEXT_TOKENS, formatTodoProgressUpdate, runAgent } from './agent/runner.js';
 import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './providers/types.js';
 import { ContextStore } from './agent/context-store.js';
 import { getSharedVectorDB } from './memory/vdb.js';
 import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from './memory/memograph.js';
+import { DurableMemory, resolveDurableMemoryArchive } from './memory/durable-memory.js';
 import { importSkillFiles, resolveSkillsDir } from './memory/skills.js';
+import { readBootKnowledge } from './memory/knowledge.js';
 import { personaDigestTool } from './tools/builtin/consolidate.js';
+import { computerUseTool, initializeComputerUseRuntime, shutdownComputerUseRuntime } from './tools/builtin/computer-use.js';
 import type { Message } from './providers/types.js';
 import type { Session } from './sessions/types.js';
 import {
@@ -110,12 +113,13 @@ async function main() {
 
   // Setup tools
   const registry = new ToolRegistry();
-  for (const tool of [readTool, writeTool, editTool, execTool, imageTool, processStartTool, processPollTool, processKillTool, processListTool, ttsTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool, todoTool, personaDigestTool]) {
+  for (const tool of [readTool, writeTool, editTool, execTool, imageTool, processStartTool, processPollTool, processKillTool, processListTool, ttsTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool, memoryOffloadTool, todoTool, personaDigestTool, computerUseTool]) {
     registry.register(tool);
   }
   for (const tool of [vdbSearchTool, vdbIngestTool, vdbStatsTool]) registry.register(tool);
   for (const tool of cuaTools) registry.register(tool);
   for (const tool of adminTools) registry.register(tool);
+  await initializeComputerUseRuntime();
   const memoryBootstrap = ingestWorkspaceSessions();
   const memographBootstrap = importMemoGraphSnapshots(
     getSharedVectorDB(config.workspace),
@@ -126,12 +130,19 @@ async function main() {
     resolveSkillsDir(config.workspace),
   );
   const workspaceVdb = getSharedVectorDB(config.workspace);
+  const durableMemory = new DurableMemory(
+    workspaceVdb,
+    resolveDurableMemoryArchive(config.workspace),
+    resolveMemoGraphStorageDir(config.workspace),
+  );
   setCombVdbHook(
     (text, source) => {
-      workspaceVdb.index({ id: '', text, source, role: 'context', timestamp: Date.now(), sessionId });
+      return workspaceVdb.index({ id: '', text, source, role: 'context', timestamp: Date.now(), sessionId });
     },
     (source, count) => workspaceVdb.recent(source, count),
+    (query, count, namespace) => workspaceVdb.search(query, count, { namespace }),
   );
+  setMemoryOffloadHook((summary, memorySessionId, source) => durableMemory.offload(summary, memorySessionId, source));
   if (memoryBootstrap.indexed > 0) {
     console.log(`[vdb] Loaded ${memoryBootstrap.indexed} session memories`);
   }
@@ -161,6 +172,7 @@ async function main() {
     chatType: 'direct',
   });
   const contextStore = new ContextStore(getSharedVectorDB(config.workspace), { sessionId });
+  contextStore.ingestBoot(readBootKnowledge(config.workspace));
 
   if (session.messages.length === 0 || session.messages[0].role !== 'system') {
     session.messages.unshift({ role: 'system', content: systemPrompt });
@@ -202,8 +214,6 @@ async function main() {
         }
       : provConfig;
     activity.start();
-    let streamedText = '';
-    let streamingOutput = false;
     try {
       const result = await runAgent(msgs, {
         provider: routeChoice.provider,
@@ -215,25 +225,15 @@ async function main() {
         abortSignal,
         onProgress() {},
         onCheckpoint(messages) { session.messages = messages; sessionMgr.save(session); },
+        onTodoCompleted(update) {
+          console.log(`\n${formatTodoProgressUpdate(update)}\n`);
+        },
         onEvent(ev) {
           if (ev.type === 'usage') {
             sessionMgr.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
           }
-          if (ev.type === 'text_delta') {
-            streamedText += ev.text;
-            if (!streamingOutput) {
-              activity.stop();
-              process.stdout.write(`\n${palette.violet}◈${palette.reset} `);
-              streamingOutput = true;
-            }
-            process.stdout.write(ev.text);
-          }
         },
         onToolStart(name, input) {
-          if (streamingOutput) {
-            process.stdout.write('\n');
-            streamingOutput = false;
-          }
           sessionMgr.trackToolCall(session, name);
           toolStarts.push({ name, at: Date.now(), detail: describeCall(input) });
           activity.start(name);
@@ -250,11 +250,7 @@ async function main() {
         },
       });
       activity.stop();
-      if (result.text && streamedText === result.text) {
-        process.stdout.write('\n\n');
-      } else if (result.text) {
-        process.stdout.write(`\n${palette.violet}◈${palette.reset} ${result.text}`);
-      }
+      if (result.text) process.stdout.write(`\n${palette.violet}◈${palette.reset} ${result.text}\n\n`);
       return result;
     } catch (err) {
       activity.stop();

@@ -1,8 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ToolProgressBubble } from '../channels/progress-bubble.js';
+import { TOOL_EMOJI, ToolProgressBubble } from '../channels/progress-bubble.js';
 
-test('progress bubble stays within Discord message limits and redacts sensitive headers', async () => {
+test('every registered built-in tool has a distinct progress icon', () => {
+  const registeredTools = [
+    'read', 'write', 'edit', 'exec', 'image', 'image_gen', 'process_start', 'process_poll',
+    'process_kill', 'process_list', 'tts', 'stt', 'web_fetch', 'memory_search', 'comb_recall',
+    'comb_stage', 'memory_offload', 'memory_recall', 'memory_ingest', 'memory_stats',
+    'google_workspace', 'azure_cloud', 'oci_cloud', 'n8n_cloud', 'kaggle_cloud',
+    'kaggle_kernel_push', 'web_browse', 'web_click', 'web_type', 'web_screenshot',
+    'web_extract', 'web_scroll', 'web_wait', 'web_session', 'web_tab_open', 'web_tab_switch',
+    'web_tab_close', 'web_tabs', 'web_download', 'web_upload', 'cua_screenshot', 'cua_click',
+    'cua_move', 'cua_type', 'cua_press', 'cua_scroll', 'computer_use', 'persona_digest', 'fs',
+    'hardware', 'todo', 'cron_manage', 'threads_manage', 'message', 'typing', 'presence',
+    'delete_message', 'mark_read', 'spawn', 'subagent_status', 'workspace_tasks', 'workspace_manage',
+  ];
+  assert.deepEqual(Object.keys(TOOL_EMOJI).sort(), registeredTools.sort());
+  assert.equal(new Set(Object.values(TOOL_EMOJI)).size, registeredTools.length);
+});
+
+test('progress bubble appends tool starts without per-tool completion marks, redacts secrets, and ends with a one-line count', async () => {
   const sent: string[] = [];
   const edits: string[] = [];
   const bubble = new ToolProgressBubble({
@@ -19,6 +36,11 @@ test('progress bubble stays within Discord message limits and redacts sensitive 
   await bubble.toolLine('exec', {
     command: 'curl -H "Authorization: Bearer discord-secret-value" https://example.test',
   });
+  assert.match(sent[0], /Working/);
+  assert.match(sent[0], /exec/);
+  assert.match(sent[0], /⚡ \*\*exec\*\*/);
+  assert.ok(!sent[0].includes('discord-secret-value'));
+
   for (let i = 0; i < 100; i++) {
     await bubble.toolLine('exec', { command: `echo operational-check-${i}` });
   }
@@ -28,34 +50,51 @@ test('progress bubble stays within Discord message limits and redacts sensitive 
   assert.ok(messages.length > 0);
   assert.ok(messages.every(message => message.length <= 2000));
   assert.ok(messages.every(message => !message.includes('discord-secret-value')));
-  assert.match(edits.at(-1) ?? '', /Done — 101 tool calls/);
+  assert.ok(messages.some(message => message.includes('⚡ **exec**')));
+  assert.equal(edits.at(-1), '✅ **Done — 101 tool calls**');
 });
 
-test('streamed channel reply is edited into the final response without a duplicate send', async () => {
+test('assistant text is not accepted or shown in the operational progress bubble', async () => {
   const sent: string[] = [];
   const edits: string[] = [];
   const bubble = new ToolProgressBubble({
     enabled: true,
     send: async (_adapterId, _chatId, content) => {
       sent.push(content);
-      return { messageId: 'live-reply' };
+      return { messageId: 'progress-message' };
     },
     edit: async (_adapterId, _chatId, _messageId, content) => {
       edits.push(content);
     },
   }, 'discord-main', 'channel');
 
-  await bubble.streamText('I found ');
-  await bubble.toolLine('web_browse', { url: 'https://example.test' });
-  await bubble.toolDone('web_browse');
-  await bubble.streamText('the answer.');
+  await bubble.toolLine('web_fetch', { url: 'https://example.test' });
+  await bubble.finalize();
 
-  assert.equal(await bubble.finalize('<@user> I found the answer.'), true);
-  assert.equal(sent.length, 1);
-  assert.equal(edits.at(-1), '<@user> I found the answer.');
+  assert.ok([...sent, ...edits].every(message => !message.includes('answer text')));
+  assert.equal(edits.at(-1), '✅ **Done — 1 tool call**');
 });
 
-test('concurrent stream deltas create one message and coalesce edits', async () => {
+test('todo completion progress is appended to the editable bubble in the requested format', async () => {
+  const sent: string[] = [];
+  const bubble = new ToolProgressBubble({
+    enabled: true,
+    send: async (_adapterId, _chatId, content) => {
+      sent.push(content);
+      return { messageId: 'progress-message' };
+    },
+    edit: async () => undefined,
+  }, 'discord-main', 'channel');
+
+  await bubble.todoLine('Progress update: completed "First task" (1/2 checklist tasks complete). Continuing with "Second task".');
+
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /✅ todo \[completed\]: "Progress update: completed \\"First task\\"/);
+  assert.ok(!sent[0].includes('⚙️ **todo**'));
+  await bubble.finalize();
+});
+
+test('concurrent tool events create one message and finalization leaves one summary line', async () => {
   const sent: string[] = [];
   const edits: string[] = [];
   let releaseSend!: (result: { messageId: string }) => void;
@@ -71,44 +110,52 @@ test('concurrent stream deltas create one message and coalesce edits', async () 
     },
   }, 'discord-main', 'channel');
 
-  const deltas = Array.from({ length: 100 }, (_, index) => bubble.streamText(`token-${index} `));
+  const firstTool = bubble.toolLine('read', { path: 'README.md' });
   await new Promise<void>(resolve => setImmediate(resolve));
   assert.equal(sent.length, 1);
-  const finalText = 'A single complete response.';
-  const finalization = bubble.finalize(finalText);
-  releaseSend({ messageId: 'live-reply' });
-  assert.equal(await finalization, true);
-  await Promise.all(deltas);
+  const finalization = bubble.finalize();
+  releaseSend({ messageId: 'progress-message' });
+  await firstTool;
+  await finalization;
+
   assert.equal(sent.length, 1);
-  assert.equal(edits.at(-1), finalText);
+  assert.equal(edits.at(-1), '✅ **Done — 1 tool call**');
 });
 
-test('streaming stays disabled for adapters that cannot edit messages', async () => {
+test('tool completion does not trigger an additional progress-message edit', async () => {
+  const sent: string[] = [];
+  const edits: string[] = [];
+  const bubble = new ToolProgressBubble({
+    enabled: true,
+    send: async (_adapterId, _chatId, content) => {
+      sent.push(content);
+      return { messageId: 'progress-message' };
+    },
+    edit: async (_adapterId, _chatId, _messageId, content) => {
+      edits.push(content);
+    },
+  }, 'discord-main', 'channel');
+
+  await bubble.toolLine('read', { path: 'README.md' });
+  await bubble.toolLine('exec', { command: 'npm test' });
+  assert.equal(edits.length, 0);
+  assert.match(sent[0], /📖 \*\*read\*\*/);
+  await bubble.finalize();
+  assert.equal(edits.length, 1);
+  assert.equal(edits[0], '✅ **Done — 2 tool calls**');
+});
+
+test('tool-less turns do not create a progress message', async () => {
   const sent: string[] = [];
   const bubble = new ToolProgressBubble({
     enabled: true,
     send: async (_adapterId, _chatId, content) => {
       sent.push(content);
-      return null;
+      return { messageId: 'progress-message' };
     },
-    edit: null,
-  }, 'read-only-adapter', 'channel');
-
-  await bubble.streamText('This should use the normal delivery path.');
-  assert.equal(await bubble.finalize('This should use the normal delivery path.'), false);
-  assert.deepEqual(sent, []);
-});
-
-test('long final responses fall back instead of truncating the channel reply', async () => {
-  const edits: string[] = [];
-  const bubble = new ToolProgressBubble({
-    enabled: true,
-    send: async () => ({ messageId: 'long-reply' }),
-    edit: async (_adapterId, _chatId, _messageId, content) => { edits.push(content); },
+    edit: async () => undefined,
   }, 'discord-main', 'channel');
 
-  await bubble.streamText('Partial streamed content');
-  assert.equal(await bubble.finalize('x'.repeat(1950)), false);
-  assert.match(edits.at(-1) ?? '', /Done — 0 tool calls/);
-  assert.ok(!(edits.at(-1) ?? '').includes('Partial streamed content'));
+  await bubble.finalize();
+  assert.deepEqual(sent, []);
 });

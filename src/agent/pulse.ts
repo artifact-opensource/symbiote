@@ -1,19 +1,19 @@
 // Symbiote — PULSE: Adaptive Iteration Budget Manager
 // 
-// Default cap: 20 iterations per turn
-// If a turn hits 18 iterations → runner auto-expands to 100 (within that turn)
-// If 3 consecutive sessions all iterate under 10 → revert effective cap back to 20
+// Default cap: 100 iterations per runner invocation
+// If a turn reaches 80 iterations → runner auto-expands to 1000
+// If 3 consecutive sessions all iterate under 40 → revert to the configured baseline
 //
 // This module tracks cross-session iteration history and manages the effective cap.
 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 
-const DEFAULT_CAP = 20;
-const EXPANDED_CAP = 100;
-const EXPAND_THRESHOLD = 18;
+const DEFAULT_CAP = 100;
+const EXPANDED_CAP = 1000;
+const EXPAND_THRESHOLD = 80;
 const REVERT_WINDOW = 3;       // Check last N sessions
-const REVERT_THRESHOLD = 10;   // If all N sessions < this, revert
+const REVERT_THRESHOLD = 40;   // If all N sessions < this, revert
 
 interface PulseState {
   effectiveCap: number;
@@ -30,10 +30,14 @@ const DEFAULT_STATE: PulseState = {
 export class PulseBudgetManager {
   private state: PulseState;
   private statePath: string;
+  private readonly baselineCap: number;
+  private readonly expandAt: number;
 
-  constructor(stateDir: string) {
+  constructor(stateDir: string, baselineCap = DEFAULT_CAP) {
     mkdirSync(stateDir, { recursive: true });
     this.statePath = join(stateDir, 'pulse-budget.json');
+    this.baselineCap = Number.isSafeInteger(baselineCap) && baselineCap > 0 ? baselineCap : DEFAULT_CAP;
+    this.expandAt = Math.min(EXPAND_THRESHOLD, Math.max(1, Math.ceil(this.baselineCap * 0.8)));
     this.state = this.load();
   }
 
@@ -44,10 +48,10 @@ export class PulseBudgetManager {
 
   /** Record a completed session's iteration count and evaluate revert */
   recordSession(iterations: number): { reverted: boolean; effectiveCap: number } {
-    if (iterations >= EXPAND_THRESHOLD && this.state.effectiveCap < EXPANDED_CAP) {
+    if (iterations >= this.expandAt && this.state.effectiveCap < EXPANDED_CAP) {
       this.state.effectiveCap = EXPANDED_CAP;
       this.state.expandedAt = Date.now();
-      console.log(`[PULSE] Expanding effective cap ${DEFAULT_CAP} → ${EXPANDED_CAP} after ${iterations} iterations`);
+      console.log(`[PULSE] Expanding effective cap ${this.baselineCap} → ${EXPANDED_CAP} after ${iterations} iterations`);
     }
 
     this.state.recentIterations.push(iterations);
@@ -60,16 +64,16 @@ export class PulseBudgetManager {
     // Check revert condition: if cap is expanded AND last N sessions all < threshold
     let reverted = false;
     if (
-      this.state.effectiveCap > DEFAULT_CAP &&
+      this.state.effectiveCap > this.baselineCap &&
       this.state.recentIterations.length >= REVERT_WINDOW &&
       this.state.recentIterations.every(n => n < REVERT_THRESHOLD)
     ) {
       console.log(
-        `[PULSE] Reverting cap ${this.state.effectiveCap} → ${DEFAULT_CAP}: ` +
+        `[PULSE] Reverting cap ${this.state.effectiveCap} → ${this.baselineCap}: ` +
         `last ${REVERT_WINDOW} sessions all under ${REVERT_THRESHOLD} iterations ` +
         `(${this.state.recentIterations.join(', ')})`
       );
-      this.state.effectiveCap = DEFAULT_CAP;
+      this.state.effectiveCap = this.baselineCap;
       this.state.revertedAt = Date.now();
       reverted = true;
     }
@@ -95,9 +99,18 @@ export class PulseBudgetManager {
   private load(): PulseState {
     try {
       const raw = readFileSync(this.statePath, 'utf-8');
-      return { ...DEFAULT_STATE, ...JSON.parse(raw) };
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') throw new Error('Malformed PULSE state.');
+      const stored = parsed as Partial<PulseState>;
+      const effectiveCap = Number.isSafeInteger(stored.effectiveCap) && (stored.effectiveCap ?? 0) > 0
+        ? Math.max(this.baselineCap, stored.effectiveCap!)
+        : this.baselineCap;
+      const recentIterations = Array.isArray(stored.recentIterations)
+        ? stored.recentIterations.filter((value): value is number => Number.isSafeInteger(value) && value >= 0).slice(-REVERT_WINDOW)
+        : [];
+      return { ...DEFAULT_STATE, ...stored, effectiveCap, recentIterations };
     } catch {
-      return { ...DEFAULT_STATE };
+      return { ...DEFAULT_STATE, effectiveCap: this.baselineCap };
     }
   }
 

@@ -72,15 +72,20 @@ import {
 } from '../tools/builtin/cloud-integrations.js';
 import { CredentialVault, type IntegrationProvider } from '../security/credential-vault.js';
 import { memorySearchTool } from '../tools/builtin/memory.js';
-import { combRecallTool, combStageTool, setCombVdbHook, flushMessages } from '../tools/builtin/comb.js';
+import { combRecallTool, combStageTool, setCombVdbHook, setMemoryOffloadHook, flushMessages } from '../tools/builtin/comb.js';
 import { personaDigestTool } from '../tools/builtin/consolidate.js';
+import { computerUseTool, initializeComputerUseRuntime, shutdownComputerUseRuntime } from '../tools/builtin/computer-use.js';
 import { vdbSearchTool, vdbIngestTool, vdbStatsTool } from '../tools/builtin/memory-vdb.js';
 import { getSharedVectorDB, ingestSessions, makeSessionDocumentId, type VDBDocument } from '../memory/vdb.js';
 import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from '../memory/memograph.js';
+import { DurableMemory, resolveDurableMemoryArchive } from '../memory/durable-memory.js';
 import { importSkillFiles, resolveSkillsDir } from '../memory/skills.js';
+import { readBootKnowledge } from '../memory/knowledge.js';
 import { browserCapture, browserControl, browserNavigate, webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool, webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool, webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool, cuaTools } from '../tools/builtin/web-browser.js';
 import { createSpawnTool, createSubAgentStatusTool } from '../tools/builtin/spawn.js';
 import { createWorkspaceTaskTool } from '../tools/builtin/workspace-tasks.js';
+import { createWorkspaceManagementTool } from '../tools/builtin/workspace-management.js';
+import { registerBuiltinTools } from '../tools/builtin/register.js';
 import { SubAgentManager } from '../sessions/sub-agent.js';
 import { createMessageTool, createTypingTool, createPresenceTool, createDeleteMessageTool, createMarkReadTool } from '../tools/builtin/message.js';
 import { createWorkspaceSessionManager, SessionManager } from '../sessions/manager.js';
@@ -88,7 +93,7 @@ import { WorkspaceRegistry } from '../agent/workspace-registry.js';
 import { ProjectTerminalManager } from '../web/project-terminal.js';
 import { buildSystemPrompt } from '../agent/system-prompt.js';
 import { readAgentAvatarDataUrl, readWorkspaceIdentity, updateWorkspaceIdentity } from '../agent/workspace-identity.js';
-import { runAgent } from '../agent/runner.js';
+import { formatTodoProgressUpdate, runAgent, type TodoCompletionUpdate } from '../agent/runner.js';
 import { ContextMonitor } from '../agent/context-monitor.js';
 import { ContextStore } from '../agent/context-store.js';
 import { PulseBudgetManager } from '../agent/pulse.js';
@@ -188,6 +193,11 @@ interface WorkspaceRun {
   result?: string;
   error?: string;
   toolNames?: string[];
+  activity?: string;
+  activeTool?: string;
+  operations?: Array<{ name: string; status: 'running' | 'done'; startedAt: number; completedAt?: number }>;
+  activityLog?: Array<{ timestamp: number; kind: 'thinking' | 'reasoning' | 'writing' | 'tool' | 'todo'; label: string; toolName?: string; status?: 'running' | 'done' }>;
+  archivedAt?: number;
 }
 
 import { nvidiaProvider } from '../providers/nvidia.js';
@@ -306,23 +316,7 @@ export class SymbioteGateway {
     // Tools (can be disabled via config: "tools": { "enabled": false })
     this.toolRegistry = new ToolRegistry();
     const toolsEnabled = (this.gatewayConfig as any).tools?.enabled !== false;
-    if (toolsEnabled) {
-      for (const tool of [
-        readTool, writeTool, editTool, execTool, imageTool, imageGenTool,
-        processStartTool, processPollTool, processKillTool, processListTool,
-        ttsTool, sttTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool,
-        vdbSearchTool, vdbIngestTool, vdbStatsTool, googleWorkspaceTool,
-        ...createCloudIntegrationTools(this.credentialVault),
-        webBrowseTool, webClickTool, webTypeTool, webScreenshotTool, webExtractTool,
-        webScrollTool, webWaitTool, webSessionTool, webTabOpenTool, webTabSwitchTool,
-        webTabCloseTool, webTabsTool, webDownloadTool, webUploadTool, ...cuaTools, personaDigestTool,
-        ...adminTools, todoTool,
-        createCronManageTool(this.cronManager),
-        createThreadsTool(this.threadManager, sessionId => this.resolveThreadActor(sessionId)),
-      ]) {
-        this.toolRegistry.register(tool);
-      }
-    } else {
+    if (!toolsEnabled) {
       console.log(`${palette.dim}  [gateway]${palette.reset} Tools ${palette.yellow}disabled${palette.reset} via config`);
     }
 
@@ -404,15 +398,6 @@ export class SymbioteGateway {
       },
     });
 
-    // Register message tool (needs channelRegistry — must come after registry creation)
-    if (toolsEnabled) {
-      this.toolRegistry.register(createMessageTool(this.channelRegistry));
-      this.toolRegistry.register(createTypingTool(this.channelRegistry));
-      this.toolRegistry.register(createPresenceTool(this.channelRegistry));
-      this.toolRegistry.register(createDeleteMessageTool(this.channelRegistry));
-      this.toolRegistry.register(createMarkReadTool(this.channelRegistry));
-    }
-
     // Sub-agent manager + spawn tools
     this.subAgentManager = new SubAgentManager(this.sessionManager, (parentSessionId, handle) => {
       const destination = this.discordSlashDestinations.get(parentSessionId);
@@ -426,7 +411,7 @@ export class SymbioteGateway {
         console.error(`[gateway] Could not deliver Discord skill result to ${destination.chatId}:`, err);
       });
     }, () => this.contextStore ?? undefined);
-    this.pulseBudget = new PulseBudgetManager(this.sessionManager.directory);
+    this.pulseBudget = new PulseBudgetManager(this.sessionManager.directory, this.config.maxIterations);
     const provCfg = (this.config.providers as Record<string, any>)[this.providerName] ?? {};
     const spawnProvConfig = {
       model: this.model,
@@ -436,12 +421,16 @@ export class SymbioteGateway {
       ...provCfg,
     };
     if (toolsEnabled) {
-      this.toolRegistry.register(createSpawnTool(
-        this.subAgentManager,
-        this.provider,
-        spawnProvConfig,
-        this.toolRegistry,
-        (parentSessionId) => {
+      registerBuiltinTools(this.toolRegistry, {
+        credentialVault: this.credentialVault,
+        cronManager: this.cronManager,
+        threadManager: this.threadManager,
+        resolveThreadActor: sessionId => this.resolveThreadActor(sessionId),
+        channelRegistry: this.channelRegistry,
+        subAgentManager: this.subAgentManager,
+        provider: this.provider,
+        providerConfig: spawnProvConfig,
+        getSpawnWorkspace: parentSessionId => {
           const parent = this.sessionManager.load(parentSessionId);
           const profile = parent?.metadata.agentId ? this.workspaceRegistry.getAgent(parent.metadata.agentId) : undefined;
           const project = parent?.metadata.projectId
@@ -453,19 +442,24 @@ export class SymbioteGateway {
             ...(parent?.metadata.agentId ? { agentId: parent.metadata.agentId } : {}),
           };
         },
-      ));
-      this.toolRegistry.register(createSubAgentStatusTool(this.subAgentManager));
-      this.toolRegistry.register(createWorkspaceTaskTool({
-        listRuns: () => this.listWebRuns(),
-        stopRun: (id) => this.stopWebRun(id),
-        restartRun: (id) => this.restartWebRun(id),
-        guideRun: (id, message) => this.guideWebRun(id, message),
-        getProjectId: (sessionId) => sessionId ? this.sessionManager.load(sessionId)?.metadata.projectId : undefined,
-        listProjectTasks: (projectId) => this.workspaceRegistry.listProjectTasks(projectId),
-        addProjectTask: (projectId, title, description) => this.workspaceRegistry.addProjectTask(projectId, title, description),
-        updateProjectTask: (projectId, id, patch) => this.workspaceRegistry.updateProjectTask(projectId, id, patch),
-        deleteProjectTask: (projectId, id) => this.workspaceRegistry.deleteProjectTask(projectId, id),
-      }));
+        workspaceTasks: {
+          listRuns: () => this.listWebRuns(),
+          stopRun: id => this.stopWebRun(id),
+          restartRun: (id, trustedAdminContext) => this.restartWebRun(id, trustedAdminContext),
+          guideRun: (id, message, trustedAdminContext) => this.guideWebRun(id, message, trustedAdminContext),
+          getProjectId: sessionId => sessionId ? this.sessionManager.load(sessionId)?.metadata.projectId : undefined,
+          listProjectTasks: projectId => this.workspaceRegistry.listProjectTasks(projectId),
+          addProjectTask: (projectId, title, description) => this.workspaceRegistry.addProjectTask(projectId, title, description),
+          updateProjectTask: (projectId, id, patch) => this.workspaceRegistry.updateProjectTask(projectId, id, patch),
+          deleteProjectTask: (projectId, id) => this.workspaceRegistry.deleteProjectTask(projectId, id),
+        },
+        workspaceManagement: {
+          listProjects: () => this.workspaceRegistry.listProjects(),
+          listAgents: projectId => this.workspaceRegistry.listAgents(projectId),
+          createProject: (name, scope) => this.workspaceRegistry.createProject(name, scope),
+          createAgent: input => this.workspaceRegistry.createAgent(input),
+        },
+      });
     }
 
     // Rebuild system prompt now that all tools are registered
@@ -480,6 +474,10 @@ export class SymbioteGateway {
   async start(): Promise<void> {
     this.releaseChecker.start();
     console.log(versionBanner(APP_VERSION));
+    if (this.toolRegistry.get('computer_use')) {
+      const computerUseReady = await initializeComputerUseRuntime();
+      console.log(`[computer-use] Native desktop-control runtime ${computerUseReady ? 'ready' : 'unavailable; check the startup error above'}`);
+    }
 
     const gatewayTitle = gradient('SYMBIOTE', [138, 43, 226], [0, 229, 255]);
     console.log(`  ${palette.bold}${gatewayTitle}${palette.reset}`);
@@ -549,7 +547,7 @@ export class SymbioteGateway {
     console.log();
     console.log(divider());
     const readyMsg = gradient('SYMBIOTE READY', [0, 230, 118], [0, 188, 212]);
-    console.log(`  ${palette.bold}${palette.green}⚡${palette.reset} ${palette.bold}${readyMsg}${palette.reset} ${palette.dim}— ${elapsed}ms${palette.reset}`);
+    console.log(`  ${palette.bold}${palette.green}[READY]${palette.reset} ${palette.bold}${readyMsg}${palette.reset} ${palette.dim}— ${elapsed}ms${palette.reset}`);
     console.log();
   }
 
@@ -599,9 +597,24 @@ export class SymbioteGateway {
   /** Initialize the Context Store — bridges context window and vdb memory */
   private async initContextStore(): Promise<void> {
     if (!this.vdbInstance) {
-      const { VectorDB } = await import("../memory/vdb.js");
       this.vdbInstance = getSharedVectorDB(this.config.workspace);
     }
+    const vdb = this.vdbInstance;
+    const durableMemory = new DurableMemory(
+      vdb,
+      resolveDurableMemoryArchive(this.config.workspace),
+      resolveMemoGraphStorageDir(this.config.workspace),
+    );
+    setCombVdbHook(
+      (text: string, source: string) => vdb.index({
+        id: '', text: text.length > 2000 ? text.slice(0, 2000) : text,
+        source, role: 'context', timestamp: Date.now(), sessionId: 'comb',
+      }),
+      (source: string, k: number) => vdb.recent(source, k),
+      (query: string, k: number, namespace: string) => vdb.search(query, k, { namespace }),
+    );
+    setMemoryOffloadHook((summary, sessionId, source) => durableMemory.offload(summary, sessionId, source));
+
     const sessionIngestion = ingestSessions(this.vdbInstance, this.sessionManager.directory, 'session');
     for (const session of this.sessionManager.list()) this.vdbWatermarks.set(session.id, session.messageCount);
     if (sessionIngestion.indexed > 0) {
@@ -632,50 +645,7 @@ export class SymbioteGateway {
     });
 
     // Boot ingestion — load identity files into vdb for retrieval
-    const ws = this.config.workspace || process.cwd();
-    const bootFiles = [
-      'SOUL.md', 'IDENTITY.md', 'AGENTS.md', 'BOOTSTRAP.md', 'TOOLS.md',
-    ];
-    const texts: Array<{ text: string; source: string }> = [];
-    for (const f of bootFiles) {
-      const fp = path.join(ws, f);
-      try {
-        if (fs.existsSync(fp)) {
-          texts.push({ text: fs.readFileSync(fp, 'utf-8'), source: f });
-        }
-      } catch { /* skip */ }
-    }
-
-    // Also load today's and yesterday's memory files
-    const now = new Date();
-    for (let d = 0; d < 2; d++) {
-      const date = new Date(now.getTime() - d * 86400000);
-      const dateStr = date.toISOString().split('T')[0];
-      const memFile = path.join(ws, 'memory', `${dateStr}.md`);
-      try {
-        if (fs.existsSync(memFile)) {
-          texts.push({ text: fs.readFileSync(memFile, 'utf-8'), source: `memory/${dateStr}` });
-        }
-      } catch { /* skip */ }
-    }
-
-    if (texts.length > 0) {
-      this.contextStore.ingestBoot(texts);
-    }
-
-    // Wire COMB→VDB: stage indexes into VDB, recall queries VDB
-    const vdb = this.vdbInstance!;
-    setCombVdbHook(
-      // indexFn
-      (text: string, source: string) => {
-        return vdb.index({
-          id: '', text: text.length > 2000 ? text.slice(0, 2000) : text,
-          source, role: 'context', timestamp: Date.now(), sessionId: 'comb',
-        });
-      },
-      // recentFn
-      (source: string, k: number) => vdb.recent(source, k),
-    );
+    this.contextStore.ingestBoot(readBootKnowledge(this.config.workspace || process.cwd()));
 
     console.log(`${palette.dim}  [context-store]${palette.reset} ${palette.green}Ready${palette.reset} — memory retrieval active, COMB→VDB wired`);
   }
@@ -1014,7 +984,7 @@ export class SymbioteGateway {
             phoneNumber: channels.whatsapp.phoneNumber,
             autoRead: channels.whatsapp.autoRead ?? true,
             onQR: (qr: string) => {
-              console.log(`\n  ${palette.gold}📱 WhatsApp QR Code — scan to link:${palette.reset}\n`);
+              console.log(`\n  ${palette.gold}[WhatsApp QR Code] Scan to link:${palette.reset}\n`);
               qrcode.generate(qr, { small: true }, (rendered: string) => {
                 console.log(rendered);
               });
@@ -1506,8 +1476,10 @@ export class SymbioteGateway {
         getRuns: () => this.listWebRuns(),
         startRun: (request) => this.startWebRun(request),
         stopRun: (id) => this.stopWebRun(id),
-        restartRun: (id) => this.restartWebRun(id),
-        guideRun: (id, message) => this.guideWebRun(id, message),
+        archiveRun: (id) => this.setWebRunArchived(id, true),
+        restoreRun: (id) => this.setWebRunArchived(id, false),
+        restartRun: (id, trustedAdminContext) => this.restartWebRun(id, trustedAdminContext),
+        guideRun: (id, message, trustedAdminContext) => this.guideWebRun(id, message, trustedAdminContext),
         updateIdentity: (identity) => {
           const updated = updateWorkspaceIdentity(this.config.workspace, identity);
           this.config.name = updated.agentName;
@@ -1582,7 +1554,77 @@ export class SymbioteGateway {
     this.sessionManager.save(session);
   }
 
-  private startWebRun(request: { name?: string; prompt: string; sessionId: string; googleWorkspaceAccessToken?: string }): WorkspaceRun {
+  private updateWebRunActivity(run: WorkspaceRun, event: Record<string, unknown>): void {
+    if (run.status !== 'running') return;
+    const now = Date.now();
+    if (event.type === 'thinking_delta') {
+      if (!this.appendRunActivity(run, 'reasoning', 'Reasoning')) return;
+    } else if (event.type === 'text_delta') {
+      if (!this.appendRunActivity(run, 'writing', 'Writing response')) return;
+    } else if (event.type === 'tool_start' && typeof event.name === 'string') {
+      const name = event.name;
+      run.activity = `Executing ${name}`;
+      run.activeTool = name;
+      run.operations = [...(run.operations ?? []), { name, status: 'running' as const, startedAt: now }].slice(-12);
+      run.activityLog = [...(run.activityLog ?? []), {
+        timestamp: now,
+        kind: 'tool' as const,
+        label: `Started ${name}`,
+        toolName: name,
+        status: 'running' as const,
+      }].slice(-80);
+    } else if (event.type === 'tool_end' && typeof event.name === 'string') {
+      const name = event.name;
+      const operations = [...(run.operations ?? [])];
+      for (let index = operations.length - 1; index >= 0; index--) {
+        if (operations[index].name === name && operations[index].status === 'running') {
+          operations[index] = { ...operations[index], status: 'done', completedAt: now };
+          break;
+        }
+      }
+      run.operations = operations;
+      delete run.activeTool;
+      const activityLog = [...(run.activityLog ?? [])];
+      for (let index = activityLog.length - 1; index >= 0; index--) {
+        if (activityLog[index].kind === 'tool' && activityLog[index].toolName === name && activityLog[index].status === 'running') {
+          activityLog[index] = { ...activityLog[index], label: `Completed ${name}`, status: 'done' };
+          break;
+        }
+      }
+      run.activityLog = activityLog.slice(-80);
+      this.appendRunActivity(run, 'thinking', 'Thinking');
+    } else if (event.type === 'todo_update' && typeof event.taskTitle === 'string') {
+      run.activity = 'Thinking';
+      delete run.activeTool;
+      run.activityLog = [...(run.activityLog ?? []), {
+        timestamp: now,
+        kind: 'todo' as const,
+        label: `Completed ${event.taskTitle}`,
+      }].slice(-80);
+    } else {
+      return;
+    }
+    this.persistWebRun(run);
+  }
+
+  private appendRunActivity(
+    run: WorkspaceRun,
+    kind: 'thinking' | 'reasoning' | 'writing',
+    label: string,
+  ): boolean {
+    const activityLog = run.activityLog ?? [];
+    const latest = activityLog[activityLog.length - 1];
+    if (run.activity === label && latest?.kind === kind && latest.label === label) return false;
+    run.activity = label;
+    delete run.activeTool;
+    if (latest?.kind !== kind || latest.label !== label) {
+      activityLog.push({ timestamp: Date.now(), kind, label });
+    }
+    run.activityLog = activityLog.slice(-80);
+    return true;
+  }
+
+  private startWebRun(request: { name?: string; prompt: string; sessionId: string; googleWorkspaceAccessToken?: string; trustedAdminContext?: boolean }): WorkspaceRun {
     const id = randomUUID();
     const sessionId = request.sessionId;
     if (!this.sessionManager.load(sessionId)) throw new Error(`Could not start task: conversation ${sessionId} was not found.`);
@@ -1594,6 +1636,8 @@ export class SymbioteGateway {
       prompt: request.prompt,
       status: 'running',
       startedAt: Date.now(),
+      activity: 'Starting',
+      activityLog: [{ timestamp: Date.now(), kind: 'thinking', label: 'Starting agent run' }],
     };
     this.webRuns.set(id, run);
     this.persistWebRun(run);
@@ -1604,8 +1648,9 @@ export class SymbioteGateway {
       senderId: 'webapp-local',
       source: 'webapp-task',
       webRunId: id,
+      ...(request.trustedAdminContext ? { trustedAdminContext: true } : {}),
       ...(request.googleWorkspaceAccessToken ? { googleWorkspaceAccessToken: request.googleWorkspaceAccessToken } : {}),
-    }).then(response => {
+    }, event => this.updateWebRunActivity(run, event)).then(response => {
       if (run.status === 'cancelled') {
         this.persistWebRun(run);
         return;
@@ -1614,6 +1659,9 @@ export class SymbioteGateway {
       run.completedAt = Date.now();
       run.result = response.text;
       run.toolNames = response.toolCalls?.map(call => call.name);
+      run.activity = 'Completed';
+      delete run.activeTool;
+      run.activityLog = [...(run.activityLog ?? []), { timestamp: Date.now(), kind: 'writing' as const, label: 'Run completed' }].slice(-80);
       this.persistWebRun(run);
     }).catch(failure => {
       if (run.status === 'cancelled') {
@@ -1623,6 +1671,8 @@ export class SymbioteGateway {
       run.status = 'failed';
       run.completedAt = Date.now();
       run.error = failure instanceof Error ? failure.message : String(failure);
+      run.activity = 'Failed';
+      delete run.activeTool;
       this.persistWebRun(run);
     }).catch(failure => {
       console.error(`[web] Could not persist workspace run ${run.id}:`, failure);
@@ -1642,23 +1692,34 @@ export class SymbioteGateway {
     return true;
   }
 
-  private restartWebRun(id: string): WorkspaceRun | null {
+  private setWebRunArchived(id: string, archived: boolean): boolean {
+    const run = this.webRuns.get(id);
+    if (!run || run.status === 'running') return false;
+    if (archived) run.archivedAt = Date.now();
+    else delete run.archivedAt;
+    this.persistWebRun(run);
+    return true;
+  }
+
+  private restartWebRun(id: string, trustedAdminContext = false): WorkspaceRun | null {
     const previous = this.webRuns.get(id);
     if (!previous || previous.status === 'running' || !this.sessionManager.load(previous.sessionId)) return null;
     return this.startWebRun({
       name: previous.name,
       prompt: previous.prompt,
       sessionId: previous.sessionId,
+      ...(trustedAdminContext ? { trustedAdminContext: true } : {}),
     });
   }
 
-  private guideWebRun(id: string, message: string): WorkspaceRun | null {
+  private guideWebRun(id: string, message: string, trustedAdminContext = false): WorkspaceRun | null {
     const previous = this.webRuns.get(id);
     if (!previous || !this.sessionManager.load(previous.sessionId)) return null;
     return this.startWebRun({
       name: `${previous.name} · guidance`,
       prompt: message,
       sessionId: previous.sessionId,
+      ...(trustedAdminContext ? { trustedAdminContext: true } : {}),
     });
   }
 
@@ -1823,8 +1884,9 @@ export class SymbioteGateway {
 
         session.messages.push({ role: 'user', content: userContent });
 
-        // Sandbox context — HTTP API users get 'standard' tier (not admin)
-        const isOwner = !!request.verifiedAgentId && (ownerIds.includes('*') || ownerIds.includes(effectiveSenderId));
+        // Only verified channel owners or the server-verified local Control Room operator are admin.
+        const isOwner = request.trustedAdminContext === true
+          || (!!request.verifiedAgentId && (ownerIds.includes('*') || ownerIds.includes(effectiveSenderId)));
         const isProjectTask = request.source === 'webapp-task' && Boolean(session.metadata.projectId);
         const sandboxCtx: SessionContext = {
           sessionId,
@@ -1840,7 +1902,7 @@ export class SymbioteGateway {
         // Run agent with BLINK continuation
         console.log(`${palette.dim}  [http]${palette.reset} Agent turn for ${palette.violet}${sessionId}${palette.reset}`);
         const startMs = Date.now();
-        const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
+        const blinkCtrl = new BlinkController();
         const turnTodoScope = `turn-${randomUUID()}`;
         const turnId = randomUUID();
 
@@ -1914,11 +1976,28 @@ export class SymbioteGateway {
           },
           onToolStart: (name) => {
             emit?.({ type: 'tool_start', name });
-            console.log(`  ${palette.violet}⚡ ${name}${palette.reset}`);
+            console.log(`  ${palette.violet}[TOOL] ${name}${palette.reset}`);
           },
           onToolEnd: (name) => {
             emit?.({ type: 'tool_end', name });
             console.log(`  ${palette.green}✓ ${name}${palette.reset}`);
+          },
+          onTodoCompleted: update => {
+            emit?.({
+              type: 'todo_update',
+              text: formatTodoProgressUpdate(update),
+              taskTitle: update.item.title,
+              completedTodo: {
+                id: update.item.id,
+                title: update.item.title,
+                status: update.item.status,
+              },
+              remainingTodos: update.remaining.map(item => ({
+                id: item.id,
+                title: item.title,
+                status: item.status,
+              })),
+            });
           },
         });
         const runHttpWithFallback = async () => {
@@ -1981,7 +2060,7 @@ export class SymbioteGateway {
 
           if (result.maxIterationsHit && blinkCtrl.needsBlink(true)) {
             blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);
-            console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}⚡ Blink #${blinkCtrl.getState().depth}${palette.reset} (http) — continuing`);
+            console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}Blink #${blinkCtrl.getState().depth}${palette.reset} (http) — continuing`);
             currentSessionMessages = result.messages;
             if (currentSessionMessages.length > 0) {
               const last = currentSessionMessages[currentSessionMessages.length - 1];
@@ -2155,7 +2234,7 @@ export class SymbioteGateway {
           await this.channelRegistry.send(
             envelope.source.adapterId,
             envelope.source.chatId,
-            { content: `⚠️ ${routeName} is unreachable. Forwarding failed.` },
+            { content: `Warning: ${routeName} is unreachable. Forwarding failed.` },
           );
         } catch { /* ignore */ }
       } finally {
@@ -2263,18 +2342,24 @@ export class SymbioteGateway {
       }
     }
 
-    // Start sustained typing (refreshes every 20s for WA, 8s for Discord)
+    // Start with an activity state; composing is enabled only once the model begins a user-facing response.
     const typingTarget = { adapterId: envelope.source.adapterId, chatId: envelope.source.chatId };
-    presenceManager.startTyping(typingTarget);
+    presenceManager.beginTurn(typingTarget);
 
     // Tool-progress bubble — live "what am I doing" message in the originating channel
     const progressBubble = new ToolProgressBubble(
       {
         enabled: this.config.toolProgress !== false,
-        send: (adapterId, chatId, content) => this.channelRegistry.send(adapterId, chatId, { content }),
+        send: async (adapterId, chatId, content) => {
+          const result = await this.channelRegistry.send(adapterId, chatId, { content });
+          return result.success
+            ? result
+            : { success: false, error: result.error ?? 'Channel send failed.' };
+        },
         edit: async (adapterId, chatId, messageId, content) => {
           const edited = await this.channelRegistry.edit(adapterId, chatId, messageId, content);
-          return edited ? undefined : null;
+          if (!edited) throw new Error('The adapter did not confirm editing the Discord progress message.');
+          return true;
         },
       },
       envelope.source.adapterId,
@@ -2314,7 +2399,7 @@ export class SymbioteGateway {
       const voiceResult = await processVoiceInbound(envelope);
       if (voiceResult && !voiceResult.isEmpty) {
         // Replace media descriptor with transcript — agent sees text, not a file path
-        userContent = userContent.replace(/\[voice,.*?\]/, `[🎤 voice message, ${voiceResult.duration}s]`);
+        userContent = userContent.replace(/\[voice,.*?\]/, `[Voice message, ${voiceResult.duration}s]`);
         userContent += `\n\n${voiceResult.text}`;
       }
       
@@ -2329,7 +2414,7 @@ export class SymbioteGateway {
         return sum + Math.ceil(content.length / 4);
       }, 0);
       if (estimatedTokens > TOKEN_LIMIT - HEADROOM) {
-        console.log(`${palette.dim}  [gateway]${palette.reset} ${palette.yellow}⚠${palette.reset} Pre-flight trim: ~${estimatedTokens} tokens ${palette.dim}(limit ${TOKEN_LIMIT})${palette.reset}`);
+        console.log(`${palette.dim}  [gateway]${palette.reset} ${palette.yellow}[WARN]${palette.reset} Pre-flight trim: ~${estimatedTokens} tokens ${palette.dim}(limit ${TOKEN_LIMIT})${palette.reset}`);
         const archived = this.sessionManager.archive(sessionId, 30);
         console.log(`${palette.dim}  [gateway]${palette.reset} Archived ${archived} messages → ${session.messages.length} remaining`);
         // Feed archived messages to VDB for persistent memory
@@ -2384,7 +2469,7 @@ export class SymbioteGateway {
       // Run agent with BLINK continuation
       console.log(`\n${palette.dim}  [turn]${palette.reset} ${palette.violet}${sessionId}${palette.reset} ${palette.dim}via${palette.reset} ${envelope.source.channelType}${palette.dim}/${palette.reset}${envelope.source.chatId}`);
       const turnStartTime = Date.now();
-      const blinkCtrl = new BlinkController({ enabled: true, maxDepth: 5, prepareAt: 3, cooldownMs: 1000 });
+      const blinkCtrl = new BlinkController();
       const turnTodoScope = `turn-${randomUUID()}`;
       const turnId = randomUUID();
 
@@ -2416,15 +2501,21 @@ export class SymbioteGateway {
         onEvent: (ev: any) => {
           if (ev.type === 'usage') {
             this.sessionManager.trackUsage(session, ev.usage.inputTokens, ev.usage.outputTokens);
-            console.log(`  ${palette.dim}📊 +${ev.usage.inputTokens}in / +${ev.usage.outputTokens}out${palette.reset}`);
+            console.log(`  ${palette.dim}[TOKENS] +${ev.usage.inputTokens}in / +${ev.usage.outputTokens}out${palette.reset}`);
           }
-          if (ev.type === 'text_delta' && !voiceReply) void progressBubble.streamText(ev.text);
-          if (ev.type === 'text_delta' || ev.type === 'done') {
-            presenceManager.llmStreaming();
+          if (ev.type === 'thinking_delta') {
+            presenceManager.stopTyping(typingTarget, false);
+            presenceManager.llmStreaming('reasoning');
+          } else if (ev.type === 'text_delta') {
+            presenceManager.startTyping(typingTarget);
+            presenceManager.llmStreaming('idle');
+          } else if (ev.type === 'tool_use_start') {
+            presenceManager.stopTyping(typingTarget, false);
           }
         },
         onToolStart: (name: string, input: Record<string, unknown>) => {
-          console.log(`  ${palette.violet}⚡ ${name}${palette.reset}`);
+          presenceManager.stopTyping(typingTarget, false);
+          console.log(`  ${palette.violet}[TOOL] ${name}${palette.reset}`);
           presenceManager.toolStart(name);
           void progressBubble.toolLine(name, input);
         },
@@ -2432,7 +2523,9 @@ export class SymbioteGateway {
           const preview = res.length > 100 ? res.slice(0, 100) + '...' : res;
           console.log(`  ${palette.green}✓ ${name}${palette.reset} ${palette.dim}${preview.split('\n')[0]}${palette.reset}`);
           presenceManager.toolEnd(name);
-          void progressBubble.toolDone(name);
+        },
+        onTodoCompleted: async (update: TodoCompletionUpdate) => {
+          await progressBubble.todoLine(formatTodoProgressUpdate(update));
         },
       });
 
@@ -2508,7 +2601,7 @@ export class SymbioteGateway {
         if (result.maxIterationsHit && blinkCtrl.needsBlink(true)) {
           // Record the blink
           blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);
-          console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}⚡ Blink #${blinkCtrl.getState().depth}${palette.reset} — continuing with fresh budget`);
+          console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}Blink #${blinkCtrl.getState().depth}${palette.reset} — continuing with fresh budget`);
 
           // Save intermediate state so nothing is lost
           currentSessionMessages = result.messages;
@@ -2576,51 +2669,38 @@ export class SymbioteGateway {
           }
         }
 
-        const progressDelivered = await progressBubble.finalize(voiceReply ? undefined : responseText);
+        await progressBubble.finalize();
         console.log(`${palette.dim}  [send]${palette.reset} → ${envelope.source.adapterId}/${envelope.source.chatId} ${palette.dim}(${responseText.length} chars)${palette.reset}`);
-        let responseDelivered = progressDelivered;
-        if (progressDelivered) {
-          console.log(`${palette.dim}  [send]${palette.reset} ${palette.green}delivered via live message${palette.reset}`);
-        } else {
-          try {
-            // Voice middleware: if original message was voice, send voice reply
-            if (voiceReply) {
-              console.log(`${palette.dim}  [voice]${palette.reset} Generating voice reply...`);
-              const voicePath = await generateVoiceReply(responseText);
-              if (voicePath) {
-                await this.channelRegistry.send(
-                  envelope.source.adapterId,
-                  envelope.source.chatId,
-                  {
-                    content: '',
-                    media: [{
-                      type: 'voice' as any,
-                      mimeType: 'audio/ogg; codecs=opus',
-                      path: voicePath,
-                    }],
-                    replyToId: envelope.metadata.platformMessageId,
-                  },
-                );
-                console.log(`${palette.dim}  [voice]${palette.reset} ${palette.green}voice reply sent${palette.reset}`);
-                await this.channelRegistry.send(
-                  envelope.source.adapterId,
-                  envelope.source.chatId,
-                  { content: responseText },
-                );
-                cleanupVoiceFile(voicePath);
-              } else {
-                console.log(`${palette.dim}  [voice]${palette.reset} ${palette.yellow}TTS failed, sending text only${palette.reset}`);
-                await this.channelRegistry.send(
-                  envelope.source.adapterId,
-                  envelope.source.chatId,
-                  {
-                    content: responseText,
-                    replyToId: envelope.metadata.platformMessageId,
-                  },
-                );
-              }
+        let responseDelivered = false;
+        try {
+          // Voice middleware: if original message was voice, send voice reply
+          if (voiceReply) {
+            console.log(`${palette.dim}  [voice]${palette.reset} Generating voice reply...`);
+            const voicePath = await generateVoiceReply(responseText);
+            if (voicePath) {
+              await this.channelRegistry.send(
+                envelope.source.adapterId,
+                envelope.source.chatId,
+                {
+                  content: '',
+                  media: [{
+                    type: 'voice' as any,
+                    mimeType: 'audio/ogg; codecs=opus',
+                    path: voicePath,
+                  }],
+                  replyToId: envelope.metadata.platformMessageId,
+                },
+              );
+              console.log(`${palette.dim}  [voice]${palette.reset} ${palette.green}voice reply sent${palette.reset}`);
+              await this.channelRegistry.send(
+                envelope.source.adapterId,
+                envelope.source.chatId,
+                { content: responseText },
+              );
+              cleanupVoiceFile(voicePath);
             } else {
-              const sendResult = await this.channelRegistry.send(
+              console.log(`${palette.dim}  [voice]${palette.reset} ${palette.yellow}TTS failed, sending text only${palette.reset}`);
+              await this.channelRegistry.send(
                 envelope.source.adapterId,
                 envelope.source.chatId,
                 {
@@ -2628,15 +2708,24 @@ export class SymbioteGateway {
                   replyToId: envelope.metadata.platformMessageId,
                 },
               );
-              if (!sendResult.success) {
-                throw new Error(sendResult.error ?? 'Channel send failed');
-              }
             }
-            responseDelivered = true;
-            console.log(`${palette.dim}  [send]${palette.reset} ${palette.green}delivered${palette.reset}`);
-          } catch (sendErr) {
-            console.error(`  ${palette.red}✗ [send]${palette.reset} ${sendErr}`);
+          } else {
+            const sendResult = await this.channelRegistry.send(
+              envelope.source.adapterId,
+              envelope.source.chatId,
+              {
+                content: responseText,
+                replyToId: envelope.metadata.platformMessageId,
+              },
+            );
+            if (!sendResult.success) {
+              throw new Error(sendResult.error ?? 'Channel send failed');
+            }
           }
+          responseDelivered = true;
+          console.log(`${palette.dim}  [send]${palette.reset} ${palette.green}delivered${palette.reset}`);
+        } catch (sendErr) {
+          console.error(`  ${palette.red}✗ [send]${palette.reset} ${sendErr}`);
         }
 
         if (responseDelivered) {
@@ -2663,12 +2752,12 @@ export class SymbioteGateway {
           }
         }
       } else {
-        await progressBubble.finalize();
+        await progressBubble.finalize(finalResult.aborted ? 'interrupted' : 'done');
         console.log(`${palette.dim}  [turn]${palette.reset} No response ${palette.dim}(${finalResult.text ? finalResult.text.slice(0, 50) : 'null'})${palette.reset}`);
       }
 
     } catch (err) {
-      await progressBubble.finalize();
+      await progressBubble.finalize(controller.signal.aborted ? 'interrupted' : 'failed');
       if (controller.signal.aborted) {
         console.log(`${palette.dim}  [turn]${palette.reset} ${palette.yellow}Interrupted${palette.reset} ${palette.violet}${sessionId}${palette.reset}`);
         // Re-process with accumulated messages
@@ -2692,7 +2781,7 @@ export class SymbioteGateway {
         // The provider adapter formats structured response metadata into a
         // readable error; keep gateway handling provider-agnostic.
         const rawMsg = err instanceof Error ? err.message : String(err);
-        const userMsg = `⚠️ Error: ${rawMsg}`;
+        const userMsg = `Error: ${rawMsg}`;
         try {
           await this.channelRegistry.send(
             envelope.source.adapterId,
@@ -2704,7 +2793,7 @@ export class SymbioteGateway {
     } finally {
       this.activeTurns.delete(sessionId);
       this.channelRegistry.setSessionActive(sessionId, false);
-      presenceManager.stopTyping(typingTarget);
+      presenceManager.endTurn(typingTarget);
 
       // Process any pending messages that arrived during this turn
       const pending = this.pendingEnvelopes.get(sessionId);
@@ -2812,6 +2901,7 @@ export class SymbioteGateway {
       for (const [, turn] of this.activeTurns) {
         turn.abortController.abort('shutdown');
       }
+      shutdownComputerUseRuntime();
       await this.projectTerminals.stopAll();
 
       // Stop Meta^n self-improvement loop + flush SARSI state

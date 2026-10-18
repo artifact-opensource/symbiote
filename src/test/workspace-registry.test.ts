@@ -23,6 +23,13 @@ test('workspace registry persists isolated project and agent workspaces', () => 
     assert.equal(registry.getAgent(agent.id)?.instructions, 'Analyze datasets and report reproducible findings.');
     assert.deepEqual(registry.listProjects().map(item => item.id), [project.id]);
     assert.deepEqual(registry.listAgents(project.id).map(item => item.id), [agent.id]);
+    const iconAgent = registry.createAgent({
+      projectId: project.id,
+      name: 'Builder',
+      emoji: 'terminal',
+      instructions: 'Build and validate project changes.',
+    });
+    assert.equal(iconAgent.emoji, 'terminal');
     assert.throws(() => registry.createAgent({
       projectId: 'missing-project',
       name: 'Unscoped',

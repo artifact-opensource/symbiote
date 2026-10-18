@@ -207,7 +207,7 @@ export class IpcIdentity {
       };
     }
 
-    // ✅ Verified
+    // Signature verified.
     return {
       isIpcRequest: true,
       verified: true,

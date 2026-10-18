@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+credentials*.json
+service-account*.json
+src/lib/firebase-applet-config.json
+src/lib/googleWorkspace.js
+src/lib/googleWorkspace.js.map
+src/lib/googleWorkspace.d.ts
+src/lib/googleWorkspace.d.ts.map

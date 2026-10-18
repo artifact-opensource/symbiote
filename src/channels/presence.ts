@@ -7,7 +7,8 @@
 // Discord: setActivity("Reading files...") + sendTyping() refresh
 // WhatsApp: composing indicator refresh (no custom text)
 
-import { ActivityType, type Client as DiscordClient } from 'discord.js';
+import { ActivityType, Events, type Client as DiscordClient } from 'discord.js';
+import { TOOL_EMOJI } from './progress-bubble.js';
 
 export interface TypingTarget {
   adapterId: string;
@@ -28,6 +29,7 @@ interface ActiveTyping {
 export type ActivityState =
   | 'idle'
   | 'thinking'
+  | 'reasoning'
   | 'reading'
   | 'writing'
   | 'editing'
@@ -53,11 +55,10 @@ const TOOL_ACTIVITY: Record<string, ActivityDisplay> = {
   read:            { text: '📖 Reading files...', type: ActivityType.Custom },
   write:           { text: '✍️ Writing...', type: ActivityType.Custom },
   edit:            { text: '✏️ Editing...', type: ActivityType.Custom },
-  exec:            { text: '⚡ Executing...', type: ActivityType.Custom },
   process_start:   { text: '🚀 Launching process...', type: ActivityType.Custom },
   process_poll:    { text: '📊 Checking process...', type: ActivityType.Custom },
-  process_kill:    { text: '🛑 Stopping process...', type: ActivityType.Custom },
-  process_list:    { text: '📋 Listing processes...', type: ActivityType.Custom },
+  process_kill:   { text: '🛑 Stopping process...', type: ActivityType.Custom },
+  process_list:   { text: '📋 Listing processes...', type: ActivityType.Custom },
   image:           { text: '👁️ Analyzing image...', type: ActivityType.Custom },
   web_fetch:       { text: '🌐 Browsing the web...', type: ActivityType.Custom },
   memory_search:   { text: '🧠 Searching memory...', type: ActivityType.Custom },
@@ -74,12 +75,14 @@ const TOOL_ACTIVITY: Record<string, ActivityDisplay> = {
 };
 
 const THINKING_ACTIVITY: ActivityDisplay = { text: '🤔 Thinking...', type: ActivityType.Custom };
+const REASONING_ACTIVITY: ActivityDisplay = { text: '🧩 Reasoning...', type: ActivityType.Custom };
 const IDLE_ACTIVITY: ActivityDisplay = { text: process.env.IDLE_EMOJI ?? '', type: ActivityType.Custom };
 
 // ─── Presence Manager ──────────────────────────────────────────────────────
 
 export class PresenceManager {
   private activeTyping = new Map<string, ActiveTyping>();
+  private activeTurns = new Set<string>();
   private typingFunctions = new Map<string, TypingFunction>();
   private discordClients = new Map<string, DiscordClient>();
   private currentActivity: ActivityDisplay = IDLE_ACTIVITY;
@@ -108,6 +111,23 @@ export class PresenceManager {
    */
   registerDiscordClient(adapterId: string, client: DiscordClient): void {
     this.discordClients.set(adapterId, client);
+    client.once(Events.ClientReady, () => this.applyActivity(client));
+    if (client.isReady()) this.applyActivity(client);
+  }
+
+  beginTurn(target: TypingTarget): void {
+    this.activeTurns.add(`${target.adapterId}:${target.chatId}`);
+    this.llmStreaming('thinking');
+  }
+
+  endTurn(target: TypingTarget): void {
+    this.stopTyping(target, false);
+    this.activeTurns.delete(`${target.adapterId}:${target.chatId}`);
+    if (this.activeTurns.size === 0) {
+      this.setActivity(IDLE_ACTIVITY);
+    } else {
+      this.setActivity(THINKING_ACTIVITY);
+    }
   }
 
   /**
@@ -146,9 +166,6 @@ export class PresenceManager {
     // Fire immediately — Infinity tells adapter to skip auto-pause (we handle it in stopTyping)
     typingFn(target.chatId, Infinity).catch(() => {});
 
-    // Set activity to thinking (default state at start of turn)
-    this.setActivity(THINKING_ACTIVITY);
-
     // Pick refresh interval based on adapter type
     const isWhatsApp = target.adapterId.includes('whatsapp');
     const refreshMs = isWhatsApp ? this.waRefreshMs : this.defaultRefreshMs;
@@ -180,7 +197,7 @@ export class PresenceManager {
    * Stop typing indicator for a target.
    * Sends 'paused' to WhatsApp to cleanly dismiss the composing bubble.
    */
-  stopTyping(target: TypingTarget): void {
+  stopTyping(target: TypingTarget, resetActivity = true): void {
     const key = `${target.adapterId}:${target.chatId}`;
     const active = this.activeTyping.get(key);
     if (active) {
@@ -197,7 +214,7 @@ export class PresenceManager {
     }
 
     // Return to idle when all typing stops
-    if (this.activeTyping.size === 0) {
+    if (resetActivity && this.activeTyping.size === 0) {
       this.setActivity(IDLE_ACTIVITY);
     }
   }
@@ -207,14 +224,17 @@ export class PresenceManager {
    * Updates Discord activity to reflect what's happening.
    */
   toolStart(toolName: string): void {
-    const activity = TOOL_ACTIVITY[toolName] ?? THINKING_ACTIVITY;
-    this.setActivity(activity);
-
     // Clear any pending "back to thinking" timeout
     if (this.activityTimeout) {
       clearTimeout(this.activityTimeout);
       this.activityTimeout = null;
     }
+    if (toolName === 'exec') return;
+    const activity = TOOL_ACTIVITY[toolName] ?? {
+      text: `${TOOL_EMOJI[toolName] ?? '🧰'} Using ${toolName.replaceAll('_', ' ')}...`,
+      type: ActivityType.Custom,
+    };
+    this.setActivity(activity);
   }
 
   /**
@@ -227,7 +247,7 @@ export class PresenceManager {
     if (this.activityTimeout) clearTimeout(this.activityTimeout);
     this.activityTimeout = setTimeout(() => {
       // Only go back to thinking if we're still in an active turn
-      if (this.activeTyping.size > 0) {
+      if (this.activeTurns.size > 0) {
         this.setActivity(THINKING_ACTIVITY);
       }
       this.activityTimeout = null;
@@ -235,11 +255,16 @@ export class PresenceManager {
   }
 
   /**
-   * Signal the LLM is streaming (between tool calls).
+   * Signal the current LLM stream activity without exposing streamed content.
    */
-  llmStreaming(): void {
+  llmStreaming(state: 'thinking' | 'reasoning' | 'idle' = 'thinking'): void {
     if (this.activityTimeout) clearTimeout(this.activityTimeout);
-    this.setActivity(THINKING_ACTIVITY);
+    const activity = state === 'reasoning'
+      ? REASONING_ACTIVITY
+      : state === 'idle'
+        ? IDLE_ACTIVITY
+        : THINKING_ACTIVITY;
+    this.setActivity(activity);
   }
 
   /**
@@ -250,6 +275,7 @@ export class PresenceManager {
       clearInterval(active.interval);
     }
     this.activeTyping.clear();
+    this.activeTurns.clear();
     if (this.activityTimeout) {
       clearTimeout(this.activityTimeout);
       this.activityTimeout = null;
@@ -262,7 +288,7 @@ export class PresenceManager {
    */
   stats(): { activeCount: number; adapters: number; currentActivity: string } {
     return {
-      activeCount: this.activeTyping.size,
+      activeCount: this.activeTurns.size,
       adapters: this.typingFunctions.size,
       currentActivity: this.currentActivity.text,
     };
@@ -275,16 +301,22 @@ export class PresenceManager {
     this.currentActivity = activity;
 
     // Update all registered Discord clients
-    for (const [, client] of this.discordClients) {
-      try {
-        if (activity.text === IDLE_ACTIVITY.text) {
-          client.user?.setActivity(activity.text, { type: ActivityType.Custom });
-        } else {
-          client.user?.setActivity(activity.text, { type: ActivityType.Custom });
-        }
-      } catch (err) {
-        // Ignore — client might not be ready
+    for (const [, client] of this.discordClients) this.applyActivity(client);
+  }
+
+  private applyActivity(client: DiscordClient): void {
+    if (!client.isReady() || !client.user) return;
+    try {
+      // Discord bots cannot publish user-style Custom Status activities.
+      // A normal Playing activity is supported and remains visible in the member list.
+      if (!this.currentActivity.text) {
+        const status = client.user.presence.status;
+        client.user.setPresence({ activities: [], ...(status === 'offline' ? {} : { status }) });
+        return;
       }
+      client.user.setActivity(this.currentActivity.text, { type: ActivityType.Playing });
+    } catch (error) {
+      console.error('[presence] Discord activity update failed:', error);
     }
   }
 }

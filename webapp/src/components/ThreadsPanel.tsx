@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
-import { Archive, Check, Copy, LoaderCircle, MessageSquarePlus, Plus, Send, Shield, UserRound, X } from 'lucide-react';
+import { Archive, Check, Copy, MessageSquarePlus, Plus, RefreshCw, Send, Shield, UserRound, X } from 'lucide-react';
 import type { AgentProfile, WorkspaceProject } from '../types';
+import ActivityOrb from './ActivityOrb';
 
 type ThreadScope = 'project' | 'selected' | 'open' | 'external';
 type ThreadPost = {
@@ -53,6 +54,8 @@ export default function ThreadsPanel({ request, projects, profiles, selectedProj
   const [newContact, setNewContact] = useState<CreateContact | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
   const refresh = useCallback(async () => {
@@ -64,15 +67,41 @@ export default function ThreadsPanel({ request, projects, profiles, selectedProj
     setContacts(contactList);
     setSelectedId(current => current && threadList.some(thread => thread.id === current) ? current : threadList[0]?.id ?? '');
     setExternalContactId(current => current && contactList.some(contact => contact.id === current) ? current : contactList[0]?.id ?? '');
+    setError('');
   }, [request]);
 
   useEffect(() => {
-    void refresh().catch(failure => setError(failure instanceof Error ? failure.message : 'Could not load agent threads.'));
+    let cancelled = false;
+    const load = async () => {
+      try {
+        await refresh();
+      } catch (failure) {
+        if (!cancelled) setError(failure instanceof Error ? failure.message : 'Could not load agent threads.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
     const timer = window.setInterval(() => {
       void refresh().catch(failure => setError(failure instanceof Error ? failure.message : 'Could not refresh agent threads.'));
     }, 5000);
-    return () => window.clearInterval(timer);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [refresh]);
+
+  const refreshManually = async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not refresh agent threads.');
+    } finally {
+      setRefreshing(false);
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (requestedThreadId && threads.some(thread => thread.id === requestedThreadId)) {
@@ -218,8 +247,21 @@ export default function ThreadsPanel({ request, projects, profiles, selectedProj
 
   return (
     <div className="threads-panel">
-      {error && <div className="threads-error" role="alert">{error}<button type="button" onClick={() => void refresh()} aria-label="Retry"><X size={13} /></button></div>}
-      <div className="threads-layout">
+      <div className="page-panel-toolbar threads-panel-toolbar">
+        <div className="page-panel-toolbar-copy">
+          <span className="eyebrow">MULTI-AGENT COLLABORATION</span>
+          <p>Private discussions, project coordination, and secure external contacts.</p>
+        </div>
+        <div className="page-panel-toolbar-actions">
+          <div className="page-panel-counts" aria-label="Thread summary">
+            <span><strong>{threads.length}</strong> threads</span>
+            <span><strong>{contacts.length}</strong> contacts</span>
+          </div>
+          <button className={`icon-button refresh-button${refreshing ? ' is-refreshing' : ''}`} type="button" onClick={() => void refreshManually()} disabled={refreshing} aria-label="Refresh threads" title="Refresh"><RefreshCw size={14} /></button>
+        </div>
+      </div>
+      {error && <div className="threads-error" role="alert"><span>{error}</span><button type="button" onClick={() => void refreshManually()} aria-label="Retry loading threads" title="Retry"><RefreshCw size={13} /></button></div>}
+      {loading ? <div className="loading-state threads-loading-state"><ActivityOrb label="Loading agent threads" loading /><span>Loading threads…</span></div> : <div className="threads-layout">
         <section className="threads-list" aria-label="Agent threads">
           <div className="threads-list-heading"><span>THREADS</span><span>{threads.length}</span></div>
           <div className="threads-list-scroll">
@@ -275,7 +317,7 @@ export default function ThreadsPanel({ request, projects, profiles, selectedProj
               <form className="thread-compose" onSubmit={event => void postMessage(event)}>
                 <label className="sr-only" htmlFor="thread-message">Message</label>
                 <textarea id="thread-message" value={draft} onChange={event => setDraft(event.target.value)} maxLength={12_000} rows={3} placeholder="Write a thread update…" />
-                <button type="submit" className="button button-primary" disabled={busy || !draft.trim()}>{busy ? <LoaderCircle size={14} className="spin" /> : <Send size={14} />}Post update</button>
+                <button type="submit" className="button button-primary" disabled={busy || !draft.trim()}>{busy ? <ActivityOrb label="Posting thread update" compact loading /> : <Send size={14} />}Post update</button>
               </form>
             </>
           ) : (
@@ -299,14 +341,14 @@ export default function ThreadsPanel({ request, projects, profiles, selectedProj
                 <option value="">Select an external contact</option>{contacts.map(contact => <option key={contact.id} value={contact.id}>{contact.label}</option>)}
               </select></label>}
               <button className="button button-primary" type="submit" disabled={busy || (scope === 'external' && !externalContactId) || ((scope === 'project' || scope === 'selected') && !participants.length)}>
-                {busy ? <LoaderCircle size={14} className="spin" /> : <Plus size={14} />}Create thread
+                {busy ? <ActivityOrb label="Creating thread" compact loading /> : <Plus size={14} />}Create thread
               </button>
             </form>
           )}
         </section>
-      </div>
+      </div>}
 
-      <section className="thread-contacts" aria-label="External agent contacts">
+      <section className="thread-contacts page-panel-section" aria-label="External agent contacts">
         <header><span><Shield size={14} />EXTERNAL CONTACTS</span><small>Each contact has a private token and can only access threads that invite it.</small></header>
         <form onSubmit={event => void addContact(event)}>
           <label className="sr-only" htmlFor="thread-contact-name">External contact name</label>

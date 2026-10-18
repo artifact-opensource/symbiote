@@ -1,6 +1,6 @@
 # Architecture
 
-Symbiote is a single-process agent framework. Every component — channels, routing, sessions, tools, providers, and the web UI — runs in one Node.js daemon.
+Symbiote is a single-process agent framework. The Node.js gateway manages channels, routing, sessions, tools, providers, and the HTTP control plane. The React web application is built separately and served by the gateway; the optional Electron desktop app connects to that local web interface.
 
 ## Data Flow
 
@@ -47,7 +47,7 @@ graph LR
         PA[PARC Router]
     end
 
-    UI[Web UI :3006] -->|SSE| Q
+    UI[Web Control Room :3009] -->|HTTP and SSE| A
 
     D --> R
     W --> R
@@ -73,9 +73,10 @@ graph LR
 | **Message Bus** | Priority queue with interrupt bypass, message coalescing (merges rapid-fire messages), and backpressure management. The nervous system. |
 | **Agent Runner** | The agentic loop — sends context to the LLM, processes tool calls, iterates until the model produces a final response or hits the iteration limit. |
 | **Providers** | LLM backends — GitHub Copilot, Anthropic, OpenAI, Gladius. Hot-swappable mid-session. All implement the same `Provider` interface. |
-| **Tools** | 18 built-in tools + MCP bridge for external tool servers. Sandboxed per-session via the policy engine. |
-| **Sessions** | Persistent conversation state with TTL. Sub-agent spawning up to depth 3. Each session has its own tool sandbox. |
-| **Web UI** | Built-in interface at `:3006` with SSE streaming, session management, and config panel. Single HTML file, no build step. |
+| **Tools** | Built-in tools plus the MCP bridge for external tool servers. Access is mediated by the session trust tier and sandbox rules. |
+| **Sessions** | Persistent conversation state, workspace and project metadata, and sub-agent runs. Tool access is classified per session and inherited by sub-agents where authorized. |
+| **Web Control Room** | React/Vite application served by the gateway on `webPort` (default `3009`). Chat uses SSE for reasoning and activity events; answer text is delivered as a completed response rather than token-by-token deltas. |
+| **Desktop app** | Optional Electron shell around the gateway-served Control Room. It connects over loopback and does not create a separate agent runtime. |
 | **Meta-Cognitive** | Self-improvement loop — SARSI (self-model), Curator (pattern review), Meta^n (recursive improvement), MEA (audit gate), PARC (adaptive routing). All async, non-blocking, wrapped in try/catch. |
 
 ## Design Principles
@@ -118,11 +119,20 @@ symbiote/
 │   ├── security/       # Input sanitization
 │   ├── sessions/       # Session store, queue, sub-agents
 │   ├── tools/          # 18 built-in tools, policy engine, registry, MCP bridge
-│   └── web/            # Web UI server (SSE streaming, static serving)
-├── web/                # Web UI (single HTML file)
+│   └── web/            # HTTP APIs, project terminals, and static UI server
+├── webapp/             # React/Vite Control Room source
+├── desktop/            # Electron shell
 ├── symbiote.example.json  # Example config
 ├── .env.example        # Example environment variables
 ├── symbiote.sh            # Linux/macOS start script
 ├── symbiote.ps1           # Windows start script
 └── symbiote-gateway.service  # systemd unit file
 ```
+
+Run `npm run build` to type-check the gateway, build the web application, and copy runtime assets. `npm run build:webapp` builds only the React/Vite application.
+
+## Turn delivery and activity
+
+Provider stream events are internal runtime events, not a promise that every channel renders partial answer text. The Control Room keeps reasoning and tool activity visible while the answer is delivered at completion. CLI output is printed after a turn finishes. Discord's optional progress message is a single tool-operation status that is edited in place and finalized with the tool count; the actual answer is sent separately. Discord presence is independently updated for thinking, tool execution, and response writing.
+
+The web and desktop interfaces expose the project and agent workspaces, including the Agent IDE's project file browser and persistent project task plan. Project task data is stored beneath each project's `.session` directory.

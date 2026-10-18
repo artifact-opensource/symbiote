@@ -95,7 +95,7 @@ function updateField(contents: string, field: 'Name' | 'Emoji', value: string): 
   return `${contents.trimEnd()}\n- ${field}: ${value}\n`;
 }
 
-export function readWorkspaceIdentity(workspace: string, fallbackName = 'Agent', fallbackEmoji = '🤖'): WorkspaceIdentity {
+export function readWorkspaceIdentity(workspace: string, fallbackName = 'Agent', fallbackEmoji = 'bot'): WorkspaceIdentity {
   const agents = readText(path.join(workspace, 'AGENTS.md'));
   const identity = readText(path.join(workspace, 'IDENTITY.md'));
   const soul = readText(path.join(workspace, 'SOUL.md'));

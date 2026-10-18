@@ -2,13 +2,13 @@
   "$schema": "./symbiote.schema.json",
   "configVersion": 2,
   "name": "Symbiote",
-  "emoji": "🤖",
+  "emoji": "bot",
   "defaultProvider": "openrouter",
   "defaultModel": "openrouter/free",
   "fallbackProviders": [],
   "temperature": 0.7,
   "maxTokens": 8192,
-  "maxIterations": 50,
+  "maxIterations": 100,
   "adaptiveTemperature": {
     "adaptive": false,
     "default": 0.5,
@@ -30,7 +30,7 @@
     "enabled": true
   },
   "sandbox": {
-    "enabled": true,
+    "enabled": false,
     "ownerAccess": true,
     "internalTier": "standard",
     "nonOwnerTier": "restricted"

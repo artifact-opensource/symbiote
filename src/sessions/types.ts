@@ -2,6 +2,14 @@
 
 import type { Message } from '../providers/types.js';
 
+export interface AgentActivityLogEntry {
+  timestamp: number;
+  kind: 'thinking' | 'reasoning' | 'writing' | 'tool' | 'todo';
+  label: string;
+  toolName?: string;
+  status?: 'running' | 'done';
+}
+
 export interface SessionMetadata {
   label?: string;
   provider?: string;
@@ -26,6 +34,11 @@ export interface SessionMetadata {
     result?: string;
     error?: string;
     toolNames?: string[];
+    activity?: string;
+    activeTool?: string;
+    operations?: Array<{ name: string; status: 'running' | 'done'; startedAt: number; completedAt?: number }>;
+    activityLog?: AgentActivityLogEntry[];
+    archivedAt?: number;
   }>;
   webRun?: {
     id: string;
@@ -37,6 +50,11 @@ export interface SessionMetadata {
     result?: string;
     error?: string;
     toolNames?: string[];
+    activity?: string;
+    activeTool?: string;
+    operations?: Array<{ name: string; status: 'running' | 'done'; startedAt: number; completedAt?: number }>;
+    activityLog?: AgentActivityLogEntry[];
+    archivedAt?: number;
   };
 }
 
@@ -72,6 +90,7 @@ export interface SubAgentConfig {
   model?: string;
   maxIterations?: number;
   depth: number;
+  parentTier?: 'admin' | 'standard' | 'restricted';
 }
 
 export interface SubAgentHandle {
@@ -82,4 +101,8 @@ export interface SubAgentHandle {
   completedAt?: number;
   result?: string;
   error?: string;
+  activity?: string;
+  activeTool?: string;
+  operations?: Array<{ name: string; status: 'running' | 'done'; startedAt: number; completedAt?: number }>;
+  activityLog?: AgentActivityLogEntry[];
 }

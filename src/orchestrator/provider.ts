@@ -88,7 +88,11 @@ export async function initializeOrchestrator(toolRegistry: ToolRegistry): Promis
     synthesisPrompt: orchCfg.synthesisPrompt,
   };
 
-  orchestratorInstance = new DualLLMOrchestrator(wrappedCloudProvider, localProviders, orchestratorConfig, toolRegistry);
+  const orchestratorTools = new ToolRegistry();
+  for (const tool of toolRegistry.list()) {
+    if (tool.name !== 'computer_use') orchestratorTools.register(tool);
+  }
+  orchestratorInstance = new DualLLMOrchestrator(wrappedCloudProvider, localProviders, orchestratorConfig, orchestratorTools);
   return orchestratorInstance;
 }
 

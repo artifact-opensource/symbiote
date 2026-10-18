@@ -20,13 +20,16 @@ export function createSpawnTool(
       type: 'object',
       properties: {
         task: { type: 'string', description: 'The task for the sub-agent to complete' },
-        maxIterations: { type: 'number', description: 'Max iterations for the sub-agent (default 25)' },
+        maxIterations: { type: 'number', description: 'Optional iteration cap per runner pass. BLINK can continue across passes; without a cap, the sub-agent starts at 100 iterations and PULSE may expand to 1,000.' },
       },
       required: ['task'],
     },
     async execute(input, opts) {
       const task = String(input.task ?? '');
-      const maxIterations = Number(input.maxIterations ?? 25);
+      const maxIterations = input.maxIterations === undefined ? undefined : Number(input.maxIterations);
+      if (maxIterations !== undefined && (!Number.isInteger(maxIterations) || maxIterations < 1)) {
+        return JSON.stringify({ error: 'maxIterations must be a positive integer.' });
+      }
       const parentSessionId = opts?.sessionId ?? 'unknown';
       const parentDepth = subAgentManager.getDepth(parentSessionId);
       const scopedWorkspace = typeof workspace === 'string' ? { path: workspace } : workspace(parentSessionId);
@@ -39,7 +42,8 @@ export function createSpawnTool(
             projectId: scopedWorkspace.projectId,
             agentId: scopedWorkspace.agentId,
             depth: parentDepth + 1,
-            maxIterations,
+            ...(maxIterations === undefined ? {} : { maxIterations }),
+            ...(opts?.sessionTier ? { parentTier: opts.sessionTier } : {}),
             ...(opts?.googleWorkspaceAccessToken ? { googleWorkspaceAccessToken: opts.googleWorkspaceAccessToken } : {}),
           },
           provider,

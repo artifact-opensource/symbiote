@@ -6,7 +6,7 @@ Symbiote can import Memograph graph snapshots into its workspace VDB. The graph 
 
 Set `MEMOGRAPH_STORAGE_DIR` to the directory containing Memograph JSON snapshots. If unset, Symbiote checks the sibling path `../memograph/.memograph_storage` relative to the configured workspace.
 
-Both graph snapshots (`nodes` and `edges`) and `MemoryStore` shard JSON files are accepted. Files are read-only; Symbiote does not rewrite or migrate Memograph's source files.
+Both graph snapshots (`nodes` and `edges`) and `MemoryStore` shard JSON files are accepted. Imported source files are read-only. Symbiote writes its own graph snapshot, `symbiote_live.json`, for explicit durable memory offloads; it does not rewrite other Memograph graphs or migrate their data.
 
 ## Imported Shard Data
 
@@ -22,7 +22,7 @@ Documents use separate `memograph:<graph>:<domain>:<scope>` namespaces. Identica
 
 ## Retrieval And Permissions
 
-The context store ranks Memograph results using native VDB BM25/TF-IDF relevance, domain authority, and scope affinity. It may add up to two related shards per result, subject to the same token budget. Context labels preserve each shard's domain, scope, and hash prefix.
+The context store ranks Memograph results using native VDB BM25/TF-IDF relevance, domain authority, and scope affinity. It may add up to two related shards per result, subject to the same token budget. Context labels preserve each shard's domain, scope, and hash prefix. Symbiote's durable offload path verifies the Memograph-compatible SHA-256 shard identity before indexing.
 
 Symbiote's default retrieval actor is `agent`. A Memograph shard is included only when its permissions contain `agent` or `*`; malformed permission metadata fails closed. Configure `ContextStore` with a different actor when embedding the store in another runtime.
 

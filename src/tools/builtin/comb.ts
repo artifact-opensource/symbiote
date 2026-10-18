@@ -10,13 +10,23 @@ import type { ToolDefinition } from '../types.js';
 // VDB index + recent query hooks — set by daemon to avoid circular imports
 let _vdbIndex: ((text: string, source: string) => boolean | void) | null = null;
 let _vdbRecent: ((source: string, k: number) => Array<{ text: string; timestamp: number }>) | null = null;
+let _vdbSearch: ((query: string, k: number, namespace: string) => Array<{ text: string; timestamp: number; score: number }>) | null = null;
+let _memoryOffload: ((summary: string, sessionId: string, source: string) => { id: string; shardHash: string; duplicate: boolean }) | null = null;
 
 export function setCombVdbHook(
   indexFn: (text: string, source: string) => boolean | void,
   recentFn?: (source: string, k: number) => Array<{ text: string; timestamp: number }>,
+  searchFn?: (query: string, k: number, namespace: string) => Array<{ text: string; timestamp: number; score: number }>,
 ): void {
   _vdbIndex = indexFn;
   _vdbRecent = recentFn ?? null;
+  _vdbSearch = searchFn ?? null;
+}
+
+export function setMemoryOffloadHook(
+  offloadFn: (summary: string, sessionId: string, source: string) => { id: string; shardHash: string; duplicate: boolean },
+): void {
+  _memoryOffload = offloadFn;
 }
 
 // ── Stage (index into VDB) ───────────────────────────────────────────────
@@ -30,7 +40,22 @@ function stage(text: string, source = 'comb'): boolean {
 
 // ── Recall (query VDB for recent comb entries) ───────────────────────────
 
-function recall(): string {
+function recall(query?: string, k = 12): string {
+  if (query?.trim() && _vdbSearch) {
+    const entries = _vdbSearch(query.trim(), k, 'memograph:symbiote_live:live:agent:symbiote');
+    if (entries.length === 0) return `=== COMB RECALL ===\n\nNo relevant durable memories found for: ${query.trim()}`;
+    return [
+      '=== COMB RECALL — Similarity-matched durable memories ===',
+      'These are historical memories, not live system state. Verify volatile facts before relying on them.',
+      '',
+      ...entries.flatMap(entry => [
+        `[${new Date(entry.timestamp).toISOString()} · relevance=${entry.score.toFixed(3)}]`,
+        entry.text,
+        '',
+      ]),
+    ].join('\n');
+  }
+
   if (!_vdbRecent) {
     return '=== COMB RECALL ===\n\nNo memory backend wired. Fresh start.';
   }
@@ -82,11 +107,18 @@ export function flushMessages(sessionLabel: string, messages: Array<{ role: stri
 
 export const combRecallTool: ToolDefinition = {
   name: 'comb_recall',
-  description: 'Recall recent staged historical notes from COMB. Notes may be stale; verify current system state with live tools.',
-  parameters: { type: 'object', properties: {}, required: [] },
-  async execute() {
+  description: 'Recall historical notes from COMB. Supply a query to similarity-match durable memories; without one, returns recent staged notes. Verify volatile facts with live tools.',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Optional query for relevant durable memories' },
+      k: { type: 'number', description: 'Maximum number of matching memories (default 12)' },
+    },
+    required: [],
+  },
+  async execute(input) {
     try {
-      return recall();
+      return recall(input.query ? String(input.query) : undefined, Number(input.k ?? 12));
     } catch (err) {
       return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -107,10 +139,44 @@ export const combStageTool: ToolDefinition = {
     const content = String(input.content ?? '');
     try {
       if (!content.trim()) throw new Error('Memory content is required.');
+      if (_memoryOffload) {
+        const result = _memoryOffload(content, String(input.sessionId ?? 'main'), 'comb');
+        return result.duplicate
+          ? `Memory already stored (shard ${result.shardHash.slice(0, 12)}).`
+          : `Distilled memory durably stored in JSONL, VDB, and Memograph (shard ${result.shardHash.slice(0, 12)}).`;
+      }
       const indexed = stage(content, 'comb');
       return indexed
         ? `Staged ${content.length} chars into memory.`
         : 'This memory was already present.';
+    } catch (err) {
+      return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+    }
+  },
+};
+
+export const memoryOffloadTool: ToolDefinition = {
+  name: 'memory_offload',
+  description: 'Persist one concise, distilled, self-contained memory to the append-only cold archive, Memograph topology, and VDB similarity index. Store durable facts, decisions, preferences, or task continuity; do not store raw transcripts, secrets, or transient status.',
+  parameters: {
+    type: 'object',
+    properties: {
+      summary: { type: 'string', description: 'One coherent, concise memory summary; up to 20,000 characters' },
+      sessionId: { type: 'string', description: 'Session or task identifier for provenance (defaults to main)' },
+    },
+    required: ['summary'],
+  },
+  async execute(input) {
+    try {
+      if (!_memoryOffload) throw new Error('Durable memory backend is not initialized; nothing was offloaded.');
+      const result = _memoryOffload(
+        String(input.summary ?? ''),
+        String(input.sessionId ?? 'main'),
+        'agent',
+      );
+      return result.duplicate
+        ? `Memory already stored (shard ${result.shardHash.slice(0, 12)}).`
+        : `Memory durably stored in JSONL, VDB, and Memograph (shard ${result.shardHash.slice(0, 12)}).`;
     } catch (err) {
       return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
     }

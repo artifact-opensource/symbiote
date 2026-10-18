@@ -171,11 +171,11 @@ export function validateAndReport(config: SymbioteConfig): boolean {
   const warnings = issues.filter(i => i.severity === 'warning');
 
   for (const w of warnings) {
-    console.warn(`⚠️  Config warning [${w.field}]: ${w.message}${w.suggestion ? `\n   → ${w.suggestion}` : ''}`);
+    console.warn(`Config warning [${w.field}]: ${w.message}${w.suggestion ? `\n   Suggestion: ${w.suggestion}` : ''}`);
   }
 
   if (errors.length > 0) {
-    console.error('\n❌ Config validation failed:\n');
+    console.error('\nConfig validation failed:\n');
     for (const e of errors) {
       console.error(`  [${e.field}]: ${e.message}${e.suggestion ? `\n   → ${e.suggestion}` : ''}`);
     }

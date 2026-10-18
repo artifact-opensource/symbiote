@@ -14,7 +14,7 @@ The Electron app is a desktop shell for the gateway-served Control Room and conn
 
 ## Workspace tasks
 
-From **Workspace**, submit a task name and prompt to send it through the selected conversation's existing session and the normal agent pipeline and tool sandbox. Each new conversation gets its own session file. The **Runs** view shows task briefs, lifecycle status, subagent counts, tools used, errors, and transcript links. Active runs can be stopped, restarted, or guided.
+From **Workspace**, submit a task name and prompt to send it through the selected conversation's existing session and the normal agent pipeline and tool policy. The task form opens **Runs** after a successful start. Each new conversation gets its own session file. **Runs** shows live phase and tool activity, task briefs, lifecycle status, subagent counts, tools used, errors, and transcript links. Active runs can be stopped, restarted, or guided. Completed runs can be collapsed, archived, and restored. Chat suppresses token-by-token answer deltas; the completed answer is displayed when the turn finishes.
 
 Run state is persisted with the conversation. If the gateway restarts while a run is still marked running, startup marks it failed and preserves its transcript; it does not automatically resume an interrupted turn. Archiving a conversation moves its session file into `.session/archive/` rather than deleting it.
 
@@ -30,7 +30,7 @@ Create a project from the **Projects** drawer. Selecting a project opens its man
 
 Open **Agent IDE** from the right rail to choose from all active projects. The IDE's project choice is local to the IDE and does not switch the project used by Conversations or Agents. Each project has a separate workspace under `<workspace>/.agents/projects/<id>/workspace` and project-scoped agents and sessions. The IDE browses, creates, edits, moves, and deletes project files and folders; the editor accepts files up to 1 MB. It omits `.env` files, `.git`, `node_modules`, `.session`, and `.agents` from the browser. Destructive file actions require confirmation.
 
-The project manager and IDE **Plan** panel share project tasks with pending, in-progress, completed, and blocked states. Tasks can be assigned to agents belonging to that project. Agents can use the same project task list while working. Each IDE terminal tab owns a persistent shell process rooted in that project's workspace; commands and output stream through the Gateway, and each submitted command is checked by the configured tool sandbox. These are pipe-backed shells, not pseudo-terminals, so terminal UI applications that require a TTY are not supported. Closing a tab, leaving the IDE, archiving the project, or shutting down the Gateway stops its shell.
+The project manager and IDE **Plan** panel share project tasks with pending, in-progress, completed, and blocked states. The plan is backed by the gateway's project-task API and persisted beneath the project's `.session` directory. Tasks can be assigned to agents belonging to that project. Agents can use the same project task list while working. Each IDE terminal tab owns a persistent shell process rooted in that project's workspace; commands and output stream through the Gateway, and each submitted command is checked by the configured tool sandbox. These are pipe-backed shells, not pseudo-terminals, so terminal UI applications that require a TTY are not supported. Closing a tab, leaving the IDE, archiving the project, or shutting down the Gateway stops its shell.
 
 ## Scheduled work and agent threads
 
@@ -52,7 +52,7 @@ The **Zen** entry in the sidebar opens the games area. Its game tabs are registe
 
 - **Conversations** provides the session chat interface and Markdown transcript export.
 - **Browser** provides a Playwright-controlled page with navigation, screenshots, and mouse/keyboard actions.
-- **Session history** searches saved conversations.
+- The **Recent Threads** list in the sidebar reopens saved conversations; there is no separate session-history page.
 - **Memory** visualizes indexed knowledge and session records on separate sides of the Symbiote node. Similar records are grouped into topical shards without merging the underlying documents; links show sparse lexical-vector similarity, not embedding-based semantic similarity. Select a record for its indexed text, filter or search the map, and export the current view as a PNG.
 - **Operations** shows channel/provider health, whole-host CPU and memory use, network and disk I/O, available temperature sensors, resource warnings, and recent gateway logs. Temperature is reported only when the operating system exposes a sensor; unavailable sensors are not estimated.
 - **Notifications** prioritizes runtime alerts and attention items in the control room. Optional native browser notifications require browser permission and a secure context; this is not an offline Web Push service.
@@ -81,6 +81,8 @@ All runtime session files are stored under `<workspace>/.session/`. Existing con
 | `/api/runs` | GET | List persisted workspace task runs |
 | `/api/runs` | POST | Start a task run |
 | `/api/runs/:id/stop` | POST | Stop an active workspace run |
+| `/api/runs/:id/archive` | POST | Archive an inactive workspace run |
+| `/api/runs/:id/restore` | POST | Restore an archived workspace run |
 | `/api/agents` | GET | List runtime subagents |
 | `/api/agents/:id/action` | POST | Stop or steer an active subagent |
 | `/api/browser/snapshot` | GET | Read the controlled browser page and screenshot |

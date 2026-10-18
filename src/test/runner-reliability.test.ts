@@ -17,8 +17,8 @@ test('runner reviews completion, serializes tool calls, throttles sends, and per
     process.chdir(workspace);
 
     const budget = new PulseBudgetManager(join(workspace, 'pulse'));
-    budget.recordSession(18);
-    assert.equal(new PulseBudgetManager(join(workspace, 'pulse')).getEffectiveCap(), 100);
+    budget.recordSession(80);
+    assert.equal(new PulseBudgetManager(join(workspace, 'pulse')).getEffectiveCap(), 1000);
 
     class TestAdapter extends BaseAdapter {
       readonly id = 'test';

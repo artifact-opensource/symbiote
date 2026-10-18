@@ -1,6 +1,7 @@
 import React from 'react';
 import { Activity, Gauge, Server, Thermometer, Radio, RotateCw, Zap } from 'lucide-react';
 import { SymbioteTelemetry } from '../types';
+import ActivityOrb from './ActivityOrb';
 
 interface DiagnosticWidgetProps {
   telemetry: SymbioteTelemetry;
@@ -150,7 +151,7 @@ export default function DiagnosticWidget({
         disabled={isScanning}
         className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 active:bg-zinc-750 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-300 hover:text-white transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
       >
-        <RotateCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin text-sky-400' : ''}`} />
+        {isScanning ? <ActivityOrb label="Scanning system metrics" compact loading /> : <RotateCw className="w-3.5 h-3.5" />}
         <span>{isScanning ? 'POLLING SYSTEM...' : 'REFRESH METRICS'}</span>
       </button>
     </div>

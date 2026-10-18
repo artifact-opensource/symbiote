@@ -30,7 +30,9 @@
 
 ## Runtime Notes
 
-Symbiote includes an embedded workspace VDB using BM25 and sparse TF-IDF retrieval. Memograph snapshots can be imported as separate LIVE, PROJECT, and ENTERPRISE memory records; shard permissions and topology metadata are retained for context assembly. Dense embedding generation is not included by default.
+Symbiote separates warm continuity from explicit cold-memory promotion. Session turns, truncation absorption, identity files, skills, and recent daily notes are searchable in the workspace VDB; identity/skill catalogs are synchronized so edits and removals do not accumulate as stale copies. `memory_offload` writes a deliberate distilled note to `.symbiote/memory.jsonl`, a Memograph-compatible LIVE graph snapshot, and the VDB. Ops Memory separately retains bounded, expiring metadata about completed tool outcomes without command arguments or result bodies.
+
+VDB retrieval uses BM25 and sparse TF-IDF; it is not a dense neural embedding backend. Memograph snapshots can be imported as separate LIVE, PROJECT, and ENTERPRISE records, with shard permissions and topology retained for context assembly. See [COMB and VDB Memory](core/comb.md) and [Memograph Integration](core/memograph.md) for the actual data flow and its limits.
 
 Provider and channel availability depends on configuration and credentials. Tool counts vary by runtime; use the CLI `/tools` command or MCP `tools/list` for the active set.
 

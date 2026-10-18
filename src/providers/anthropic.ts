@@ -42,8 +42,14 @@ function convertMessages(messages: Message[]): { system?: string; messages: unkn
         content: [{
           type: 'tool_result',
           tool_use_id: msg.tool_call_id,
-          content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content),
-          ...(msg.name === '__error' ? { is_error: true } : {}),
+          content: typeof msg.content === 'string'
+            ? msg.content
+            : msg.content.flatMap((block): unknown[] => {
+              if (block.type === 'text' && block.text) return [{ type: 'text', text: block.text }];
+              if (block.type === 'image' && block.source?.type === 'base64') return [{ type: 'image', source: block.source }];
+              return [];
+            }),
+          ...(msg.is_error ? { is_error: true } : {}),
         }],
       });
       continue;

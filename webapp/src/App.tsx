@@ -3,14 +3,18 @@ import type { ReactNode, RefObject } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  Activity, ArrowRight, ArrowUpRight, Bell, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Command, Compass, Copy, Cpu,
-  Archive, Brain, Cloud, Database, Download, FileClock, Gauge, Globe, HardDrive, History, Info, LayoutDashboard, Leaf, LoaderCircle, Maximize2, Menu, MessageSquare, Minimize2, Moon, Network,
+  Activity, ArrowRight, ArrowUpRight, Bell, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Command, Copy, Cpu,
+  Archive, Brain, Cloud, Database, Download, Gauge, Globe, HardDrive, History, Info, LayoutDashboard, Leaf, Maximize2, Menu, MessageSquare, Minimize2, Moon, Network,
   Biohazard, ChevronUp, FolderOpen, MessagesSquare, Plus, RefreshCw, Search, Send, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
 } from 'lucide-react';
 import type { AgentProfile, ChatMessage, GatewayConfig, GatewayStatus, HostResourceSnapshot, SessionSummary, ThreadUserHelpRequest, ToolSummary, ViewId, WorkspaceAgent, WorkspaceProject, WorkspaceRun } from './types';
 import type { CloudProviderStatus, GoogleWorkspaceGrant } from './components/IntegrationsView';
+import ActivityOrb from './components/ActivityOrb';
+import { getActivityFromStatus, getActivityOrbState, getToolActivity, isAgentActivity } from './components/activity-orb-state';
+import ReasoningDisplay from './components/ReasoningDisplay';
 import CronPanel from './components/CronPanel';
 import ThreadsPanel from './components/ThreadsPanel';
+import { AgentIcon as AgentGlyph, AgentIconPicker } from './components/AgentIconPicker';
 
 declare const __SYMBIOTE_VERSION__: string;
 
@@ -22,12 +26,11 @@ const ProjectsPanel = lazy(() => import('./components/ProjectsPanel'));
 
 const NAVIGATION: { id: ViewId; label: string; icon: typeof LayoutDashboard; group: string }[] = [
   { id: 'workspace', label: 'Workspace', icon: LayoutDashboard, group: 'Work' },
-  { id: 'ide', label: 'Agent IDE', icon: TerminalSquare, group: 'Work' },
   { id: 'runs', label: 'Tasks', icon: Activity, group: 'Work' },
   { id: 'chat', label: 'Conversations', icon: MessageSquare, group: 'Work' },
   { id: 'browser', label: 'Browser', icon: Globe, group: 'Work' },
+  { id: 'ide', label: 'Agent IDE', icon: TerminalSquare, group: 'Work' },
   { id: 'memory', label: 'Memory', icon: Brain, group: 'Work' },
-  { id: 'sessions', label: 'Session history', icon: FileClock, group: 'Work' },
   { id: 'games', label: 'Zen', icon: Leaf, group: 'Play' },
   { id: 'operations', label: 'Operations', icon: Activity, group: 'Runtime' },
   { id: 'tools', label: 'Tool registry', icon: Wrench, group: 'Runtime' },
@@ -363,6 +366,69 @@ function findSavedAssistantResponse(messages: ChatMessage[], userText: string): 
   return undefined;
 }
 
+type TodoActivityItem = NonNullable<ChatMessage['todoActivity']>[number];
+
+function readTodoActivityItem(value: unknown): TodoActivityItem | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const item = value as Record<string, unknown>;
+  const statuses = ['pending', 'in_progress', 'blocked', 'completed'];
+  if (typeof item.id !== 'string' || typeof item.title !== 'string' || !statuses.includes(String(item.status))) return undefined;
+  return { id: item.id, title: item.title, status: item.status as TodoActivityItem['status'] };
+}
+
+function mergeTodoActivity(
+  current: TodoActivityItem[] = [],
+  completedValue: unknown,
+  remainingValue: unknown,
+): TodoActivityItem[] {
+  const completed = readTodoActivityItem(completedValue);
+  if (!completed) return current;
+  const remaining = Array.isArray(remainingValue)
+    ? remainingValue.map(readTodoActivityItem).filter((item): item is TodoActivityItem => item !== undefined)
+    : [];
+  const latestById = new Map(current.map(item => [item.id, item]));
+  for (const item of remaining) latestById.set(item.id, item);
+  latestById.set(completed.id, { ...completed, status: 'completed' });
+
+  const ordered = [
+    latestById.get(completed.id)!,
+    ...current.map(item => latestById.get(item.id)!),
+    ...remaining.map(item => latestById.get(item.id)!),
+  ];
+  const seen = new Set<string>();
+  return ordered.filter(item => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function TodoActivityBubble({ items }: { items: TodoActivityItem[] }) {
+  if (!items.length) return null;
+  const [latest, ...older] = items;
+  return (
+    <div className="todo-activity" aria-label="Live todo checklist">
+      <div className="todo-activity-current">
+        <input type="checkbox" checked={latest.status === 'completed'} readOnly aria-label={latest.status === 'completed' ? 'Completed' : 'Not completed'} />
+        <span>{latest.title}</span>
+      </div>
+      {older.length > 0 && (
+        <details>
+          <summary>{older.length} other checklist {older.length === 1 ? 'item' : 'items'}<ChevronDown size={13} /></summary>
+          <div className="todo-activity-list">
+            {older.map(item => (
+              <div key={item.id}>
+                <input type="checkbox" checked={item.status === 'completed'} readOnly aria-label={item.status === 'completed' ? 'Completed' : 'Not completed'} />
+                <span>{item.title}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function MinimalMode({ theme, agentName, agentEmoji, agentAvatarDataUrl, onThemeChange }: {
   theme: Theme;
   agentName?: string;
@@ -405,9 +471,9 @@ function MinimalMode({ theme, agentName, agentEmoji, agentAvatarDataUrl, onTheme
 
   useEffect(() => {
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 5000);
+    const timer = window.setInterval(() => void refresh(), tab === 'tasks' ? 1000 : 5000);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, tab]);
 
   useEffect(() => {
     void window.symbioteDesktop?.getOpacity().then(setOpacity).catch(failure => {
@@ -454,21 +520,27 @@ function MinimalMode({ theme, agentName, agentEmoji, agentAvatarDataUrl, onTheme
     const assistantId = createClientId();
     let streamedText = '';
     setActiveTurnSessionId(activeSessionId);
-    setMessages(current => [...current, { id: `pending-${Date.now()}`, role: 'user', content: message, timestamp: Date.now() }, { id: assistantId, role: 'assistant', content: '', streaming: true, thinking: true, timestamp: Date.now() }]);
+    setMessages(current => [...current, { id: `pending-${Date.now()}`, role: 'user', content: message, timestamp: Date.now() }, { id: assistantId, role: 'assistant', content: '', streaming: true, thinking: true, activityState: 'thinking', timestamp: Date.now() }]);
     try {
       const outcome = await streamApi<{ text: string }>('/api/chat', { text: message, sessionId: activeSessionId }, event => {
+        if (event.type === 'todo_update') {
+          setMessages(current => current.map(item => item.id === assistantId
+            ? { ...item, todoActivity: mergeTodoActivity(item.todoActivity, event.completedTodo, event.remainingTodos) }
+            : item));
+          return;
+        }
         setMessages(current => current.map(item => {
           if (item.id !== assistantId) return item;
-          if (event.type === 'text_delta') return { ...item, content: item.content + String(event.text ?? ''), thinking: false };
-          if (event.type === 'thinking_delta') return { ...item, thinking: true };
+          if (event.type === 'text_delta') return { ...item, content: item.content + String(event.text ?? ''), thinking: false, activityState: 'responding' };
+          if (event.type === 'thinking_delta') return { ...item, thinking: true, activityState: 'reasoning' };
           if (event.type === 'tool_start') {
             const name = String(event.name ?? 'tool');
-            return { ...item, thinking: false, activeTool: name, activeTools: [...(item.activeTools ?? []), name] };
+            return { ...item, thinking: false, activityState: getToolActivity(name).activity, activeTool: name, activeTools: [...(item.activeTools ?? []), name] };
           }
           if (event.type === 'tool_end') {
             const name = String(event.name ?? 'tool');
             const activeTools = (item.activeTools ?? []).filter((tool, index, tools) => tool !== name || index !== tools.lastIndexOf(name));
-            return { ...item, activeTools, activeTool: activeTools.at(-1), thinking: activeTools.length === 0 };
+            return { ...item, activeTools, activeTool: activeTools.at(-1), thinking: activeTools.length === 0, activityState: activeTools.length ? getToolActivity(activeTools.at(-1)!).activity : 'thinking' };
           }
           return item;
         }));
@@ -481,7 +553,7 @@ function MinimalMode({ theme, agentName, agentEmoji, agentAvatarDataUrl, onTheme
           setMessages(saved);
         } else {
           setMessages(current => current.map(item => item.id === assistantId
-            ? { ...item, content: streamedText, streaming: false, interrupted: true }
+            ? { ...item, content: streamedText, streaming: false, activeTools: [], activeTool: undefined, todoActivity: [], interrupted: true }
             : item));
         }
         return;
@@ -489,12 +561,17 @@ function MinimalMode({ theme, agentName, agentEmoji, agentAvatarDataUrl, onTheme
       const result = outcome.result;
       await refresh();
       const saved = await api<ChatMessage[]>(`/api/sessions/${encodeURIComponent(activeSessionId)}/messages`);
-      setMessages(saved.length ? saved : current => current.map(item => item.id === assistantId ? { ...item, content: result.text, streaming: false } : item));
+      setMessages(saved.length ? saved : current => current.map(item => item.id === assistantId
+        ? { ...item, content: result.text, streaming: false, activeTools: [], activeTool: undefined, todoActivity: [] }
+        : item));
     } catch (failure) {
       setMessages(current => current.map(item => item.id === assistantId ? {
         ...item,
         content: item.content || streamedText || (failure instanceof Error ? failure.message : 'The agent turn failed.'),
         streaming: false,
+        activeTools: [],
+        activeTool: undefined,
+        todoActivity: [],
         interrupted: true,
       } : item));
     } finally {
@@ -553,7 +630,11 @@ function MinimalMode({ theme, agentName, agentEmoji, agentAvatarDataUrl, onTheme
           </div>
           <div className="minimal-messages" ref={scrollRef}>
             {messages.length === 0 && <p className="minimal-empty">Start a conversation.</p>}
-            {messages.map(message => <article className={`minimal-message minimal-message-${message.role}`} key={message.id}><span className={message.role === 'assistant' ? 'minimal-message-agent' : undefined}>{message.role === 'user' ? 'You' : <><AgentAvatar emoji={agentEmoji} image={agentAvatarDataUrl} size={13} />{agentName || 'Agent'}</>}</span>{message.content && <MessageBody content={message.content} />}{message.streaming && (message.activeTool || message.thinking) && <small className="message-live-activity"><span className="thinking-pulse" />{message.activeTool ? `Using ${message.activeTool}` : 'Thinking'}</small>}{message.interrupted && <small className="message-interrupted">This reply did not finish. Your message is preserved; you can try again.</small>}</article>)}
+            {messages.map(message => <article className={`minimal-message minimal-message-${message.role}`} key={message.id}><span className={message.role === 'assistant' ? 'minimal-message-agent' : undefined}>{message.role === 'user' ? 'You' : <><AgentAvatar emoji={agentEmoji} image={agentAvatarDataUrl} size={13} />{agentName || 'Agent'}</>}</span>{message.content && <MessageBody content={message.content} />}{message.streaming && message.todoActivity?.length ? <TodoActivityBubble items={message.todoActivity} /> : null}{message.streaming && (() => {
+              const activity = isAgentActivity(message.activityState) ? message.activityState : message.activeTool ? getToolActivity(message.activeTool).activity : 'thinking';
+              const tool = message.activeTool ? getToolActivity(message.activeTool) : undefined;
+              return <ReasoningDisplay activity={activity} toolLabel={tool ? `Executing · ${tool.label}` : undefined} compact />;
+            })()}{message.interrupted && <small className="message-interrupted">This reply did not finish. Your message is preserved; you can try again.</small>}</article>)}
           </div>
           <form className="minimal-composer" onSubmit={event => void sendMessage(event)}>
             <textarea value={text} onChange={event => setText(event.target.value)} rows={2} placeholder="Write a message…" aria-label="Message" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
@@ -614,24 +695,15 @@ function initials(label?: string): string {
   return (label || 'S').trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
 }
 
-function agentIcon(emoji?: string) {
-  if (emoji === '🧠') return Brain;
-  if (emoji === '🧭') return Compass;
-  if (emoji === '🌿') return Leaf;
-  if (emoji === '✨') return Sparkles;
-  return Bot;
-}
-
 function AgentAvatar({ emoji, image, size = 16, className = '' }: {
   emoji?: string;
   image?: string;
   size?: number;
   className?: string;
 }) {
-  const Icon = agentIcon(emoji);
   return image
     ? <img className={className} src={image} alt="" width={size} height={size} />
-    : <Icon className={className} size={size} aria-hidden="true" />;
+    : <AgentGlyph id={emoji} className={className} size={size} />;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -779,7 +851,7 @@ function AccessGate({ onUnlock, error }: { onUnlock: (token: string) => Promise<
         <input id="lan-access-token" type="password" autoComplete="current-password" value={token} onChange={event => setToken(event.target.value)} required />
         {error && <div className="notice notice-error" role="alert">{error}</div>}
         <button className="button button-primary" type="submit" disabled={checking || !token.trim()}>
-          {checking ? <LoaderCircle size={15} className="spin" /> : <ArrowRight size={15} />}
+          {checking ? <ActivityOrb label="Checking" compact loading /> : <ArrowRight size={15} />}
           {checking ? 'Checking…' : 'Connect'}
         </button>
       </form>
@@ -879,7 +951,6 @@ export default function App() {
       return {};
     }
   });
-  const [sessionQuery, setSessionQuery] = useState('');
   const [toolQuery, setToolQuery] = useState('');
   const [logQuery, setLogQuery] = useState('');
   const [commandOpen, setCommandOpen] = useState(false);
@@ -911,7 +982,6 @@ export default function App() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const activeTurnSessionId = useRef<string | null>(null);
   const nativeNotifiedIds = useRef(new Set<string>());
-  const sessionSearchRef = useRef<HTMLInputElement>(null);
   const toolSearchRef = useRef<HTMLInputElement>(null);
   const logSearchRef = useRef<HTMLInputElement>(null);
   const activeSession = sessions.find(session => session.id === activeSessionId);
@@ -1017,6 +1087,7 @@ export default function App() {
     const iconInk = contrastInk(hslRgb(appearance.secondaryHue, 72, iconLightness));
     root.style.setProperty('--appearance-brightness', `${brightness}%`);
     root.style.setProperty('--appearance-primary', primary);
+    root.style.setProperty('--appearance-primary-hue', `${appearance.primaryHue}deg`);
     root.style.setProperty('--appearance-primary-ink', primaryInk);
     root.style.setProperty('--appearance-icon', `hsl(${appearance.secondaryHue} 72% ${iconLightness}%)`);
     root.style.setProperty('--appearance-icon-ink', iconInk);
@@ -1103,7 +1174,7 @@ export default function App() {
         setCommandOpen(true);
         setCommandQuery('');
       } else if (event.key === '/' && !isEditing) {
-        const search = view === 'sessions' ? sessionSearchRef.current : view === 'tools' ? toolSearchRef.current : view === 'operations' ? logSearchRef.current : null;
+        const search = view === 'tools' ? toolSearchRef.current : view === 'operations' ? logSearchRef.current : null;
         if (search) {
           event.preventDefault();
           search.focus();
@@ -1321,13 +1392,6 @@ export default function App() {
     if (view === 'chat') bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, sending, view]);
 
-  const filteredSessions = useMemo(() => {
-    const query = sessionQuery.trim().toLowerCase();
-    return query
-      ? sessions.filter(session => `${session.label ?? ''} ${session.id}`.toLowerCase().includes(query))
-      : sessions;
-  }, [sessions, sessionQuery]);
-
   const filteredTools = useMemo(() => {
     const query = toolQuery.trim().toLowerCase();
     return query
@@ -1496,6 +1560,24 @@ export default function App() {
     }
   };
 
+  const archiveRun = async (id: string) => {
+    try {
+      await api(`/api/runs/${encodeURIComponent(id)}/archive`, { method: 'POST' });
+      await refreshWork();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not archive the run.');
+    }
+  };
+
+  const restoreRun = async (id: string) => {
+    try {
+      await api(`/api/runs/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+      await refreshWork();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not restore the run.');
+    }
+  };
+
   const updateIdentity = async (identity: { name: string; emoji: string; soulContent: string; agentsContent: string; instructions: string; avatarDataUrl: string | null }) => {
     try {
       const updated = await api<GatewayConfig>('/api/identity', {
@@ -1575,7 +1657,7 @@ export default function App() {
       setSessions(remaining);
       if (activeSessionId === id) {
         setActiveSessionId(remaining[0]?.id ?? '');
-        if (!remaining.length) navigate('sessions');
+        if (!remaining.length) navigate('workspace');
       }
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not archive conversation.');
@@ -1608,7 +1690,7 @@ export default function App() {
     const assistantId = createClientId();
     let streamedText = '';
     activeTurnSessionId.current = activeSessionId;
-    setMessages(previous => [...previous, userMessage, { id: assistantId, role: 'assistant', content: '', timestamp: Date.now(), streaming: true, thinking: true }]);
+    setMessages(previous => [...previous, userMessage, { id: assistantId, role: 'assistant', content: '', timestamp: Date.now(), streaming: true, thinking: true, activityState: 'thinking' }]);
     setSending(true);
     setSessionDrafts(previous => {
       const next = { ...previous };
@@ -1629,19 +1711,26 @@ export default function App() {
         sessionId: activeSessionId,
         ...(googleWorkspaceOnline && googleWorkspaceGrant ? { googleWorkspaceAccessToken: googleWorkspaceGrant.accessToken } : {}),
       }, streamed => {
+        if (streamed.type === 'todo_update') {
+          setMessages(previous => previous.map(message => message.id === assistantId
+            ? { ...message, todoActivity: mergeTodoActivity(message.todoActivity, streamed.completedTodo, streamed.remainingTodos) }
+            : message));
+          return;
+        }
         setMessages(previous => previous.map(message => {
           if (message.id !== assistantId) return message;
           if (streamed.type === 'text_delta') {
             const delta = String(streamed.text ?? '');
             streamedText += delta;
-            return { ...message, content: message.content + delta, thinking: false };
+            return { ...message, content: message.content + delta, thinking: false, activityState: 'responding' };
           }
-          if (streamed.type === 'thinking_delta') return { ...message, thinking: true };
+          if (streamed.type === 'thinking_delta') return { ...message, thinking: true, activityState: 'reasoning' };
           if (streamed.type === 'tool_start') {
             const name = String(streamed.name ?? 'tool');
             return {
               ...message,
               thinking: false,
+              activityState: getToolActivity(name).activity,
               activeTool: name,
               activeTools: [...(message.activeTools ?? []), name],
               toolActivity: [...(message.toolActivity ?? []), { name, status: 'running' as const }],
@@ -1659,7 +1748,7 @@ export default function App() {
             }
             if (runningIndex >= 0) toolActivity[runningIndex] = { ...toolActivity[runningIndex], status: 'done' };
             const activeTools = toolActivity.filter(tool => tool.status === 'running').map(tool => tool.name);
-            return { ...message, activeTools, activeTool: activeTools.at(-1), toolActivity, thinking: activeTools.length === 0 };
+            return { ...message, activeTools, activeTool: activeTools.at(-1), toolActivity, thinking: activeTools.length === 0, activityState: activeTools.length ? getToolActivity(activeTools.at(-1)!).activity : 'thinking' };
           }
           return message;
         }));
@@ -1679,6 +1768,7 @@ export default function App() {
             activeTools: [],
             activeTool: undefined,
             toolActivity: [],
+            todoActivity: [],
             interrupted: true,
           } : message));
         }
@@ -1693,6 +1783,7 @@ export default function App() {
         activeTools: [],
         activeTool: undefined,
         toolActivity: [],
+        todoActivity: [],
         timestamp: Date.now(),
         durationMs: response.durationMs,
         iterations: response.iterations,
@@ -1712,6 +1803,7 @@ export default function App() {
         activeTools: [],
         activeTool: undefined,
         toolActivity: [],
+        todoActivity: [],
         interrupted: true,
       } : message));
     } finally {
@@ -1858,7 +1950,7 @@ export default function App() {
           {['Work', 'Play', 'Runtime'].map(group => (
             <div className="nav-group" key={group}>
               <div className="nav-label">{group}</div>
-              {NAVIGATION.filter(item => item.group === group && item.id !== 'ide').map(item => {
+              {NAVIGATION.filter(item => item.group === group).map(item => {
                 const Icon = item.icon;
                 return (
                   <button
@@ -1968,7 +2060,7 @@ export default function App() {
           )}
 
           {loading && !status ? (
-            <div className="loading-state"><LoaderCircle size={22} className="spin" /><span>Connecting to your local runtime…</span></div>
+            <div className="loading-state"><ActivityOrb label="Connecting" loading /><span>Connecting to your local runtime…</span></div>
           ) : (
             <>
               {view === 'workspace' && (
@@ -1997,7 +2089,7 @@ export default function App() {
                 />
               )}
               {view === 'ide' && (
-                <Suspense fallback={<div className="loading-state"><LoaderCircle size={20} className="spin" /><span>Loading the project IDE…</span></div>}>
+                <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading the project IDE" loading /><span>Loading the project IDE…</span></div>}>
                   <ProjectIDE
                     projects={projects}
                     profiles={workspaceAgents}
@@ -2015,6 +2107,8 @@ export default function App() {
                   onStop={stopRun}
                   onRestart={restartRun}
                   onGuide={guideRun}
+                  onArchive={archiveRun}
+                  onRestore={restoreRun}
                   onOpenSession={openRunSession}
                 />
               )}
@@ -2042,18 +2136,8 @@ export default function App() {
                 />
               )}
               {view === 'browser' && <BrowserView />}
-              {view === 'sessions' && (
-                <SessionsView
-                  sessions={filteredSessions}
-                  query={sessionQuery}
-                  onQuery={setSessionQuery}
-                  onOpen={id => { selectSession(id); navigate('chat'); }}
-                  onNew={() => void createSession()}
-                  creating={creatingSession}
-                />
-              )}
-              {view === 'memory' && <Suspense fallback={<div className="loading-state">Loading memory map…</div>}><MemoryMap request={api} /></Suspense>}
-              {view === 'integrations' && <Suspense fallback={<div className="loading-state"><LoaderCircle size={20} className="spin" /><span>Loading integrations…</span></div>}><IntegrationsView grant={googleWorkspaceGrant} onGrantChange={setGoogleWorkspaceGrant} request={api} cloudStatus={cloudProviderStatus} onCloudStatusChange={(provider, configured) => setCloudProviderStatus(previous => ({ ...previous, [provider]: configured }))} /></Suspense>}
+              {view === 'memory' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading the memory map" loading /><span>Loading memory map…</span></div>}><MemoryMap request={api} /></Suspense>}
+              {view === 'integrations' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading integrations" loading /><span>Loading integrations…</span></div>}><IntegrationsView grant={googleWorkspaceGrant} onGrantChange={setGoogleWorkspaceGrant} request={api} cloudStatus={cloudProviderStatus} onCloudStatusChange={(provider, configured) => setCloudProviderStatus(previous => ({ ...previous, [provider]: configured }))} /></Suspense>}
               {view === 'operations' && (
                 <OperationsView
                   status={status}
@@ -2070,7 +2154,7 @@ export default function App() {
                 <ToolsView tools={filteredTools} total={tools.length} query={toolQuery} onQuery={setToolQuery} />
               )}
               {view === 'settings' && <SettingsView config={config} status={status} />}
-              {view === 'games' && <Suspense fallback={<div className="loading-state">Loading games…</div>}><GamesView request={api} /></Suspense>}
+              {view === 'games' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading games" loading /><span>Loading games…</span></div>}><GamesView request={api} /></Suspense>}
             </>
           )}
         </main>
@@ -2081,7 +2165,6 @@ export default function App() {
         projectToOpen={projectToOpen}
         openThreadRequest={workspaceThreadOpenRequest}
         threadToOpen={threadToOpen}
-        currentView={view}
         onOpenIDE={() => navigate('ide')}
         projects={projects}
         profiles={workspaceAgents}
@@ -2116,21 +2199,14 @@ function AgentSettingsDialog({ config, onSave, onClose }: {
   onClose: () => void;
 }) {
   const [name, setName] = useState(config.agentName || config.name || '');
-  const [emoji, setEmoji] = useState(config.agentEmoji || '🤖');
+  const [emoji, setEmoji] = useState(config.agentEmoji || 'bot');
   const [soulContent, setSoulContent] = useState(config.soulContent || '');
   const [agentsContent, setAgentsContent] = useState(config.agentsContent || '');
   const [instructions, setInstructions] = useState(config.agentInstructions || '');
   const [avatarDataUrl, setAvatarDataUrl] = useState<string | null>(config.agentAvatarDataUrl ?? null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const choices = [
-    { emoji: '🤖', label: 'Automaton', icon: Bot },
-    { emoji: '🧠', label: 'Mind', icon: Brain },
-    { emoji: '🧭', label: 'Compass', icon: Compass },
-    { emoji: '🌿', label: 'Leaf', icon: Leaf },
-    { emoji: '✨', label: 'Spark', icon: Sparkles },
-  ];
-  const AgentIcon = agentIcon(emoji);
+  const AgentIcon = AgentGlyph;
   const loadAvatar = (file?: File) => {
     if (!file) return;
     if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
@@ -2186,13 +2262,7 @@ function AgentSettingsDialog({ config, onSave, onClose }: {
                 <span>Upload image</span>
               </label>
               <span className="identity-avatar-or">or</span>
-              <div className="identity-icons" role="group" aria-label="Choose an agent symbol">
-                {choices.map(({ emoji: value, label, icon: Icon }) => (
-                  <button key={value} type="button" className={emoji === value && !avatarDataUrl ? 'identity-icon-choice identity-icon-selected' : 'identity-icon-choice'} onClick={() => { setEmoji(value); setAvatarDataUrl(null); }} aria-label={label} title={label} aria-pressed={emoji === value && !avatarDataUrl}>
-                    <Icon size={17} />
-                  </button>
-                ))}
-              </div>
+              <AgentIconPicker id="identity-agent-icon" value={emoji} onChange={value => { setEmoji(value); setAvatarDataUrl(null); }} />
             </div>
             <small>Used throughout the workspace and chat. Subagents keep their bot icon. PNG, JPEG, or WebP up to 2 MiB.</small>
             {avatarDataUrl && <button className="button button-secondary identity-avatar-remove" type="button" onClick={() => setAvatarDataUrl(null)}>Remove custom avatar</button>}
@@ -2215,7 +2285,7 @@ function AgentSettingsDialog({ config, onSave, onClose }: {
           {error && <div className="notice notice-error" role="alert">{error}</div>}
           <footer className="identity-dialog-actions">
             <button className="button button-secondary" type="button" onClick={onClose}>Cancel</button>
-            <button className="button button-primary" type="submit" disabled={saving || !name.trim()}>{saving ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{saving ? 'Saving' : 'Save identity'}</button>
+            <button className="button button-primary" type="submit" disabled={saving || !name.trim()}>{saving ? <ActivityOrb label="Saving identity" compact loading /> : <Check size={14} />}{saving ? 'Saving' : 'Save identity'}</button>
           </footer>
         </form>
       </section>
@@ -2322,9 +2392,8 @@ function OverviewView(props: {
       <section className="overview-banner">
         <div className="banner-orbit orbit-one" /><div className="banner-orbit orbit-two" />
         <div className="banner-copy">
-          <h2>{status ? 'Your workspace is online' : 'Waiting for your runtime'}</h2>
-          <p>{status ? `${status.activeTurns ?? 0} active ${status.activeTurns === 1 ? 'turn' : 'turns'} · Symbiote Gateway connected` : 'Start the Symbiote gateway to bring your control room online.'}</p>
-          {status && <HeroTaskForm sessionId={activeSessionId} onStart={onStartRun} starting={startingRun} />}
+          {!status && <p>Start the Symbiote gateway to bring your control room online.</p>}
+          {status && <HeroTaskForm sessionId={activeSessionId} onStart={onStartRun} starting={startingRun} onNavigate={onNavigate} />}
           <button className="banner-link" onClick={() => onNavigate('operations')}>View runtime details <ArrowRight size={15} /></button>
         </div>
         <WorkspaceGraph
@@ -2387,7 +2456,6 @@ function OverviewView(props: {
         <section className="surface-card work-card">
           <div className="section-heading">
             <div><div className="eyebrow">KEEP THE THREAD</div><h2>Recent conversations</h2></div>
-            <button className="text-button" onClick={() => onNavigate('sessions')}>All sessions <ArrowUpRight size={14} /></button>
           </div>
           {latestSessions.length ? (
             <div className="conversation-list">
@@ -2512,10 +2580,11 @@ const TASK_PROMPTS = [
 
 const TASK_HELP = 'Launch an agent run in this project. The agent can delegate independent work to subagents.';
 
-function HeroTaskForm({ sessionId, onStart, starting }: {
+function HeroTaskForm({ sessionId, onStart, starting, onNavigate }: {
   sessionId: string;
   onStart: (prompt: string, sessionId: string) => Promise<boolean>;
   starting: boolean;
+  onNavigate: (view: ViewId) => void;
 }) {
   const [prompt, setPrompt] = useState('');
   const [heading] = useState(() => TASK_PROMPTS[Math.floor(Math.random() * TASK_PROMPTS.length)]);
@@ -2526,6 +2595,7 @@ function HeroTaskForm({ sessionId, onStart, starting }: {
         void onStart(prompt.trim(), sessionId).then(started => {
           if (started) {
             setPrompt('');
+            onNavigate('runs');
             const textarea = document.getElementById('hero-task-prompt') as HTMLTextAreaElement | null;
             if (textarea) textarea.style.height = 'auto';
           }
@@ -2547,7 +2617,7 @@ function HeroTaskForm({ sessionId, onStart, starting }: {
           event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 260)}px`;
         }} maxLength={20_000} rows={1} placeholder="Describe the task…" />
         <button type="submit" className="hero-task-submit" aria-label={starting ? 'Starting task' : 'Start task'} title={starting ? 'Starting task' : 'Start task'} disabled={starting || !prompt.trim()}>
-          {starting ? <LoaderCircle size={15} className="spin" /> : <ArrowRight size={15} />}
+          {starting ? <ActivityOrb label="Starting task" compact loading /> : <ArrowRight size={15} />}
         </button>
       </div>
     </form>
@@ -2806,22 +2876,31 @@ function RunStatus({ status }: { status: WorkspaceRun['status'] }) {
   return <span className={`run-status run-status-${status}`}><Icon size={13} />{status}</span>;
 }
 
-function RunsView({ runs, agents, onStop, onRestart, onGuide, onOpenSession }: {
+function RunsView({ runs, agents, onStop, onRestart, onGuide, onArchive, onRestore, onOpenSession }: {
   runs: WorkspaceRun[];
   agents: WorkspaceAgent[];
   onStop: (id: string) => void;
   onRestart: (id: string) => void;
   onGuide: (id: string, message: string) => Promise<void>;
+  onArchive: (id: string) => void;
+  onRestore: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
 }) {
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedRuns = runs.filter(run => run.archivedAt);
   const lanes: Array<{ key: string; title: string; description: string; items: WorkspaceRun[] }> = [
-    { key: 'active', title: 'In progress', description: 'The main agent is working', items: runs.filter(run => run.status === 'running') },
-    { key: 'done', title: 'Completed', description: 'Finished task runs', items: runs.filter(run => run.status === 'completed') },
-    { key: 'attention', title: 'Needs attention', description: 'Stopped or failed runs', items: runs.filter(run => run.status === 'failed' || run.status === 'cancelled') },
+    { key: 'active', title: 'In progress', description: 'Live activity from the main agent and its subagents', items: runs.filter(run => !run.archivedAt && run.status === 'running') },
+    { key: 'done', title: 'Completed', description: 'Finished task runs', items: runs.filter(run => !run.archivedAt && run.status === 'completed') },
+    { key: 'attention', title: 'Needs attention', description: 'Stopped or failed runs', items: runs.filter(run => !run.archivedAt && (run.status === 'failed' || run.status === 'cancelled')) },
   ];
   return (
     <div className="page task-page">
-      <PageHeading eyebrow="AGENTIC WORKFLOW" title="Task board" detail="Track the main agent’s work, send guidance, stop a run, or restart from its saved conversation." />
+      <PageHeading
+        eyebrow="AGENTIC WORKFLOW"
+        title="Task board"
+        detail="Watch live activity, guide work in progress, and review or archive completed runs."
+        action={<button type="button" className="button button-secondary" onClick={() => setShowArchived(current => !current)} aria-expanded={showArchived}><Archive size={14} />{showArchived ? 'Hide archived' : `Archived${archivedRuns.length ? ` · ${archivedRuns.length}` : ''}`}</button>}
+      />
       <div className="task-board" aria-label="Agentic task board">
         {lanes.map(lane => (
           <section className={`task-lane task-lane-${lane.key}`} key={lane.key} aria-label={`${lane.title} tasks`}>
@@ -2831,25 +2910,33 @@ function RunsView({ runs, agents, onStop, onRestart, onGuide, onOpenSession }: {
             </header>
             {lane.items.length ? lane.items.map(run => {
               const runAgents = agents.filter(agent => agent.parentSessionId === run.sessionId);
-              return <TaskCard key={run.id} run={run} runAgents={runAgents} onStop={onStop} onRestart={onRestart} onGuide={onGuide} onOpenSession={onOpenSession} />;
+              return <TaskCard key={run.id} run={run} runAgents={runAgents} onStop={onStop} onRestart={onRestart} onGuide={onGuide} onArchive={onArchive} onOpenSession={onOpenSession} />;
             }) : <div className="task-lane-empty">No tasks here</div>}
           </section>
         ))}
       </div>
+      {showArchived && <section className="task-lane task-lane-archived" aria-label="Archived task runs">
+        <header className="task-lane-heading"><div><h2>Archived</h2><p>Hidden from the active board; restore any run when needed.</p></div><span>{archivedRuns.length}</span></header>
+        {archivedRuns.length ? archivedRuns.map(run => <TaskCard key={run.id} run={run} runAgents={agents.filter(agent => agent.parentSessionId === run.sessionId)} onStop={onStop} onRestart={onRestart} onGuide={onGuide} onRestore={onRestore} onOpenSession={onOpenSession} />) : <div className="task-lane-empty">No archived runs</div>}
+      </section>}
     </div>
   );
 }
 
-function TaskCard({ run, runAgents, onStop, onRestart, onGuide, onOpenSession }: {
+function TaskCard({ run, runAgents, onStop, onRestart, onGuide, onArchive, onRestore, onOpenSession }: {
   run: WorkspaceRun;
   runAgents: WorkspaceAgent[];
   onStop: (id: string) => void;
   onRestart: (id: string) => void;
   onGuide: (id: string, message: string) => Promise<void>;
+  onArchive?: (id: string) => void;
+  onRestore?: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
 }) {
   const [guidance, setGuidance] = useState('');
   const [sendingGuidance, setSendingGuidance] = useState(false);
+  const [expanded, setExpanded] = useState(run.status === 'running');
+  useEffect(() => setExpanded(run.status === 'running'), [run.status]);
   const sendGuidance = async (message: string) => {
     if (!message.trim()) return;
     setSendingGuidance(true);
@@ -2862,15 +2949,41 @@ function TaskCard({ run, runAgents, onStop, onRestart, onGuide, onOpenSession }:
   };
   return (
     <article className="task-card">
-      <div className="task-card-heading"><div><h3>{run.name}</h3><span className="run-meta">{formatRelative(run.startedAt)} · {formatElapsed(run.startedAt, run.completedAt)}</span></div><RunStatus status={run.status} /></div>
+      <div className="task-card-heading">
+        {run.status === 'running'
+          ? <div><h3>{run.name}</h3><span className="run-meta">{formatRelative(run.startedAt)} · {formatElapsed(run.startedAt, run.completedAt)}</span></div>
+          : <button type="button" className="task-card-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><span><h3>{run.name}</h3><span className="run-meta">{formatRelative(run.startedAt)} · {formatElapsed(run.startedAt, run.completedAt)}</span></span>{expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>}
+        <RunStatus status={run.status} />
+      </div>
+      {expanded && <>
       <details className="run-prompt"><summary>Task brief</summary><p>{run.prompt}</p></details>
-      {!!runAgents.length && <div className="run-tool-summary"><Users size={13} />{runAgents.filter(agent => agent.status === 'running').length} active of {runAgents.length} agents</div>}
+      {!!runAgents.length && <section className="run-operations" aria-label="Subagent operations">
+        <div className="run-tool-summary"><Users size={13} />{runAgents.filter(agent => agent.status === 'running').length} active of {runAgents.length} agents</div>
+        {runAgents.map(agent => <div className="run-operation" key={agent.sessionId}>
+          <ActivityOrb label={agent.activity ?? agent.status} compact loading={agent.status === 'running'} />
+          <span><strong>{agent.task}</strong><small>{agent.activeTool ? `Executing ${agent.activeTool}` : agent.activity ?? agent.status}</small></span>
+        </div>)}
+        {runAgents.flatMap(agent => (agent.activityLog ?? []).slice(-3).map((entry, index) => ({ agent, entry, key: `${agent.sessionId}-${entry.timestamp}-${index}` }))).slice(-8).map(({ agent, entry, key }) => <div className="run-activity-entry run-activity-subagent" key={key}><span className={`run-activity-kind run-activity-${entry.kind}`} /><span><strong>{agent.task}</strong><small>{entry.label}</small></span><time>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time></div>)}
+      </section>}
+      {run.status === 'running' && <section className="run-operations" aria-label="Agent operations">
+        <div className="run-operation">
+          <ActivityOrb label={run.activity ?? 'Working'} compact loading />
+          <span><strong>{run.activeTool ? `Executing ${run.activeTool}` : run.activity ?? 'Working'}</strong><small>Live agent activity</small></span>
+        </div>
+        {!!run.activityLog?.length && <ul className="run-activity-log" aria-label="Live activity log">
+          {run.activityLog.slice(-10).reverse().map((entry, index) => <li className="run-activity-entry" key={`${entry.timestamp}-${index}`}>
+            <span className={`run-activity-kind run-activity-${entry.kind}${entry.status === 'running' ? ' is-running' : ''}`} />
+            <span><strong>{entry.label}</strong>{entry.toolName && <small>{entry.status === 'running' ? 'Running' : 'Complete'}</small>}</span>
+            <time>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>
+          </li>)}
+        </ul>}
+      </section>}
       {run.error && <p className="run-result run-error"><CircleAlert size={14} />{run.error}</p>}
       {run.result && <div className="run-result"><strong>Agent result</strong><MessageBody content={run.result} /></div>}
       {!!run.toolNames?.length && <div className="run-tool-summary"><Wrench size={13} />{run.toolNames.join(', ')}</div>}
       {run.status === 'running' && <form className="task-guidance-form" onSubmit={event => { event.preventDefault(); void sendGuidance(guidance); }}>
         <textarea value={guidance} onChange={event => setGuidance(event.target.value)} maxLength={2_000} rows={2} placeholder="Guide or nudge the agent…" aria-label={`Guide task ${run.name}`} />
-        <button type="submit" className="button button-secondary" disabled={sendingGuidance || !guidance.trim()}>{sendingGuidance ? <LoaderCircle size={14} className="spin" /> : <ArrowRight size={14} />}Guide</button>
+        <button type="submit" className="button button-secondary" disabled={sendingGuidance || !guidance.trim()}>{sendingGuidance ? <ActivityOrb label="Sending guidance" compact loading /> : <ArrowRight size={14} />}Guide</button>
       </form>}
       <div className="task-card-actions">
         <button className="button button-secondary" onClick={() => onOpenSession(run.sessionId)}><MessageSquare size={14} />Conversation</button>
@@ -2880,18 +2993,21 @@ function TaskCard({ run, runAgents, onStop, onRestart, onGuide, onOpenSession }:
             {(run.status === 'cancelled' || run.status === 'failed') && <button className="button button-secondary" onClick={() => void sendGuidance('Continue this task from the existing conversation. Check what remains and complete the work.')}>Nudge</button>}
             <button className="button button-secondary" onClick={() => onRestart(run.id)}><RefreshCw size={14} />Restart</button>
           </>}
+        {run.archivedAt
+          ? <button className="button button-secondary" onClick={() => onRestore?.(run.id)}><Archive size={14} />Restore</button>
+          : run.status !== 'running' && <button className="button button-secondary" onClick={() => onArchive?.(run.id)}><Archive size={14} />Archive</button>}
       </div>
+      </>}
     </article>
   );
 }
 
-function WorkspaceDrawer({ openRequest, projectOpenRequest, projectToOpen, openThreadRequest, threadToOpen, currentView, onOpenIDE, projects, profiles, subagents, selectedProjectId, selectedAgentId, onSelectProject, onSelectAgent, onCreateProject, onCreateAgent, onOpenProfile, onOpenSubagent, onArchiveSubagent, onRestoreProject, onArchiveProject, onDeleteProject, onProjectUpdated, unreadThreadCount, onFailure, request }: {
+function WorkspaceDrawer({ openRequest, projectOpenRequest, projectToOpen, openThreadRequest, threadToOpen, onOpenIDE, projects, profiles, subagents, selectedProjectId, selectedAgentId, onSelectProject, onSelectAgent, onCreateProject, onCreateAgent, onOpenProfile, onOpenSubagent, onArchiveSubagent, onRestoreProject, onArchiveProject, onDeleteProject, onProjectUpdated, unreadThreadCount, onFailure, request }: {
   openRequest: number;
   projectOpenRequest: number;
   projectToOpen: string;
   openThreadRequest: number;
   threadToOpen: string;
-  currentView: ViewId;
   onOpenIDE: () => void;
   projects: WorkspaceProject[];
   profiles: AgentProfile[];
@@ -2917,7 +3033,7 @@ function WorkspaceDrawer({ openRequest, projectOpenRequest, projectToOpen, openT
   const [builderOpen, setBuilderOpen] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [agentName, setAgentName] = useState('');
-  const [emoji, setEmoji] = useState('🤖');
+  const [emoji, setEmoji] = useState('bot');
   const [instructions, setInstructions] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
@@ -3021,7 +3137,6 @@ function WorkspaceDrawer({ openRequest, projectOpenRequest, projectToOpen, openT
       <aside className="workspace-rail" aria-label="Agents and projects">
         <button type="button" className={section === 'agents' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'agents' ? null : 'agents')} aria-label="Open agents" aria-expanded={section === 'agents'} title="Agents"><Users size={17} /></button>
         <button type="button" className={section === 'projects' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'projects' ? null : 'projects')} aria-label="Open projects" aria-expanded={section === 'projects'} title="Projects"><FolderOpen size={17} /></button>
-        <button type="button" className={`workspace-rail-button${currentView === 'ide' ? ' rail-active' : ''}`} onClick={() => { setSection(null); onOpenIDE(); }} aria-label="Open Agent IDE" aria-current={currentView === 'ide' ? 'page' : undefined} title="Agent IDE"><TerminalSquare size={17} /></button>
         <button type="button" className={section === 'cron' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'cron' ? null : 'cron')} aria-label="Open cron jobs and reminders" aria-expanded={section === 'cron'} title="Cron and reminders"><Clock3 size={17} /></button>
         <button type="button" className={section === 'threads' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'threads' ? null : 'threads')} aria-label={`Open agent collaboration threads${unreadThreadCount ? `, ${unreadThreadCount} unread help requests` : ''}`} aria-expanded={section === 'threads'} title="Agent threads"><MessagesSquare size={17} />{unreadThreadCount > 0 && <span className="workspace-rail-unread-dot" aria-label={`${unreadThreadCount} unread help requests`} />}</button>
       </aside>
@@ -3082,7 +3197,7 @@ function WorkspaceDrawer({ openRequest, projectOpenRequest, projectToOpen, openT
             </div>
             <div className="workspace-drawer-list">
               {projectProfiles.map(profile => <button key={profile.id} className={`drawer-agent${profile.id === selectedAgentId ? ' drawer-item-active' : ''}`} type="button" onClick={() => { onSelectAgent(profile.id); onOpenProfile(profile); }}>
-                <span className="drawer-agent-avatar">{profile.emoji}</span><span><strong>{profile.name}</strong><small>{selectedProject?.name ?? 'Project agent'}</small></span><ArrowRight size={14} />
+                <span className="drawer-agent-avatar"><AgentGlyph id={profile.emoji} size={16} /></span><span><strong>{profile.name}</strong><small>{selectedProject?.name ?? 'Project agent'}</small></span><ArrowRight size={14} />
               </button>)}
               {projectProfiles.length === 0 && <p className="drawer-empty">No agents in this project. Use + to create one.</p>}
             </div>
@@ -3103,11 +3218,11 @@ function WorkspaceDrawer({ openRequest, projectOpenRequest, projectToOpen, openT
           <header className="identity-dialog-header"><span className="identity-dialog-icon"><Users size={19} /></span><div><div className="eyebrow">NEW WORKSPACE AGENT</div><h2 id="agent-builder-title">Build an agent</h2></div><button className="icon-button small" type="button" onClick={() => setBuilderOpen(false)} aria-label="Close agent builder"><X size={16} /></button></header>
           <form onSubmit={event => void addAgent(event)}>
             <label className="identity-field"><span>Agent name</span><input value={agentName} onChange={event => setAgentName(event.target.value)} maxLength={80} required /></label>
-            <fieldset className="identity-field"><legend>Avatar</legend><div className="identity-icons" role="group" aria-label="Choose agent avatar">{['🤖', '🧠', '🧭', '🌿', '✨'].map(icon => <button key={icon} className={`identity-icon-choice${emoji === icon ? ' identity-icon-selected' : ''}`} type="button" onClick={() => setEmoji(icon)} aria-label={`Choose ${icon}`} aria-pressed={emoji === icon}>{icon}</button>)}</div></fieldset>
+            <fieldset className="identity-field"><legend>Avatar</legend><AgentIconPicker id="workspace-agent-icon" value={emoji} onChange={setEmoji} /></fieldset>
             <label className="identity-field"><span>Role, behavior, and operating instructions</span><textarea value={instructions} onChange={event => setInstructions(event.target.value)} maxLength={20_000} rows={12} required placeholder="Describe what this agent does, how it should work, and its boundaries." /></label>
             <p className="drawer-builder-note">Creates a project-scoped workspace and a separate conversation history. The gateway’s configured tool and security policy still applies.</p>
             {formError && <div className="notice notice-error" role="alert">{formError}</div>}
-            <footer className="identity-dialog-actions"><button className="button button-secondary" type="button" onClick={() => setBuilderOpen(false)}>Cancel</button><button className="button button-primary" type="submit" disabled={saving || !agentName.trim() || !instructions.trim()}>{saving ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}{saving ? 'Creating' : 'Create agent'}</button></footer>
+            <footer className="identity-dialog-actions"><button className="button button-secondary" type="button" onClick={() => setBuilderOpen(false)}>Cancel</button><button className="button button-primary" type="submit" disabled={saving || !agentName.trim() || !instructions.trim()}>{saving ? <ActivityOrb label="Creating agent" compact loading /> : <Check size={14} />}{saving ? 'Creating' : 'Create agent'}</button></footer>
           </form>
         </section>
       </div>}
@@ -3119,10 +3234,19 @@ function AgentsView({ agents, onControl }: {
   agents: WorkspaceAgent[];
   onControl: (id: string, action: 'stop' | 'steer', message?: string) => Promise<void>;
 }) {
+  const running = agents.filter(agent => agent.status === 'running').length;
+  const completed = agents.filter(agent => agent.status === 'completed').length;
+  const failed = agents.filter(agent => agent.status === 'failed' || agent.status === 'killed').length;
   return (
     <div className="page">
       <PageHeading eyebrow="PARALLEL WORKERS" title="Agents" detail="Observe and control subagents spawned by the Symbiote runtime." />
-      <div className="agent-capability-note"><Users size={16} /><span>Subagents run in isolated sessions under the gateway’s existing tool sandbox. Steering sends guidance; stop cancels an active agent.</span></div>
+      <section className="surface-card agent-page-summary" aria-label="Agent run summary">
+        <div><strong>{running}</strong><span>Running</span></div>
+        <div><strong>{completed}</strong><span>Completed</span></div>
+        <div><strong>{failed}</strong><span>Failed or stopped</span></div>
+        <div><strong>{agents.length}</strong><span>Total runs</span></div>
+      </section>
+      <div className="agent-capability-note"><Users size={16} /><span>Subagents run in isolated sessions with commands defaulting to their assigned workspace. Tool access follows the parent agent’s tier and gateway policy. Steering sends guidance; stop cancels an active agent.</span></div>
       {agents.length ? <section className="agent-list">{agents.slice().sort((a, b) => b.startedAt - a.startedAt).map(agent => <AgentCard key={agent.sessionId} agent={agent} onControl={onControl} />)}</section> : (
         <section className="surface-card"><EmptyState icon={Users} title="No subagents yet" detail="When a task delegates work using Symbiote’s spawn tool, its subagent will appear here." /></section>
       )}
@@ -3139,7 +3263,15 @@ function AgentCard({ agent, onControl }: {
   return (
     <article className="surface-card agent-card">
       <div className="run-card-heading"><div><h3>{agent.task}</h3><span className="run-meta">Agent {agent.sessionId} · {formatElapsed(agent.startedAt, agent.completedAt)}</span></div><span className={`run-status run-status-${agent.status === 'completed' ? 'completed' : agent.status === 'running' ? 'running' : 'failed'}`}>{agent.status}</span></div>
+      {isRunning && <div className="run-operation agent-current-activity"><ActivityOrb state={getActivityOrbState(getActivityFromStatus(agent.activity, agent.activeTool))} label={agent.activity ?? 'Thinking'} compact /><span><strong>{agent.activeTool ? `Executing ${agent.activeTool}` : agent.activity ?? 'Thinking'}</strong><small>Live agent activity</small></span></div>}
       {agent.parentSessionId && <div className="agent-parent">Parent session <code>{agent.parentSessionId}</code></div>}
+      {!!agent.activityLog?.length && <ul className="run-activity-log agent-activity-log" aria-label="Recent agent activity">
+        {agent.activityLog.slice(-5).reverse().map((entry, index) => <li className="run-activity-entry" key={`${entry.timestamp}-${index}`}>
+          <span className={`run-activity-kind run-activity-${entry.kind}${entry.status === 'running' ? ' is-running' : ''}`} />
+          <span><strong>{entry.label}</strong>{entry.toolName && <small>{entry.status === 'running' ? 'Running' : 'Complete'}</small>}</span>
+          <time>{new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>
+        </li>)}
+      </ul>}
       {agent.error && <p className="run-result run-error"><CircleAlert size={14} />{agent.error}</p>}
       {agent.result && <div className="run-result"><strong>Result</strong><p>{agent.result}</p></div>}
       {isRunning && <form className="agent-steer-form" onSubmit={event => {
@@ -3390,7 +3522,7 @@ function ChatView(props: {
     <div className="page page-chat">
       <PageHeading
         eyebrow="A DIRECT LINE TO YOUR AGENT"
-        title={session?.label || 'Conversations'}
+        title="Conversations"
         detail={session ? `${session.messageCount} saved messages · Updated ${formatRelative(session.updatedAt)}` : 'Choose a saved session, or start a new conversation.'}
         action={<div className="chat-session-actions">
           <label className="sr-only" htmlFor="session-picker">Select conversation</label>
@@ -3419,26 +3551,23 @@ function ChatView(props: {
                 {message.role === 'user' && message.tokensIn !== undefined && <div className="message-usage" title={message.tokenCountsEstimated ? 'Approximate count based on message length.' : 'Input tokens'}>
                   <span><Sparkles size={12} />{message.tokenCountsEstimated ? '~' : ''}{message.tokensIn} input tokens</span>
                 </div>}
-                {message.role === 'assistant' && !message.streaming && <div className="message-usage" aria-label="Response usage">
+                {message.role === 'assistant' && !message.streaming && !message.progressUpdate && <div className="message-usage" aria-label="Response usage">
                   <span><Clock3 size={12} />{formatChatElapsed(message.durationMs)}</span>
                   {message.tokensOut !== undefined && <span title={message.tokenCountsEstimated ? 'Approximate count based on response length.' : 'Provider-reported output token count'}><Sparkles size={12} />{message.tokenCountsEstimated ? '~' : ''}{message.tokensOut} output tokens</span>}
                   <span><Wrench size={12} />{message.toolCalls?.length ?? 0} tool {(message.toolCalls?.length ?? 0) === 1 ? 'call' : 'calls'}</span>
                 </div>}
                 {message.streaming && message.toolActivity?.length ? (
                   <details className="tool-activity">
-                    <summary><span className="thinking-pulse" />{message.activeTool ? <Activity size={14} /> : message.thinking ? <Brain size={14} /> : <Wrench size={14} />}{message.activeTool ? `Using ${message.activeTool}` : message.thinking ? 'Thinking' : `${message.toolActivity.length} tool ${message.toolActivity.length === 1 ? 'action' : 'actions'}`}<ChevronDown size={14} /></summary>
+                    <summary><Wrench size={14} />{message.toolActivity.length} tool {message.toolActivity.length === 1 ? 'action' : 'actions'}<ChevronDown size={14} /></summary>
                     <div className="tool-activity-list">{message.toolActivity.map((tool, index) => <div key={`${tool.name}-${index}`}><code>{tool.name}</code><span>{tool.status === 'running' ? 'Running now' : 'Completed'}</span></div>)}</div>
                   </details>
-                ) : !!message.toolCalls?.length && (
-                  <details className="tool-activity">
-                    <summary><Wrench size={14} />{message.toolCalls.length} {message.toolCalls.length === 1 ? 'tool action' : 'tool actions'}<ChevronDown size={14} /></summary>
-                    <div className="tool-activity-list">{message.toolCalls.map((call, index) => <div key={`${call.name}-${index}`}><code>{call.name}</code><span>{call.result.slice(0, 280) || 'Completed'}</span></div>)}</div>
-                  </details>
-                )}
-                {message.streaming && message.thinking && !message.toolActivity?.length && <div className="message-live-activity" aria-live="polite">
-                  <span className="thinking-pulse" />
-                  Thinking
-                </div>}
+                ) : null}
+                {message.streaming && message.todoActivity?.length ? <TodoActivityBubble items={message.todoActivity} /> : null}
+                {message.streaming && (() => {
+                  const activity = isAgentActivity(message.activityState) ? message.activityState : message.activeTool ? getToolActivity(message.activeTool).activity : 'thinking';
+                  const tool = message.activeTool ? getToolActivity(message.activeTool) : undefined;
+                  return <ReasoningDisplay activity={activity} toolLabel={tool ? `Executing · ${tool.label}` : undefined} />;
+                })()}
               </div>
             </article>
           )) : (
@@ -3453,7 +3582,7 @@ function ChatView(props: {
               </div>
             </div>
           )}
-          {sending && !messages.some(message => message.role === 'assistant' && message.streaming) && <div className="thinking-row"><span className="thinking-pulse" /><span>Agent is working</span></div>}
+          {sending && !messages.some(message => message.role === 'assistant' && message.streaming) && <div className="thinking-row"><ActivityOrb label="Agent is connecting" loading /><span>Agent is connecting</span></div>}
           <div ref={bottomRef} />
         </div>
         <form className="composer" onSubmit={onSubmit}>
@@ -3612,7 +3741,7 @@ function BrowserView() {
           <span className="browser-lock"><Globe size={15} /></span>
           <label className="sr-only" htmlFor="browser-address">Navigate to website</label>
           <input id="browser-address" value={address} onChange={event => setAddress(event.target.value)} placeholder="Enter a website address" autoComplete="url" />
-          <button className="icon-button" type="submit" disabled={loading || !address.trim()} aria-label="Go to address" title="Go">{loading ? <LoaderCircle size={15} className="spin" /> : <ArrowRight size={16} />}</button>
+          <button className="icon-button" type="submit" disabled={loading || !address.trim()} aria-label="Go to address" title="Go">{loading ? <ActivityOrb label="Navigating" compact loading /> : <ArrowRight size={16} />}</button>
         </form>
         <div className="browser-titlebar"><span className="browser-status-dot" /><strong>{frame?.title || 'Browser session'}</strong><span>{frame?.viewport ? `${frame.viewport.width} × ${frame.viewport.height}` : ''}</span><button className="icon-button small" onClick={() => void capture().catch(failure => setError(failure instanceof Error ? failure.message : 'Could not capture the page.'))} aria-label="Refresh screenshot" title="Refresh"><RefreshCw size={14} /></button></div>
         {error && <div className="browser-error" role="alert"><span>{error}</span><button className="button button-secondary" onClick={() => void navigateTo(undefined, DEFAULT_BROWSER_HOMEPAGE)}>Open homepage</button></div>}
@@ -3621,7 +3750,7 @@ function BrowserView() {
             ? <img ref={imageRef} src={frame.image} alt={`Interactive browser page: ${frame.title}`} draggable={false}
               onClick={event => { const point = viewportPoint(event); if (point) void act('click', point); }}
               />
-            : <div className="browser-empty"><Globe size={25} /><span>{loading ? 'Loading page…' : 'Open a website to begin browsing.'}</span><button className="button button-secondary" onClick={() => void navigateTo(undefined, DEFAULT_BROWSER_HOMEPAGE)}>Open Symbiote homepage</button></div>}
+            : <div className="browser-empty">{loading ? <ActivityOrb label="Loading page" loading /> : <Globe size={25} />}<span>{loading ? 'Loading page…' : 'Open a website to begin browsing.'}</span><button className="button button-secondary" onClick={() => void navigateTo(undefined, DEFAULT_BROWSER_HOMEPAGE)}>Open Symbiote homepage</button></div>}
         </div>
         <div className="browser-controls">
           <form onSubmit={event => { event.preventDefault(); if (inputText) { void act('type', { text: inputText }); setInputText(''); } }}>
@@ -3643,40 +3772,6 @@ function BrowserView() {
 
 function configLabel(name?: string, subagent = false): string {
   return subagent ? 'Subagent' : name || 'Symbiote';
-}
-
-function SessionsView(props: {
-  sessions: SessionSummary[];
-  query: string;
-  onQuery: (query: string) => void;
-  onOpen: (id: string) => void;
-  onNew: () => void;
-  creating: boolean;
-}) {
-  const { sessions, query, onQuery, onOpen, onNew, creating } = props;
-  return (
-    <div className="page">
-      <PageHeading eyebrow="PERSISTED IN YOUR SESSION STORE" title="Session history" detail="Your conversations live alongside the runtime, ready to pick up where you left off." action={<button className="button button-primary" onClick={onNew} disabled={creating}><Plus size={16} />New conversation</button>} />
-      <section className="surface-card sessions-panel">
-        <div className="list-toolbar"><div className="toolbar-count">{sessions.length} <span>{sessions.length === 1 ? 'session' : 'sessions'}</span></div><label className="search-field"><Search size={16} /><input value={query} onChange={event => onQuery(event.target.value)} placeholder="Search sessions…" /><kbd>/</kbd></label></div>
-        {sessions.length ? (
-          <div className="session-table">
-            <div className="session-table-head"><span>Conversation</span><span>Messages</span><span>Last active</span><span /></div>
-            {sessions.map(session => (
-              <button className="session-table-row" key={session.id} onClick={() => onOpen(session.id)}>
-                <span className="session-table-name"><span className="conversation-avatar avatar-0">{initials(session.label)}</span><span><strong>{session.label || 'Untitled conversation'}</strong><small>{session.id}</small></span></span>
-                <span className="session-message-count">{session.messageCount}</span>
-                <span className="session-last-active">{formatRelative(session.updatedAt)}</span>
-                <ArrowRight size={15} className="row-arrow" />
-              </button>
-            ))}
-          </div>
-        ) : (
-          <EmptyState icon={Search} title={query ? 'No matches found.' : 'No sessions yet.'} detail={query ? 'Try a different name or clear the search.' : 'Create a conversation and it will be saved here automatically.'} action={!query ? <button className="button button-secondary" onClick={onNew}><Plus size={15} />Create a session</button> : undefined} />
-        )}
-      </section>
-    </div>
-  );
 }
 
 function OperationsView(props: {
@@ -3848,12 +3943,12 @@ function SettingsView({ config, status }: { config: GatewayConfig | null; status
             <button className="button button-secondary" type="button" onClick={() => void copyLanToken()}><Copy size={14} />Copy</button>
           </div>
         ) : (
-          <button className="button button-secondary" type="button" disabled={tokenLoading} onClick={() => void showLanToken()}>{tokenLoading ? <LoaderCircle size={14} className="spin" /> : <ShieldCheck size={14} />}{tokenLoading ? 'Loading token' : 'Reveal LAN token'}</button>
+          <button className="button button-secondary" type="button" disabled={tokenLoading} onClick={() => void showLanToken()}>{tokenLoading ? <ActivityOrb label="Loading token" compact loading /> : <ShieldCheck size={14} />}{tokenLoading ? 'Loading token' : 'Reveal LAN token'}</button>
         )}
         {tokenError && <p className="settings-token-error" role="alert">{tokenError}</p>}
         {window.symbioteDesktop && <div className="settings-firewall">
           <button className="button button-secondary" type="button" disabled={firewallLoading} onClick={() => void configureLanFirewall()}>
-            {firewallLoading ? <LoaderCircle size={14} className="spin" /> : <ShieldCheck size={14} />}
+            {firewallLoading ? <ActivityOrb label="Checking firewall" compact loading /> : <ShieldCheck size={14} />}
             {firewallLoading ? 'Waiting for permission' : 'Configure Windows Firewall'}
           </button>
           {firewallStatus && <p className="settings-token-error" role="status">{firewallStatus}</p>}

@@ -9,7 +9,7 @@
     "$schema": { "type": "string" },
     "configVersion": { "type": "integer", "minimum": 1, "description": "Config format version. Run `symbiote upgrade` to migrate." },
     "name": { "type": "string", "description": "Agent display name." },
-    "emoji": { "type": "string", "description": "Agent emoji used in channels." },
+    "emoji": { "type": "string", "description": "Agent icon identifier. Existing emoji values remain supported for compatibility." },
 
     "defaultProvider": { "type": "string", "description": "Provider id used for new turns.", "examples": ["openrouter", "anthropic", "openai", "gemini", "groq", "xai", "nvidia", "github-copilot", "ollama", "gladius"] },
     "defaultModel": { "type": "string", "description": "Model id passed to the default provider." },

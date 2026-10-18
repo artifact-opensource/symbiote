@@ -82,7 +82,7 @@ export function listSkillSummaries(workspace: string): SkillMeta[] {
   return summaries;
 }
 
-/** Index skill file contents into the VDB, same idempotent dedup as Memograph import. */
+/** Synchronize skill file contents into one replaceable VDB catalog namespace. */
 export function importSkillFiles(database: VectorDB, skillsDir: string): SkillImportResult {
   const result: SkillImportResult = { files: 0, indexed: 0, skipped: 0, failures: 0, skills: [] };
 
@@ -95,27 +95,51 @@ export function importSkillFiles(database: VectorDB, skillsDir: string): SkillIm
     return result;
   }
 
+  const namespace = 'skills:catalog';
+  const previous = new Map(
+    database.listDocuments()
+      .filter(document => document.namespace === namespace)
+      .map(document => [document.id, document]),
+  );
+  const documents: VDBDocument[] = [];
+
   for (const filePath of filenames) {
     result.files++;
+    const id = `skill:${path.relative(skillsDir, filePath).replace(/[\\/]/g, ':')}`;
     try {
       const raw = fs.readFileSync(filePath, 'utf-8');
       const { body } = parseFrontmatter(raw);
       const meta = describeSkill(skillsDir, filePath);
       const doc: VDBDocument = {
-        id: `skill:${path.relative(skillsDir, filePath).replace(/[\\/]/g, ':')}`,
+        id,
         text: body.trim() || raw.trim(),
         source: 'skill',
         role: 'context',
-        timestamp: Date.now(),
-        namespace: `skill:${meta.name}`,
+        timestamp: fs.statSync(filePath).mtimeMs,
+        namespace,
         metadata: { name: meta.name, description: meta.description, file: filePath },
       };
-      if (database.index(doc)) result.indexed++; else result.skipped++;
+      documents.push(doc);
+      const old = previous.get(id);
+      if (old && old.text === doc.text && old.source === doc.source && old.role === doc.role
+          && old.timestamp === doc.timestamp && JSON.stringify(old.metadata ?? {}) === JSON.stringify(doc.metadata ?? {})) {
+        result.skipped++;
+      } else {
+        result.indexed++;
+      }
       result.skills.push(meta);
     } catch (error) {
       result.failures++;
       console.error(`[skills] import failed (${filePath}): ${error instanceof Error ? error.message : error}`);
+      const old = previous.get(id);
+      if (old) documents.push(old);
     }
+  }
+  try {
+    database.syncNamespace(namespace, documents);
+  } catch (error) {
+    result.failures++;
+    console.error(`[skills] catalog synchronization failed (${skillsDir}): ${error instanceof Error ? error.message : error}`);
   }
   return result;
 }

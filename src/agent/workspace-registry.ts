@@ -45,6 +45,16 @@ export interface WorkspaceAgentProfile {
 
 const MAX_PROJECT_FILES = 10_000;
 const BLOCKED_PROJECT_PATH_SEGMENTS = new Set(['.agents', '.git', '.session', 'node_modules']);
+const AGENT_ICON_IDS = new Set([
+  'bot', 'brain', 'compass', 'leaf', 'sparkles', 'terminal', 'globe', 'database', 'shield',
+  'wrench', 'network', 'cpu', 'server', 'message', 'users', 'workflow', 'gauge', 'hard-drive',
+  'cloud', 'activity', 'folder', 'layout', 'code', 'search', 'eye',
+  '\u{1F916}', '\u{1F9E0}', '\u{1F9ED}', '\u{1F33F}', '\u{2728}',
+]);
+
+export function isSupportedAgentIcon(value: string): boolean {
+  return AGENT_ICON_IDS.has(value);
+}
 
 interface RegistryData {
   version: 1;
@@ -420,7 +430,7 @@ export class WorkspaceRegistry {
     const name = safeName(input.name, 'Agent name');
     const instructions = input.instructions.trim();
     if (instructions.length > 20_000) throw new Error('Agent instructions must be 20,000 characters or fewer.');
-    if (!['🤖', '🧠', '🧭', '🌿', '✨'].includes(input.emoji)) throw new Error('Choose a supported agent icon.');
+    if (!isSupportedAgentIcon(input.emoji)) throw new Error('Choose a supported agent icon.');
     if (data.agents.some(agent => agent.projectId === project.id && agent.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
       throw new Error(`An agent named "${name}" already exists in this project.`);
     }

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Download, Maximize2, Minus, Plus, Search, X } from 'lucide-react';
 import type { MemoryDocument, MemoryGraphData, MemoryGraphNode } from '../types';
+import ActivityOrb from './ActivityOrb';
 
 type MemoryRequest = <T>(endpoint: string, options?: RequestInit) => Promise<T>;
 type Side = 'system' | 'documents' | 'sessions' | 'projects';
@@ -602,10 +603,10 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
         <div className="memory-toolbar">
           <label className="search-field memory-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a memory…" aria-label="Search memory map" />{query && <button className="icon-button small" onClick={() => setQuery('')} aria-label="Clear search"><X size={13} /></button>}</label>
           <label className="memory-source-filter"><span className="sr-only">Filter by source</span><select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}><option value="all">All sources</option><option value="vdb">.vdb vector store</option><option value="projects">Projects</option>{sources.map(source => <option key={source} value={source}>{source}</option>)}</select></label>
-          <span className={`memory-refresh-label${refreshing ? ' is-refreshing' : ''}`}>{refreshing ? 'SYNCING' : stats ? `${shownDocuments.length.toLocaleString()} / ${stats.documentCount.toLocaleString()} NODES` : loading ? 'INDEXING' : 'NO INDEX'}</span>
+          <span className={`memory-refresh-label${refreshing ? ' is-refreshing' : ''}`}>{refreshing && <ActivityOrb label="Synchronizing memory" compact loading />}{refreshing ? 'SYNCING' : stats ? `${shownDocuments.length.toLocaleString()} / ${stats.documentCount.toLocaleString()} NODES` : loading ? 'INDEXING' : 'NO INDEX'}</span>
         </div>
         <div className="memory-map-shell" ref={shellRef}>
-          {loading && <div className="memory-loading">Loading indexed knowledge…</div>}
+          {loading && <div className="memory-loading"><ActivityOrb label="Loading indexed knowledge" loading /><span>Loading indexed knowledge…</span></div>}
           {!loading && !data?.nodes.length && <div className="memory-empty">No indexed knowledge yet. Memory documents, sessions, and project files appear here as they are synchronized.</div>}
           <canvas
             ref={canvasRef}

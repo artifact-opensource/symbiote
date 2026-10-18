@@ -333,26 +333,31 @@ export class ContextStore {
    * Called once at session start to prime the vdb with foundational context.
    */
   ingestBoot(texts: Array<{ text: string; source: string }>): number {
-    let indexed = 0;
+    const documents: VDBDocument[] = [];
     for (const { text, source } of texts) {
       // Chunk long texts into ~500 token segments for better retrieval granularity
       const chunks = this.chunk(text, 500);
-      for (const chunk of chunks) {
-        const doc: VDBDocument = {
-          id: '',
-          text: chunk,
+      const date = source.match(/^memory\/(\d{4}-\d{2}-\d{2})$/)?.[1];
+      const timestamp = date ? Date.parse(`${date}T00:00:00Z`) : 0;
+      for (let index = 0; index < chunks.length; index++) {
+        documents.push({
+          id: `boot:${encodeURIComponent(source)}:${index}`,
+          text: chunks[index],
           source,
           role: 'context',
-          timestamp: Date.now(),
+          timestamp,
+          namespace: 'boot:context',
+          metadata: { file: source },
           sessionId: 'boot',
-        };
-        if (this.vdb.index(doc)) indexed++;
+        });
       }
     }
-    if (indexed > 0) {
-      console.log(`  [context-store] Boot ingest: ${indexed} chunks from ${texts.length} sources`);
+    const previousCount = this.vdb.listDocuments().filter(document => document.namespace === 'boot:context').length;
+    this.vdb.syncNamespace('boot:context', documents);
+    if (documents.length > 0 || previousCount > 0) {
+      console.log(`  [context-store] Boot ingest: ${documents.length} current chunks from ${texts.length} sources`);
     }
-    return indexed;
+    return documents.length;
   }
 
   /** Get vdb stats */

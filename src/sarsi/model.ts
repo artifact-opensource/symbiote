@@ -137,7 +137,7 @@ export function createDefaultSarsiModel(): SarsiModel {
     toolRules: [
       { id: 't1', operation: 'file_read', preferredTool: 'read', maxRetries: 2, timeoutMs: 5000 },
       { id: 't2', operation: 'web_fetch', preferredTool: 'web_fetch', maxRetries: 3, timeoutMs: 15000 },
-      { id: 't3', operation: 'shell_exec', preferredTool: 'exec', maxRetries: 1, timeoutMs: 30000 },
+      { id: 't3', operation: 'shell_exec', preferredTool: 'exec', maxRetries: 1, timeoutMs: 5000 },
       { id: 't4', operation: 'memory_search', preferredTool: 'memory_recall', fallbackTool: 'memory_search', maxRetries: 2, timeoutMs: 10000 },
     ],
     metrics: {

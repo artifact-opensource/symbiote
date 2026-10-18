@@ -32,11 +32,15 @@ import { webFetchTool } from './builtin/web-fetch.js';
 import { memorySearchTool } from './builtin/memory.js';
 import { ingestWorkspaceSessions, vdbSearchTool, vdbIngestTool, vdbStatsTool } from './builtin/memory-vdb.js';
 import { cuaTools } from './builtin/web-browser.js';
-import { combRecallTool, combStageTool, setCombVdbHook } from './builtin/comb.js';
+import { combRecallTool, combStageTool, memoryOffloadTool, setCombVdbHook, setMemoryOffloadHook } from './builtin/comb.js';
 import { getSharedVectorDB } from '../memory/vdb.js';
 import { importMemoGraphSnapshots, resolveMemoGraphStorageDir } from '../memory/memograph.js';
+import { DurableMemory, resolveDurableMemoryArchive } from '../memory/durable-memory.js';
 import { importSkillFiles, resolveSkillsDir } from '../memory/skills.js';
+import { ContextStore } from '../agent/context-store.js';
+import { readBootKnowledge } from '../memory/knowledge.js';
 import { personaDigestTool } from './builtin/consolidate.js';
+import { computerUseTool, initializeComputerUseRuntime, shutdownComputerUseRuntime } from './builtin/computer-use.js';
 import { APP_VERSION } from '../meta/version.js';
 
 // â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -64,10 +68,11 @@ for (const tool of [
   readTool, writeTool, execTool, editTool, imageTool,
   processStartTool, processPollTool, processKillTool, processListTool,
   ttsTool, webFetchTool, memorySearchTool, vdbSearchTool, vdbIngestTool, vdbStatsTool,
-  combRecallTool, combStageTool, ...cuaTools, personaDigestTool, ...adminTools,
+  combRecallTool, combStageTool, memoryOffloadTool, ...cuaTools, computerUseTool, personaDigestTool, ...adminTools,
 ]) {
   registry.register(tool);
 }
+await initializeComputerUseRuntime();
 
 // Set working directory from config
 const configArg = process.argv.indexOf('--config');
@@ -87,16 +92,24 @@ try {
 const workspace = process.env.SYMBIOTE_WORKSPACE ?? process.cwd();
 process.env.SYMBIOTE_WORKSPACE = workspace;
 const workspaceVdb = getSharedVectorDB(workspace);
+const durableMemory = new DurableMemory(
+  workspaceVdb,
+  resolveDurableMemoryArchive(workspace),
+  resolveMemoGraphStorageDir(workspace),
+);
 setCombVdbHook(
   (text, source) => {
-    workspaceVdb.index({ id: '', text, source, role: 'context', timestamp: Date.now(), sessionId: 'mcp' });
+    return workspaceVdb.index({ id: '', text, source, role: 'context', timestamp: Date.now(), sessionId: 'mcp' });
   },
   (source, count) => workspaceVdb.recent(source, count),
+  (query, count, namespace) => workspaceVdb.search(query, count, { namespace }),
 );
+setMemoryOffloadHook((summary, sessionId, source) => durableMemory.offload(summary, sessionId, source));
 try {
   const sessions = ingestWorkspaceSessions();
   const memograph = importMemoGraphSnapshots(workspaceVdb, resolveMemoGraphStorageDir(workspace));
   const skills = importSkillFiles(workspaceVdb, resolveSkillsDir(workspace));
+  new ContextStore(workspaceVdb, { sessionId: 'mcp' }).ingestBoot(readBootKnowledge(workspace));
   if (sessions.indexed > 0 || memograph.indexed > 0 || skills.indexed > 0) {
     log(`Indexed ${sessions.indexed} sessions, ${memograph.indexed} Memograph shards, ${skills.indexed} skill files`);
   }
@@ -221,10 +234,13 @@ async function handleRequest(msg: JsonRpcMessage): Promise<void> {
 
       log(`Calling tool: ${toolName}`);
       try {
-        const result = await tool.execute(toolArgs);
+        const result = await registry.executeWithImages(toolName, toolArgs);
         sendResponse(id, {
-          content: [{ type: 'text', text: result }],
-          isError: false,
+          content: [
+            { type: 'text', text: result.text },
+            ...(result.images ?? []).map(image => ({ type: 'image', mimeType: image.mimeType, data: image.dataBase64 })),
+          ],
+          isError: result.isError === true,
         });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -270,11 +286,13 @@ rl.on('close', () => {
 });
 
 process.on('SIGTERM', () => {
+  shutdownComputerUseRuntime();
   log('SIGTERM â€” shutting down');
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
+  shutdownComputerUseRuntime();
   log('SIGINT â€” shutting down');
   process.exit(0);
 });

@@ -318,7 +318,7 @@ export class DiscordAdapter extends BaseAdapter {
       {
         type: 'reaction',
         reaction: {
-          emoji: reaction.emoji?.name ?? '❓',
+          emoji: reaction.emoji?.name ?? '?',
           messageId: reaction.message.id,
           remove,
         },
@@ -556,14 +556,14 @@ export class DiscordAdapter extends BaseAdapter {
 
   async editMessage(chatId: string, messageId: string, newContent: string): Promise<void> {
     const channel = await this.resolveChannel(chatId);
-    if (!channel) return;
+    if (!channel) throw new Error(`Cannot edit Discord message ${messageId}: channel ${chatId} could not be resolved.`);
     try {
       const msg = await channel.messages.fetch(messageId);
-      if (msg.author.id === this.botId) {
-        await msg.edit(newContent);
-      }
+      if (msg.author.id !== this.botId) throw new Error(`Cannot edit Discord message ${messageId}: it is not authored by this bot.`);
+      await msg.edit(newContent);
     } catch (err) {
       console.error(`[${this.id}] Edit failed:`, err);
+      throw err;
     }
   }
 

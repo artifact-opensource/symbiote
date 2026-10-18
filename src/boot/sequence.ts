@@ -113,7 +113,7 @@ export async function runBootSequence(steps: BootStep[]): Promise<{
       console.log(`  ${palette.bold}${palette.yellow}◐${palette.reset} ${palette.bold}${status}${palette.reset} ${palette.dim}(degraded: ${degraded.join(', ')}) — ${totalMs}ms${palette.reset}`);
     } else {
       const status = gradient('READY', [0, 230, 118], [0, 188, 212]);
-      console.log(`  ${palette.bold}${palette.green}⚡${palette.reset} ${palette.bold}${status}${palette.reset} ${palette.dim}— ${totalMs}ms${palette.reset}`);
+      console.log(`  ${palette.bold}${status}${palette.reset} ${palette.dim}— ${totalMs}ms${palette.reset}`);
     }
   } else {
     const status = gradient('BOOT FAILED', [255, 82, 82], [255, 145, 0]);

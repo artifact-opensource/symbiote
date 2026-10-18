@@ -142,7 +142,8 @@ test('unscoped todo calls use the runner checklist and returned tool errors are 
       }),
     });
     assert.equal(result.toolCalls[0].input.scope, 'test-turn-scope');
-    assert.ok(seen[2].some(message => message.role === 'tool' && message.name === '__error'));
+    const failedRead = seen[2].find(message => message.role === 'tool' && message.name === 'read');
+    assert.equal(failedRead?.is_error, true);
   } finally {
     process.chdir(originalCwd);
     rmSync(workspace, { recursive: true, force: true });

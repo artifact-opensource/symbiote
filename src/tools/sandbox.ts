@@ -11,15 +11,16 @@
  * - The real tools never see the sandbox — it's transparent wrapping
  * 
  * Security model:
- * - ADMIN sessions (owner DM on primary adapters) get full access
+ * - ADMIN sessions (verified owners and trusted local operators) get full access
  * - STANDARD sessions get restricted access (no infrastructure modification)
+ * - Trusted admin authority is explicitly inherited by its own subagents
  * - Rules are declarative and audited — every denial is logged
  */
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { ToolDefinition, ToolExecuteOptions } from './types.js';
+import type { ToolDefinition, ToolExecuteOptions, ToolExecutionOutput } from './types.js';
 import type { ToolRegistry } from './registry.js';
 import type { ToolExecutor } from '../agent/runner.js';
 
@@ -34,6 +35,7 @@ export interface SessionContext {
   chatType: 'direct' | 'group';
   senderId: string;
   isOwner: boolean;
+  inheritedTier?: SessionTier;
   workspaceRoot?: string;
 }
 
@@ -68,7 +70,7 @@ export interface SandboxConfig {
 const PRIMARY_ADAPTERS = new Set(['discord-main', 'whatsapp-main']);
 
 let sandboxConfig: Required<SandboxConfig> = {
-  enabled: true,
+  enabled: false,
   ownerAccess: true,
   internalTier: 'standard',
   nonOwnerTier: 'restricted',
@@ -76,7 +78,7 @@ let sandboxConfig: Required<SandboxConfig> = {
 
 export function configureSandbox(config: SandboxConfig | undefined): void {
   sandboxConfig = {
-    enabled: config?.enabled !== false,
+    enabled: config?.enabled === true,
     ownerAccess: config?.ownerAccess !== false,
     internalTier: config?.internalTier === 'restricted' ? 'restricted' : 'standard',
     nonOwnerTier: config?.nonOwnerTier === 'standard' ? 'standard' : 'restricted',
@@ -84,12 +86,14 @@ export function configureSandbox(config: SandboxConfig | undefined): void {
 }
 
 export function classifySession(ctx: SessionContext): SessionTier {
-  if (!sandboxConfig.enabled) return 'admin';
-  if (ctx.channelType === 'internal' || ctx.adapterId === 'subagent') {
-    return sandboxConfig.internalTier;
-  }
   if (ctx.isOwner && sandboxConfig.ownerAccess) {
     return 'admin';
+  }
+  if (ctx.channelType === 'internal' || ctx.adapterId === 'subagent') {
+    if (ctx.inheritedTier === 'admin' && sandboxConfig.ownerAccess) return 'admin';
+    if (ctx.inheritedTier) return ctx.inheritedTier;
+    if (!sandboxConfig.enabled && sandboxConfig.ownerAccess) return 'admin';
+    return sandboxConfig.internalTier;
   }
   return sandboxConfig.nonOwnerTier;
 }
@@ -335,13 +339,14 @@ export class SandboxedToolRegistry {
   /** Proxy: list all tools (but may filter for restricted sessions) */
   list(): Array<{ name: string; description: string; parameters: any }> {
     const all = this.inner.list();
-    
-    if (this.tier === 'restricted') {
+    if (this.tier !== 'admin') {
+      const visibleToNonAdmin = all.filter(t => t.name !== 'computer_use' && t.name !== 'workspace_manage');
+      if (this.tier !== 'restricted') return visibleToNonAdmin;
       // Restricted sessions don't even see dangerous tools
       const hiddenTools = new Set(['exec', 'process_start', 'process_kill', 'write', 'edit', 'spawn', 'message', 'delete_message']);
-      return all.filter(t => !hiddenTools.has(t.name));
+      return visibleToNonAdmin.filter(t => !hiddenTools.has(t.name));
     }
-    
+
     return all;
   }
 
@@ -358,6 +363,32 @@ export class SandboxedToolRegistry {
   async execute(name: string, input: Record<string, unknown>, options?: ToolExecuteOptions): Promise<string> {
     const denial = this.validate(name, input);
     if (denial) return JSON.stringify({ error: denial, sandbox: true });
+    if (name === 'computer_use' && this.tier !== 'admin') {
+      const reason = 'Native desktop control is only available in admin sessions';
+      logDenial({
+        timestamp: Date.now(),
+        sessionId: this.ctx.sessionId,
+        tier: this.tier,
+        tool: name,
+        rule: 'admin-only-desktop-control',
+        reason,
+        input: this.sanitizeInput(input),
+      });
+      return JSON.stringify({ error: reason, sandbox: true });
+    }
+    if (name === 'workspace_manage' && this.tier !== 'admin') {
+      const reason = 'Project and agent creation is only available in admin sessions';
+      logDenial({
+        timestamp: Date.now(),
+        sessionId: this.ctx.sessionId,
+        tier: this.tier,
+        tool: name,
+        rule: 'admin-only-workspace-management',
+        reason,
+        input: this.sanitizeInput(input),
+      });
+      return JSON.stringify({ error: reason, sandbox: true });
+    }
 
     // Project commands default to the assigned workspace unless the caller gives a checked path.
     const scopedInput = { ...input };
@@ -365,7 +396,50 @@ export class SandboxedToolRegistry {
       && typeof scopedInput.workdir !== 'string') {
       scopedInput.workdir = this.ctx.workspaceRoot;
     }
-    return this.inner.execute(name, scopedInput, options);
+    return this.inner.execute(name, scopedInput, {
+      ...options,
+      sessionId: this.ctx.sessionId,
+      sessionTier: this.tier,
+    });
+  }
+
+  async executeWithImages(name: string, input: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolExecutionOutput> {
+    const denial = this.validate(name, input);
+    if (denial) return { text: JSON.stringify({ error: denial, sandbox: true }), isError: true };
+    if (name === 'computer_use' && this.tier !== 'admin') {
+      const reason = 'Native desktop control is only available in admin sessions';
+      logDenial({
+        timestamp: Date.now(),
+        sessionId: this.ctx.sessionId,
+        tier: this.tier,
+        tool: name,
+        rule: 'admin-only-desktop-control',
+        reason,
+        input: this.sanitizeInput(input),
+      });
+      return { text: JSON.stringify({ error: reason, sandbox: true }), isError: true };
+    }
+    if (name === 'workspace_manage' && this.tier !== 'admin') {
+      const reason = 'Project and agent creation is only available in admin sessions';
+      logDenial({
+        timestamp: Date.now(),
+        sessionId: this.ctx.sessionId,
+        tier: this.tier,
+        tool: name,
+        rule: 'admin-only-workspace-management',
+        reason,
+        input: this.sanitizeInput(input),
+      });
+      return { text: JSON.stringify({ error: reason, sandbox: true }), isError: true };
+    }
+    const scopedInput = { ...input };
+    if (this.ctx.workspaceRoot && ['exec', 'process_start'].includes(name)
+      && typeof scopedInput.workdir !== 'string') {
+      scopedInput.workdir = this.ctx.workspaceRoot;
+    }
+    const executionOptions = { ...options, sessionId: this.ctx.sessionId, sessionTier: this.tier };
+    if (this.inner.executeWithImages) return this.inner.executeWithImages(name, scopedInput, executionOptions);
+    return { text: await this.inner.execute(name, scopedInput, executionOptions) };
   }
 
   /** Validate a command before it is submitted to a long-lived project shell. */

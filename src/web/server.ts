@@ -15,9 +15,10 @@ import type { IntegrationProvider } from '../security/credential-vault.js';
 import { stripBlinkControlMessages } from '../agent/blink.js';
 import type { CronAlert, CronJob, CreateCronJobInput, UpdateCronJobInput } from '../cron/manager.js';
 import type { AgentThread, CreateThreadInput, ThreadContact } from '../threads/manager.js';
-import type { ProjectTask, ProjectTaskPatch } from '../agent/workspace-registry.js';
+import { isSupportedAgentIcon, type ProjectTask, type ProjectTaskPatch } from '../agent/workspace-registry.js';
 import type { AppearanceSettings } from '../appearance/settings.js';
 import type { ReleaseDownloadStatus } from '../updates/release-updater.js';
+import { createSseTextFilter } from './sse-text-filter.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -133,15 +134,17 @@ export interface WebControlPlane {
   postExternalThreadMessage: (contact: { id: string; label: string }, threadId: string, body: string) => AgentThread;
   retryThreadNotification: (id: string) => unknown;
   chat: (
-    request: { text: string; sessionId: string; senderId: string; senderName: string; source: string; googleWorkspaceAccessToken?: string },
+    request: { text: string; sessionId: string; senderId: string; senderName: string; source: string; googleWorkspaceAccessToken?: string; trustedAdminContext?: boolean },
     emit?: (event: Record<string, unknown>) => void,
   ) => Promise<unknown>;
   interruptSession: (id: string) => boolean;
   getRuns: () => unknown[];
-  startRun: (request: { name?: string; prompt: string; sessionId: string; googleWorkspaceAccessToken?: string }) => unknown;
+  startRun: (request: { name?: string; prompt: string; sessionId: string; googleWorkspaceAccessToken?: string; trustedAdminContext?: boolean }) => unknown;
   stopRun: (id: string) => boolean;
-  restartRun: (id: string) => unknown | null;
-  guideRun: (id: string, message: string) => unknown | null;
+  archiveRun: (id: string) => boolean;
+  restoreRun: (id: string) => boolean;
+  restartRun: (id: string, trustedAdminContext?: boolean) => unknown | null;
+  guideRun: (id: string, message: string, trustedAdminContext?: boolean) => unknown | null;
   updateIdentity: (identity: {
     name: string;
     emoji: string;
@@ -180,7 +183,7 @@ let config: Config = {
 
 // Agent identity (from symbiote.json)
 let agentName = 'Agent';
-let agentEmoji = '🤖';
+let agentEmoji = 'bot';
 
 const configPath = path.resolve(process.cwd(), 'symbiote.json');
 
@@ -353,7 +356,7 @@ async function streamChat(
 
     // Forward SSE events from real API to webchat client
     let fullContent = '';
-    let doneMeta: { latencyMs?: number; iterations?: number; tokensIn?: number; tokensOut?: number; toolCalls?: ToolCall[]; temperatureHistory?: Array<{ iteration: number; category: string; temperature: number }> } = {};
+    let doneMeta: { text?: string; latencyMs?: number; iterations?: number; tokensIn?: number; tokensOut?: number; toolCalls?: ToolCall[]; temperatureHistory?: Array<{ iteration: number; category: string; temperature: number }> } = {};
     let buffer = '';
     let apiError: string | undefined;
 
@@ -370,9 +373,7 @@ async function streamChat(
         try {
           const data = JSON.parse(dataStr);
           if (data.type === 'text' || data.type === 'text_delta') {
-            const text = typeof data.text === 'string' ? data.text : String(data.content ?? '');
-            fullContent += text;
-            res.write(`data: ${JSON.stringify({ type: 'text_delta', text, id: assistantId })}\n\n`);
+            continue;
           } else if (data.type === 'thinking_delta') {
             res.write(`data: ${JSON.stringify(data)}\n\n`);
           } else if (data.type === 'tool_start' || data.type === 'tool_end') {
@@ -392,16 +393,7 @@ async function streamChat(
     });
     if (apiError) throw new Error(apiError);
 
-    // Process any remaining buffer
-    if (buffer.startsWith('data: ')) {
-      const dataStr = buffer.slice(6).trim();
-      if (dataStr) {
-        try {
-          const data = JSON.parse(dataStr);
-          if (data.type === 'text' || data.type === 'text_delta') fullContent += typeof data.text === 'string' ? data.text : String(data.content ?? '');
-        } catch { /* ignore */ }
-      }
-    }
+    fullContent = typeof doneMeta.text === 'string' ? doneMeta.text : '';
 
     const latency = Date.now() - startMs;
     const tokensOut = typeof doneMeta.tokensOut === 'number' ? doneMeta.tokensOut : Math.ceil(fullContent.length / 4);
@@ -481,6 +473,18 @@ function isSameOriginRequest(req: http.IncomingMessage): boolean {
   const origin = req.headers.origin;
   if (!origin) return isLoopbackRequest(req);
   return origin === `http://${req.headers.host ?? ''}`;
+}
+
+function isTrustedLocalOperatorRequest(req: http.IncomingMessage): boolean {
+  if (!isLoopbackRequest(req) || !isSameOriginRequest(req)) return false;
+  const host = req.headers.host;
+  if (!host) return false;
+  try {
+    const hostname = new URL(`http://${host}`).hostname.toLowerCase();
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+  } catch {
+    return false;
+  }
 }
 
 function hasValidAccessToken(req: http.IncomingMessage, expected: string): boolean {
@@ -937,7 +941,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       if (typeof body.name !== 'string' || !body.name.trim() || body.name.trim().length > 80) {
         return json(res, { error: 'Agent name must contain 1–80 characters.' }, 400);
       }
-      if (typeof body.emoji !== 'string' || !['🤖', '🧠', '🧭', '🌿', '✨'].includes(body.emoji)) {
+      if (typeof body.emoji !== 'string' || !isSupportedAgentIcon(body.emoji)) {
         return json(res, { error: 'Choose a supported agent icon.' }, 400);
       }
       if (typeof body.soulContent !== 'string' || body.soulContent.length > 100_000) {
@@ -1080,12 +1084,13 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         name,
         prompt: body.prompt.trim(),
         sessionId,
+        trustedAdminContext: isTrustedLocalOperatorRequest(req),
         ...(typeof body.googleWorkspaceAccessToken === 'string' ? { googleWorkspaceAccessToken: body.googleWorkspaceAccessToken } : {}),
       }), 201);
     }
     const restartRunAction = matchRoute('/api/runs/:id/restart', pathname);
     if (method === 'POST' && restartRunAction) {
-      const run = control.restartRun(decodeURIComponent(restartRunAction.id));
+      const run = control.restartRun(decodeURIComponent(restartRunAction.id), isTrustedLocalOperatorRequest(req));
       return run ? json(res, run, 201) : json(res, { error: 'Run cannot be restarted because it is missing or still active.' }, 409);
     }
     const guideRunAction = matchRoute('/api/runs/:id/guide', pathname);
@@ -1097,7 +1102,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       if (body.message.length > 2_000) {
         return json(res, { error: 'Guidance messages must be 2,000 characters or fewer.' }, 413);
       }
-      const run = control.guideRun(decodeURIComponent(guideRunAction.id), body.message.trim());
+      const run = control.guideRun(decodeURIComponent(guideRunAction.id), body.message.trim(), isTrustedLocalOperatorRequest(req));
       return run ? json(res, run, 202) : json(res, { error: 'Task could not be guided because its run or session is unavailable.' }, 409);
     }
     if (method === 'GET' && pathname === '/api/agents') {
@@ -1109,6 +1114,20 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       return control.stopRun(id)
         ? json(res, { stopped: true })
         : json(res, { error: 'Run is no longer active or could not be stopped.' }, 409);
+    }
+    const archiveRunAction = matchRoute('/api/runs/:id/archive', pathname);
+    if (method === 'POST' && archiveRunAction) {
+      const id = decodeURIComponent(archiveRunAction.id);
+      return control.archiveRun(id)
+        ? json(res, { archived: true })
+        : json(res, { error: 'Only inactive runs can be archived.' }, 409);
+    }
+    const restoreRunAction = matchRoute('/api/runs/:id/restore', pathname);
+    if (method === 'POST' && restoreRunAction) {
+      const id = decodeURIComponent(restoreRunAction.id);
+      return control.restoreRun(id)
+        ? json(res, { restored: true })
+        : json(res, { error: 'Run could not be restored.' }, 409);
     }
     const agentAction = matchRoute('/api/agents/:id/action', pathname);
     if (method === 'POST' && agentAction) {
@@ -1487,16 +1506,18 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         'X-Accel-Buffering': 'no',
       });
       res.flushHeaders?.();
-      const emit = (event: Record<string, unknown>) => {
+      const textFilter = createSseTextFilter(event => {
         if (!res.destroyed && !res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
-      };
+      });
+      const emit = (event: Record<string, unknown>) => textFilter.emit(event);
       try {
         const result = await control.chat({
         text: body.text,
         sessionId,
         senderId: 'webapp-local',
-        senderName: 'Local operator',
+        senderName: 'You',
         source: 'webapp',
+        trustedAdminContext: isTrustedLocalOperatorRequest(req),
         ...(typeof body.googleWorkspaceAccessToken === 'string' ? { googleWorkspaceAccessToken: body.googleWorkspaceAccessToken } : {}),
         }, emit);
         emit({ type: 'done', result });

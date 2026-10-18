@@ -31,21 +31,31 @@ function convertMessages(messages: Message[]): { contents: unknown[]; systemInst
 
     // Tool result messages → user role with functionResponse part
     if (msg.role === 'tool') {
-      const resultText = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+      const resultText = typeof msg.content === 'string'
+        ? msg.content
+        : msg.content.filter(block => block.type === 'text').map(block => block.text ?? '').join('\n');
       let parsedResult: unknown;
       try {
         parsedResult = JSON.parse(resultText);
       } catch {
         parsedResult = { result: resultText };
       }
+      const parts: unknown[] = [{
+        functionResponse: {
+          name: msg.name ?? 'unknown',
+          response: parsedResult,
+        },
+      }];
+      if (typeof msg.content !== 'string') {
+        for (const block of msg.content) {
+          if (block.type === 'image' && block.source?.type === 'base64') {
+            parts.push({ inlineData: { mimeType: block.source.media_type, data: block.source.data } });
+          }
+        }
+      }
       contents.push({
         role: 'user',
-        parts: [{
-          functionResponse: {
-            name: msg.name ?? 'unknown',
-            response: parsedResult,
-          },
-        }],
+        parts,
       });
       continue;
     }

@@ -1,4 +1,4 @@
-export type ViewId = 'workspace' | 'ide' | 'runs' | 'agents' | 'chat' | 'browser' | 'memory' | 'sessions' | 'games' | 'integrations' | 'operations' | 'tools' | 'settings';
+export type ViewId = 'workspace' | 'ide' | 'runs' | 'agents' | 'chat' | 'browser' | 'memory' | 'games' | 'integrations' | 'operations' | 'tools' | 'settings';
 
 export interface MemoryGraphNode {
   id: string;
@@ -48,6 +48,11 @@ export interface WorkspaceRun {
   result?: string;
   error?: string;
   toolNames?: string[];
+  activity?: string;
+  activeTool?: string;
+  operations?: Array<{ name: string; status: 'running' | 'done'; startedAt: number; completedAt?: number }>;
+  activityLog?: Array<{ timestamp: number; kind: 'thinking' | 'reasoning' | 'writing' | 'tool' | 'todo'; label: string; toolName?: string; status?: 'running' | 'done' }>;
+  archivedAt?: number;
 }
 
 export interface WorkspaceAgent {
@@ -61,6 +66,10 @@ export interface WorkspaceAgent {
   parentSessionId?: string;
   projectId?: string;
   agentId?: string;
+  activity?: string;
+  activeTool?: string;
+  operations?: Array<{ name: string; status: 'running' | 'done'; startedAt: number; completedAt?: number }>;
+  activityLog?: Array<{ timestamp: number; kind: 'thinking' | 'reasoning' | 'writing' | 'tool' | 'todo'; label: string; toolName?: string; status?: 'running' | 'done' }>;
 }
 
 export interface SessionSummary {
@@ -135,8 +144,11 @@ export interface ChatMessage {
   activeTools?: string[];
   activeTool?: string;
   toolActivity?: Array<{ name: string; status: 'running' | 'done' }>;
+  todoActivity?: Array<{ id: string; title: string; status: 'pending' | 'in_progress' | 'blocked' | 'completed' }>;
   thinking?: boolean;
+  activityState?: string;
   interrupted?: boolean;
+  progressUpdate?: boolean;
 }
 
 export interface ChannelStatus {

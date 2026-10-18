@@ -3,11 +3,40 @@
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
 import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 import { fetchWithRetry } from './retry.js';
+import { createDesktopImageMessage, extractOpenAIImages, extractToolText } from './openai-images.js';
 
 const DEFAULT_BASE_URL = 'https://api.freetheai.xyz/v1';
 
 function convertMessages(messages: Message[]): unknown[] {
-  return messages.map(m => ({ role: m.role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content) }));
+  const converted: unknown[] = [];
+  let pendingToolImages: unknown[] = [];
+  for (const message of messages) {
+    if (message.role !== 'tool' && pendingToolImages.length > 0) {
+      converted.push(createDesktopImageMessage(pendingToolImages));
+      pendingToolImages = [];
+    }
+    if (message.role === 'tool') {
+      converted.push({ role: 'tool', tool_call_id: message.tool_call_id, content: extractToolText(message.content) });
+      pendingToolImages.push(...extractOpenAIImages(message.content));
+    } else if (message.role === 'assistant' && message.tool_calls?.length) {
+      converted.push({
+        role: 'assistant',
+        content: typeof message.content === 'string' ? message.content : message.content.filter(block => block.type === 'text').map(block => block.text ?? '').join(''),
+        tool_calls: message.tool_calls.map(call => ({
+          id: call.id,
+          type: 'function',
+          function: { name: call.name, arguments: JSON.stringify(call.input) },
+        })),
+      });
+    } else {
+      converted.push({
+        role: message.role,
+        content: typeof message.content === 'string' ? message.content : message.content.filter(block => block.type === 'text').map(block => block.text ?? '').join(''),
+      });
+    }
+  }
+  if (pendingToolImages.length > 0) converted.push(createDesktopImageMessage(pendingToolImages));
+  return converted;
 }
 
 function convertTools(tools: ToolDef[]): unknown[] {

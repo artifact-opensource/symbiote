@@ -106,7 +106,7 @@ export function defaultSetupInput(existing?: SymbioteConfig, envPath = path.reso
     agent: {
       enabled: !fs.existsSync(path.join(workspace, 'SOUL.md')),
       name: existing?.name ?? 'Symbiote',
-      emoji: existing?.emoji ?? '🤖',
+      emoji: existing?.emoji ?? 'bot',
       personality: 'Calm, precise, production-minded operator',
       creatorName: (() => {
         const savedName = readWorkspaceIdentity(workspace).ownerName;

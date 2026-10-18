@@ -305,7 +305,7 @@ function findLastUserMessage(messages: Message[]): Message | undefined {
     if (messages[i].role === 'user') {
       // Skip system warnings injected by the runner
       const content = messages[i].content;
-      if (typeof content === 'string' && content.startsWith('⚠️ SYSTEM WARNING:')) {
+      if (typeof content === 'string' && /^(?:\u{26A0}\u{FE0F}\s*)?SYSTEM WARNING:/u.test(content)) {
         continue;
       }
       return messages[i];

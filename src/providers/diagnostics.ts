@@ -79,12 +79,12 @@ export function diagnoseError(
   };
 
   // LOUD logging — never silent
-  console.error(`\n🔴 Provider Error [${provider}]`);
+  console.error(`\nProvider error [${provider}]`);
   console.error(`   URL: ${url}`);
   console.error(`   Status: ${status}`);
   console.error(`   Headers: ${JSON.stringify(diagnostic.headers)}`);
   console.error(`   Body: ${body.slice(0, 500)}`);
-  console.error(`   💡 ${suggestion}\n`);
+  console.error(`   Suggestion: ${suggestion}\n`);
 
   return diagnostic;
 }

@@ -2,8 +2,10 @@
 
 import { spawn } from 'node:child_process';
 import { getProcessManager } from './process.js';
-import type { ToolDefinition } from '../types.js';
+import { DEFAULT_EXEC_TIMEOUT_SECONDS, resolveExecTimeoutMs, type ToolDefinition } from '../types.js';
 import { describeShell, hintForFailure, isWindows, killProcessTree, shellCommand, wrapPtyCommand, type ShellKind } from '../../runtime/platform.js';
+
+export { DEFAULT_EXEC_TIMEOUT_SECONDS, resolveExecTimeoutMs };
 
 const SHELLS: ShellKind[] = ['auto', 'powershell', 'bash', 'cmd'];
 
@@ -31,8 +33,8 @@ export const execTool: ToolDefinition = {
     properties: {
       command: { type: 'string', description: 'Shell command to execute' },
       workdir: { type: 'string', description: 'Working directory (defaults to cwd)' },
-      timeout: { type: 'number', description: 'Timeout in seconds (default 600, ignored if background)' },
-      background: { type: 'boolean', description: 'Run in background (returns process ID)' },
+      timeout: { type: 'number', description: 'Timeout in seconds (default 5; specify a longer timeout for longer foreground commands; ignored if background)' },
+      background: { type: 'boolean', description: 'Run in background (returns process ID; use for long-running commands)' },
       pty: { type: 'boolean', description: 'Wrap in pseudo-TTY via script command' },
       shell: { type: 'string', enum: SHELLS, description: 'Shell to use (default auto: picks by command syntax)' },
       env: { type: 'object', description: 'Extra environment variables for this command' },
@@ -51,12 +53,12 @@ export const execTool: ToolDefinition = {
     // Background mode: delegate to process manager
     if (background) {
       const mgr = getProcessManager();
-      const p = mgr.start(command, workdir, undefined, kind);
+      const p = mgr.start(command, workdir, options?.sessionId, kind);
       return JSON.stringify({ processId: p.id, pid: p.pid, status: 'running' });
     }
 
     if (options?.signal?.aborted) return 'Error: Command aborted before it started.';
-    const timeoutMs = ((input.timeout as number) ?? 600) * 1000;
+    const timeoutMs = resolveExecTimeoutMs(input.timeout);
 
     // PTY wrapping: use `script` to allocate a pseudo-terminal
     const actualCommand = pty ? wrapPtyCommand(command) : command;
@@ -86,6 +88,7 @@ export const execTool: ToolDefinition = {
         options?.signal?.removeEventListener('abort', onAbort);
         resolve(output);
       };
+
       const onAbort = () => {
         killProcessTree(proc);
         finish(`Error: Command aborted.\n${Buffer.concat(chunks).toString('utf-8')}`);

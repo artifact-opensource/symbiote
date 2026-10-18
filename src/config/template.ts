@@ -58,14 +58,14 @@ export function buildConfigTemplate(input: TemplateInput = {}): Record<string, a
     configVersion: CONFIG_VERSION,
 
     name: input.name ?? 'Symbiote',
-    emoji: input.emoji ?? '🤖',
+    emoji: input.emoji ?? 'bot',
 
     defaultProvider: input.provider ?? 'openrouter',
     defaultModel: input.model ?? 'openrouter/free',
     fallbackProviders: [],
     temperature: input.temperature ?? 0.7,
     maxTokens: input.maxTokens ?? 8192,
-    maxIterations: input.maxIterations ?? 50,
+    maxIterations: input.maxIterations ?? 100,
     adaptiveTemperature: { adaptive: false, default: 0.5, logChanges: false },
 
     workspace: '.',
@@ -80,6 +80,7 @@ export function buildConfigTemplate(input: TemplateInput = {}): Record<string, a
 
     toolProgress: true,
     tools: { enabled: true },
+    sandbox: { enabled: false, ownerAccess: true, internalTier: 'standard', nonOwnerTier: 'restricted' },
     timeouts: { llmRequestMs: 900_000 },
     heartbeat: {
       activeIntervalMin: 30,

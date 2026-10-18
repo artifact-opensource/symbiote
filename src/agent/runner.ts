@@ -10,17 +10,29 @@ import { classifyTask, getTemperature } from './temperature.js';
 import type { TemperatureConfig, TaskCategory } from './temperature.js';
 import { stripBlinkControlMessages, type BlinkController } from './blink.js';
 import type { ContextStore } from './context-store.js';
-import { TodoManager } from './todo.js';
-import type { ToolExecuteOptions } from '../tools/types.js';
+import { TodoManager, type TodoItem } from './todo.js';
+import { resolveExecTimeoutMs, type ToolExecuteOptions, type ToolExecutionOutput } from '../tools/types.js';
 import { randomUUID } from 'node:crypto';
 import { getSarsiModel } from '../sarsi/index.js';
+import { EXPANDED_CAP as PULSE_EXPANDED_CAP, EXPAND_THRESHOLD as PULSE_EXPAND_THRESHOLD } from './pulse.js';
 
 export const DEFAULT_MAX_CONTEXT_TOKENS = 100_000;
+
+export function omitEphemeralImages(messages: Message[]): Message[] {
+  return messages.map(message => {
+    if (message.role !== 'tool' || typeof message.content === 'string') return message;
+    if (!message.content.some(block => block.type === 'image')) return message;
+    const content = message.content.filter(block => block.type !== 'image');
+    content.push({ type: 'text', text: '[Desktop screenshot omitted from saved conversation history.]' });
+    return { ...message, content };
+  });
+}
 
 /** Minimal interface for tool registries (satisfied by both ToolRegistry and SandboxedToolRegistry) */
 export interface ToolExecutor {
   toProviderFormat(): ToolDef[];
   execute(name: string, input: Record<string, unknown>, options?: ToolExecuteOptions): Promise<string>;
+  executeWithImages?(name: string, input: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolExecutionOutput>;
   list(): Array<{ name: string; description: string; parameters: any }>;
 }
 
@@ -45,6 +57,7 @@ export interface RunnerConfig {
   onEvent?: (event: StreamEvent) => void;
   onToolStart?: (name: string, input: Record<string, unknown>) => void;
   onToolEnd?: (name: string, result: string) => void;
+  onTodoCompleted?: (update: TodoCompletionUpdate) => Promise<void> | void;
   /** Called after each iteration's tool results so callers can persist work even if a later LLM call throws. */
   onCheckpoint?: (messages: Message[]) => void;
 }
@@ -58,9 +71,10 @@ const envMs = (name: string, fallback: number): number => {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 };
 // A hung tool or silent stream must never stall the loop forever.
-const toolTimeoutMs = (toolName: string): number => {
+export const resolveToolTimeoutMs = (toolName: string, input: Record<string, unknown> = {}): number => {
   const configured = Number(process.env.SYMBIOTE_TOOL_TIMEOUT_MS);
   if (Number.isFinite(configured) && configured > 0) return configured;
+  if (toolName === 'exec') return resolveExecTimeoutMs(input.timeout);
 
   const rule = getSarsiModel().toolRules.find(item =>
     item.preferredTool === toolName || item.fallbackTool === toolName,
@@ -96,12 +110,12 @@ function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortSignal | u
   });
 }
 
-function executeToolWithTimeout(
-  execute: (signal: AbortSignal) => Promise<string>,
+function executeToolWithTimeout<T>(
+  execute: (signal: AbortSignal) => Promise<T>,
   ms: number,
   parentSignal: AbortSignal | undefined,
   label: string,
-): Promise<string> {
+): Promise<T> {
   return new Promise((resolve, reject) => {
     const controller = new AbortController();
     let settled = false;
@@ -171,6 +185,38 @@ export interface RunResult {
   temperatureHistory?: Array<{ iteration: number; category: TaskCategory; temperature: number }>;
 }
 
+export interface TodoCompletionUpdate {
+  item: TodoItem;
+  completed: number;
+  total: number;
+  remaining: TodoItem[];
+}
+
+export function formatTodoProgressUpdate(update: TodoCompletionUpdate): string {
+  const progress = `${update.completed}/${update.total} checklist tasks complete`;
+  const next = update.remaining.find(item => item.status === 'in_progress' || item.status === 'pending');
+  return next
+    ? `Progress update: completed "${update.item.title}" (${progress}). Continuing with "${next.title}".`
+    : `Progress update: completed "${update.item.title}" (${progress}). Verifying the finished work now.`;
+}
+
+function captureTodoCompletion(
+  toolName: string,
+  input: Record<string, unknown>,
+  defaultScope: string,
+): { manager: TodoManager; id: string; previousStatus: TodoItem['status'] } | undefined {
+  if (toolName !== 'todo') return undefined;
+  const action = input.action;
+  if (action !== 'complete' && !(action === 'update' && input.status === 'completed')) return undefined;
+  const id = typeof input.id === 'string' ? input.id.trim() : '';
+  if (!id) return undefined;
+  const scope = typeof input.scope === 'string' && input.scope.trim() ? input.scope.trim() : defaultScope;
+  const manager = new TodoManager({ scope, workspace: process.cwd() });
+  const previous = manager.list().find(item => item.id === id);
+  if (!previous) return undefined;
+  return { manager, id, previousStatus: previous.status };
+}
+
 /**
  * Run the agent loop: send messages to LLM, process tool calls, repeat until done.
  * 
@@ -184,10 +230,9 @@ export async function runAgent(
   messages: Message[],
   config: RunnerConfig,
 ): Promise<RunResult> {
-  const initialMaxIter = config.maxIterations ?? 25;
-  const PULSE_EXPAND_THRESHOLD = 18;
-  const PULSE_EXPANDED_CAP = 100;
+  const initialMaxIter = config.maxIterations ?? 100;
   let maxIter = initialMaxIter;
+  const pulseExpandAt = Math.min(PULSE_EXPAND_THRESHOLD, Math.max(1, Math.ceil(initialMaxIter * 0.8)));
   const maxCtx = config.maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS;
   const allToolCalls: RunResult['toolCalls'] = [];
   const temperatureHistory: Array<{ iteration: number; category: TaskCategory; temperature: number }> = [];
@@ -198,6 +243,8 @@ export async function runAgent(
   let completionReviewPending = false;
   let completionReviewUsed = false;
   let emptyNudges = 0;
+  let blockerReviewUsed = false;
+  let todoChecklistRequired = false;
   const callCounts = new Map<string, number>();
   const todoScope = config.todoScope ?? `run-${randomUUID()}`;
   const completionReviewId = config.turnId ?? randomUUID();
@@ -248,7 +295,7 @@ export async function runAgent(
     iterations++;
 
     // PULSE dynamic expansion: if approaching cap, expand to full budget
-    if (iterations >= PULSE_EXPAND_THRESHOLD && maxIter === initialMaxIter && initialMaxIter < PULSE_EXPANDED_CAP) {
+    if (iterations >= pulseExpandAt && maxIter === initialMaxIter && initialMaxIter < PULSE_EXPANDED_CAP) {
       const oldCap = maxIter;
       maxIter = PULSE_EXPANDED_CAP;
       console.log(`[PULSE] Expanding iteration cap ${initialMaxIter} → ${PULSE_EXPANDED_CAP} at iteration ${iterations}`);
@@ -267,7 +314,7 @@ export async function runAgent(
       const lastUserMsg = [...currentMessages].reverse().find(m => m.role === 'user');
       return {
         text: lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : '') : '',
-        messages: currentMessages,
+        messages: omitEphemeralImages(currentMessages),
         toolCalls: allToolCalls,
         iterations,
         maxIterationsHit: false,
@@ -298,7 +345,7 @@ export async function runAgent(
     if (config.policyEngine && config.sessionId) {
       const iterCheck = config.policyEngine.checkIteration(config.sessionId, iterations);
       if (iterCheck.warning) {
-        console.warn(`⚠️  ${iterCheck.warning}`);
+        console.warn(`Warning: ${iterCheck.warning}`);
         // Inject warning into context so the LLM can react and wrap up gracefully
         const directive = `Runtime policy warning: ${iterCheck.warning}. Wrap up now with the best available result; do not start new work.`;
         const systemMessage = currentMessages.find(message => message.role === 'system');
@@ -311,7 +358,7 @@ export async function runAgent(
       if (!iterCheck.ok) {
         return {
           text: `[${iterCheck.warning}]`,
-          messages: currentMessages,
+          messages: omitEphemeralImages(currentMessages),
           toolCalls: allToolCalls,
           iterations,
           maxIterationsHit: true,
@@ -406,7 +453,7 @@ export async function runAgent(
         console.log(`[runner] Stream aborted at iteration ${iterations}. Returning partial result.`);
         return {
           text: textAccum || '',
-          messages: currentMessages,
+          messages: omitEphemeralImages(currentMessages),
           toolCalls: allToolCalls,
           iterations,
           maxIterationsHit: false,
@@ -486,7 +533,7 @@ export async function runAgent(
           }
         }
         try {
-          config.onCheckpoint?.(currentMessages);
+          config.onCheckpoint?.(omitEphemeralImages(currentMessages));
         } catch (error) {
           console.error('[runner] Completion-review checkpoint persistence failed:', error);
         }
@@ -501,12 +548,32 @@ export async function runAgent(
         continue;
       }
 
-      for (const task of todoManager.list()) {
-        if (task.status === 'in_progress' || task.status === 'pending') {
-          todoManager.updateTask(task.id, { status: 'completed' });
-        }
+      const unresolvedTodos = todoChecklistRequired
+        ? todoManager.list().filter(task => task.status !== 'completed')
+        : [];
+      const openTodos = unresolvedTodos.filter(task => task.status === 'pending' || task.status === 'in_progress');
+      if (openTodos.length > 0) {
+        const checklist = openTodos.map(task => `- ${task.title}${task.description ? `: ${task.description}` : ''}`).join('\n');
+        currentMessages.push({
+          role: 'system',
+          content: `Checklist verification found unfinished tasks. Do not report completion. Continue the work and update each task only after verifying its result:\n${checklist}`,
+        });
+        continue;
       }
-      return { text: textAccum, messages: currentMessages, toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
+      if (unresolvedTodos.length > 0 && !blockerReviewUsed) {
+        blockerReviewUsed = true;
+        const checklist = unresolvedTodos.map(task => `- ${task.title}${task.description ? `: ${task.description}` : ''}`).join('\n');
+        currentMessages.push({
+          role: 'system',
+          content: `The checklist contains blocked tasks. Make one attempt to resolve them; if still blocked, clearly report each blocker and do not claim the request is fully complete:\n${checklist}`,
+        });
+        continue;
+      }
+      if (unresolvedTodos.length > 0) {
+        const checklist = unresolvedTodos.map(task => `- ${task.title}: ${task.description ?? 'Blocked'}`).join('\n');
+        textAccum = `${textAccum.trim()}\n\nUnresolved checklist items:\n${checklist}`.trim();
+      }
+      return { text: textAccum, messages: omitEphemeralImages(currentMessages), toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
     }
 
     // Append assistant message with tool calls
@@ -531,19 +598,26 @@ export async function runAgent(
         const toolInput = tc.name === 'todo' && !(typeof tc.input.scope === 'string' && tc.input.scope.trim())
           ? { ...tc.input, scope: todoScope }
           : tc.input;
+        if (tc.name === 'todo') todoChecklistRequired = true;
+        const todoCompletion = captureTodoCompletion(tc.name, toolInput, todoScope);
         try { config.onToolStart?.(tc.name, toolInput); } catch { /* progress reporting is non-critical */ }
         try {
           const toolOptions: ToolExecuteOptions = {
             sessionId: config.sessionId,
             googleWorkspaceAccessToken: config.googleWorkspaceAccessToken,
           };
-          let result = clipResult(await executeToolWithTimeout(
-            (signal) => config.toolRegistry.execute(tc.name, toolInput, { ...toolOptions, signal }),
-            toolTimeoutMs(tc.name),
+          const executeTool = (signal: AbortSignal): Promise<ToolExecutionOutput> => config.toolRegistry.executeWithImages
+            ? config.toolRegistry.executeWithImages(tc.name, toolInput, { ...toolOptions, signal })
+            : config.toolRegistry.execute(tc.name, toolInput, { ...toolOptions, signal }).then(text => ({ text }));
+          const execution = await executeToolWithTimeout(
+            executeTool,
+            resolveToolTimeoutMs(tc.name, toolInput),
             config.abortSignal,
             `Tool ${tc.name}`,
-          ));
-          const isError = looksFailed(result);
+          );
+          const output = execution;
+          let result = clipResult(output.text);
+          const isError = output.isError === true || looksFailed(result);
           // Sanitize tool result before it enters the LLM context
           const sanitized = sanitizeToolResult(tc.name, result);
           if (sanitized.injectionDetected) {
@@ -551,7 +625,21 @@ export async function runAgent(
           }
           result = sanitized.text || '(no output)';
           try { config.onToolEnd?.(tc.name, result); } catch { /* progress reporting is non-critical */ }
-          toolResults.push({ tc, input: toolInput, result, isError });
+          if (!isError && todoCompletion) {
+            const completedTodo = todoCompletion.manager.list().find(item =>
+              item.id === todoCompletion.id && item.status === 'completed',
+            );
+            if (completedTodo && todoCompletion.previousStatus !== 'completed') {
+              const items = todoCompletion.manager.list();
+              await config.onTodoCompleted?.({
+                item: completedTodo,
+                completed: items.filter(item => item.status === 'completed').length,
+                total: items.length,
+                remaining: items.filter(item => item.status !== 'completed'),
+              });
+            }
+          }
+          toolResults.push({ tc, input: toolInput, result, images: output.images ?? [], isError });
         } catch (err) {
           const errMsg = JSON.stringify({ error: err instanceof Error ? err.message : String(err), is_error: true });
           try { config.onToolEnd?.(tc.name, errMsg); } catch { /* progress reporting is non-critical */ }
@@ -578,8 +666,14 @@ export async function runAgent(
       currentMessages.push({
         role: 'tool',
         tool_call_id: tc.id,
-        content: result,
-        ...(isError ? { name: '__error' } : {}),
+        name: tc.name,
+        is_error: isError,
+        content: entry.images?.length
+          ? [{ type: 'text', text: result }, ...entry.images.map(image => ({
+            type: 'image' as const,
+            source: { type: 'base64' as const, media_type: image.mimeType, data: image.dataBase64 },
+          }))]
+          : result,
       });
     }
 
@@ -587,7 +681,7 @@ export async function runAgent(
     recentToolNames = pendingToolCalls.map(tc => tc.name);
     completionReviewPending = false;
     try {
-      config.onCheckpoint?.(currentMessages);
+      config.onCheckpoint?.(omitEphemeralImages(currentMessages));
     } catch (error) {
       console.error('[runner] Checkpoint persistence failed; continuing the active turn:', error);
     }
@@ -599,7 +693,7 @@ export async function runAgent(
       const lastUserMsg = [...currentMessages].reverse().find(m => m.role === 'user');
       return {
         text: lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : '') : '',
-        messages: currentMessages,
+        messages: omitEphemeralImages(currentMessages),
         toolCalls: allToolCalls,
         iterations,
         maxIterationsHit: false,
@@ -615,7 +709,7 @@ export async function runAgent(
   console.warn(`[runner] Max iterations (${maxIter}) reached after ${allToolCalls.length} tool calls`);
   return {
     text: textAccum.trim() || '[Max iterations reached]',
-    messages: currentMessages,
+    messages: omitEphemeralImages(currentMessages),
     toolCalls: allToolCalls,
     iterations,
     maxIterationsHit: true,

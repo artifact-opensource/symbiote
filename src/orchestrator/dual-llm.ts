@@ -577,8 +577,8 @@ Important:
             pendingToolCalls.map(async (tc) => {
               const releaseTool = await this.toolSemaphore.acquire();
               try {
-                const result = await this.toolRegistry.execute(tc.name, tc.input);
-                return { tc, result, isError: false };
+                const result = await this.toolRegistry.executeWithImages(tc.name, tc.input);
+                return { tc, result, isError: typeof result !== 'string' && result.isError === true };
               } catch (err) {
                 return { tc, result: JSON.stringify({ error: err instanceof Error ? err.message : String(err), is_error: true }), isError: true };
               } finally {
@@ -602,8 +602,14 @@ Important:
             taskMessages.push({
               role: 'tool',
               tool_call_id: tc.id,
-              content: typeof result === 'string' ? result : JSON.stringify(result),
-              ...(isError ? { name: '__error' } : {}),
+              name: tc.name,
+              is_error: isError,
+              content: typeof result === 'string'
+                ? result
+                : [{ type: 'text', text: result.text }, ...(result.images ?? []).map(image => ({
+                  type: 'image' as const,
+                  source: { type: 'base64' as const, media_type: image.mimeType, data: image.dataBase64 },
+                }))],
             });
           }
 

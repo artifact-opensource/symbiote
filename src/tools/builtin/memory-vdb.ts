@@ -6,6 +6,8 @@
 
 import type { ToolDefinition } from '../types.js';
 import { getSharedVectorDB, ingestSessions, type VectorDB } from '../../memory/vdb.js';
+import { DurableMemory, resolveDurableMemoryArchive } from '../../memory/durable-memory.js';
+import { resolveMemoGraphStorageDir } from '../../memory/memograph.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -146,6 +148,12 @@ export const vdbStatsTool: ToolDefinition = {
   async execute() {
     const db = getVDB();
     const stats = db.stats();
+    const workspace = getWorkspace();
+    const durable = new DurableMemory(
+      db,
+      resolveDurableMemoryArchive(workspace),
+      resolveMemoGraphStorageDir(workspace),
+    ).stats();
     return [
       `VDB Statistics:`,
       `  Documents: ${stats.documentCount}`,
@@ -153,6 +161,8 @@ export const vdbStatsTool: ToolDefinition = {
       `  Disk: ${(stats.diskBytes / 1024).toFixed(1)}KB`,
       `  Last indexed: ${stats.lastIndexed ? new Date(stats.lastIndexed).toISOString() : 'never'}`,
       `  Sources: ${JSON.stringify(stats.sources)}`,
+      `Durable JSONL records: ${durable.archiveRecords} (${durable.archivePath})`,
+      `Memograph shards: ${durable.graphShards}/${durable.verifiedShards} hash-verified (${durable.graphPath})`,
     ].join('\n');
   },
 };

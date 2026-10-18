@@ -129,16 +129,17 @@ export interface SymbioteConfig {
 }
 
 const DEFAULT_CONFIG: SymbioteConfig = {
+  emoji: 'bot',
   providers: {},
   defaultProvider: 'openrouter',
   defaultModel: 'openrouter/free',
   maxTokens: 8192,
   temperature: 0.7,
-  maxIterations: 50,
+  maxIterations: 100,
   workspace: process.cwd(),
   sessionsDir: '.session',
   sandbox: {
-    enabled: true,
+    enabled: false,
     ownerAccess: true,
     internalTier: 'standard',
     nonOwnerTier: 'restricted',

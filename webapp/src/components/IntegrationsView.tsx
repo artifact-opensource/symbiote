@@ -11,7 +11,6 @@ import {
   FileText,
   Folder,
   Info,
-  LoaderCircle,
   LogOut,
   Mail,
   MessageSquare,
@@ -20,6 +19,7 @@ import {
   CheckSquare,
   Workflow,
 } from 'lucide-react';
+import ActivityOrb from './ActivityOrb';
 import type { User } from '@firebase/auth';
 import { googleSignIn, googleSignOut, observeGoogleUser } from '../lib/firebase';
 import {
@@ -255,12 +255,12 @@ export default function CloudSpacesView({
           <div className="integration-card-actions">
             {authorized ? (
               <button className="button button-secondary" type="button" onClick={() => void disconnectAccount()} disabled={working}>
-                {working ? <LoaderCircle size={14} className="spin" /> : <LogOut size={14} />}
+                {working ? <ActivityOrb label="Disconnecting account" compact loading /> : <LogOut size={14} />}
                 Disconnect
               </button>
             ) : (
               <button className="button button-primary" type="button" onClick={() => void connectAccount()} disabled={working || accountLoading}>
-                {working ? <LoaderCircle size={14} className="spin" /> : <GoogleMark />}
+                {working ? <ActivityOrb label="Authorizing account" compact loading /> : <GoogleMark />}
                 {working ? 'Authorizing…' : needsReauthorization ? 'Renew access' : 'Authorize Workspace'}
               </button>
             )}
@@ -280,7 +280,7 @@ export default function CloudSpacesView({
                   title={error ? `${service.name}: ${error}` : `${service.name}: ${online ? 'authorized and reachable' : checking ? 'checking access' : 'offline'}`}
                   aria-label={`${service.name}: ${online ? 'online' : checking ? 'checking' : 'offline'}`}
                 >
-                  <span className="integration-app-icon">{checking ? <LoaderCircle size={18} className="spin" /> : <Icon size={19} />}</span>
+                  <span className="integration-app-icon">{checking ? <ActivityOrb label={`Checking ${service.name}`} loading /> : <Icon size={19} />}</span>
                   <span className="integration-app-name">{service.name}</span>
                   <span className="integration-app-status">{online ? <><Check size={11} />Online</> : checking ? 'Checking' : error ? <><CircleAlert size={11} />Unavailable</> : 'Offline'}</span>
                 </div>
@@ -421,7 +421,7 @@ function CloudProviderCard({
           ))}
           <div className="cloud-provider-actions">
             <button className="button button-primary" type="submit" disabled={working}>
-              {working ? <LoaderCircle size={14} className="spin" /> : <Check size={14} />}
+              {working ? <ActivityOrb label="Saving integration settings" compact loading /> : <Check size={14} />}
               Save & test
             </button>
             {configured && <button className="button button-secondary" type="button" onClick={() => void testConnection()} disabled={working}>Test</button>}

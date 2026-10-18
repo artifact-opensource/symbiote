@@ -85,7 +85,7 @@ export class ContextMonitor {
 
     if (status.health === 'warning') {
       if (!this.hasWarned) {
-        console.warn(`⚠️  Context at ${(status.usage * 100).toFixed(0)}% (${status.totalTokens}/${status.maxTokens} tokens)`);
+        console.warn(`Warning: context at ${(status.usage * 100).toFixed(0)}% (${status.totalTokens}/${status.maxTokens} tokens)`);
         this.hasWarned = true;
       }
       return messages;
@@ -102,13 +102,13 @@ export class ContextMonitor {
     }
 
     if (status.health === 'emergency') {
-      console.error(`🚨 Context EMERGENCY at ${(status.usage * 100).toFixed(0)}% — flushing to disk`);
+      console.error(`Context emergency at ${(status.usage * 100).toFixed(0)}% — flushing to disk`);
       await this.saveTranscript(messages);
       return this.hardTruncate(messages, 10);
     }
 
     // compacting
-    console.warn(`🔄 Context at ${(status.usage * 100).toFixed(0)}% — auto-compacting`);
+    console.warn(`Context at ${(status.usage * 100).toFixed(0)}% — auto-compacting`);
     return this.compact(messages);
   }
 
@@ -177,6 +177,6 @@ export class ContextMonitor {
     const filename = `transcript-${Date.now()}.json`;
     const filepath = path.join(this.transcriptDir, filename);
     fs.writeFileSync(filepath, JSON.stringify(messages, null, 2));
-    console.log(`📝 Transcript saved: ${filepath}`);
+    console.log(`Transcript saved: ${filepath}`);
   }
 }

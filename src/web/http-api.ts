@@ -21,6 +21,7 @@ import * as crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { palette, ok, warn } from '../cli/brand.js';
 import { getIpcIdentity, type IpcVerification } from './ipc-identity.js';
+import { createSseTextFilter } from './sse-text-filter.js';
 
 const __http_dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -59,6 +60,8 @@ export interface ChatRequest {
   verifiedAgentId?: string;
   /** Verified IPC agent name */
   verifiedAgentName?: string;
+  /** Set by a trusted server-side caller; never accepted from HTTP request bodies. */
+  trustedAdminContext?: boolean;
 }
 
 export interface ChatResponse {
@@ -211,6 +214,9 @@ export class HttpApiServer {
 
     try {
       parsed = JSON.parse(body);
+      delete parsed.trustedAdminContext;
+      delete parsed.verifiedAgentId;
+      delete parsed.verifiedAgentName;
       // Accept both "text" and "message" fields (web UI sends "message")
       if (!parsed.text && (parsed as any).message) {
         parsed.text = (parsed as any).message;
@@ -257,7 +263,6 @@ export class HttpApiServer {
 
     try {
       const startMs = Date.now();
-      let streamedText = '';
       if (sse) {
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
@@ -265,17 +270,16 @@ export class HttpApiServer {
           'Connection': 'keep-alive',
         });
       }
+      const textFilter = createSseTextFilter(event => {
+        if (!res.destroyed) res.write(`data: ${JSON.stringify(event)}\n\n`);
+      });
       const response = await this.config.onChat(parsed, event => {
         if (!sse || res.destroyed) return;
-        if (event.type === 'text_delta' && typeof event.text === 'string') streamedText += event.text;
-        res.write(`data: ${JSON.stringify(event)}\n\n`);
+        textFilter.emit(event);
       });
       response.durationMs = Date.now() - startMs;
 
       if (sse) {
-        if (!streamedText && response.text) {
-          res.write(`data: ${JSON.stringify({ type: 'text_delta', text: response.text })}\n\n`);
-        }
         res.write(`data: ${JSON.stringify({
           type: 'done',
           message: {

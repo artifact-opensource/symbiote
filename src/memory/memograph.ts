@@ -141,6 +141,7 @@ export function importMemoGraphSnapshots(
     }
     result.files++;
     const graphId = path.relative(storageDir, filePath).replace(/[\\/]/g, ':').replace(/\.json$/i, '');
+    const graphFailureCount = result.failures;
     const children = new Map<string, Set<string>>();
     for (const [parentHash, childHashes] of Object.entries(snapshot.edges ?? {})) {
       if (!Array.isArray(childHashes)) {
@@ -174,7 +175,7 @@ export function importMemoGraphSnapshots(
         continue;
       }
 
-      const timestamp = shard.timestamp ?? Date.now();
+      const timestamp = shard.timestamp ?? 0;
       const hashOk = verifyShardHash(shard);
       if (hashOk) result.hashVerified++; else result.hashMismatches++;
       documents.push({
@@ -206,12 +207,43 @@ export function importMemoGraphSnapshots(
       }
     }
 
+    const existing = database.listDocuments().filter(document =>
+      document.source === 'memograph' && document.sessionId === graphId,
+    );
+    const existingById = new Map(existing.map(document => [document.id, document]));
+    const desiredById = new Map<string, VDBDocument>();
+    if (result.failures > graphFailureCount) {
+      for (const document of existing) desiredById.set(document.id, document);
+    }
     for (const document of documents) {
+      desiredById.set(document.id, document);
+      const previous = existingById.get(document.id);
+      if (previous
+          && previous.text === document.text
+          && previous.source === document.source
+          && previous.role === document.role
+          && previous.timestamp === document.timestamp
+          && previous.namespace === document.namespace
+          && previous.sessionId === document.sessionId
+          && JSON.stringify(previous.metadata ?? {}) === JSON.stringify(document.metadata ?? {})) {
+        result.skipped++;
+      } else {
+        result.indexed++;
+      }
+    }
+
+    const namespaces = new Set([
+      ...existing.map(document => document.namespace).filter((namespace): namespace is string => Boolean(namespace)),
+      ...[...desiredById.values()].map(document => document.namespace).filter((namespace): namespace is string => Boolean(namespace)),
+    ]);
+    for (const namespace of namespaces) {
       try {
-        if (database.index(document)) result.indexed++;
-        else result.skipped++;
+        database.syncNamespace(
+          namespace,
+          [...desiredById.values()].filter(document => document.namespace === namespace),
+        );
       } catch (error) {
-        fail('shard indexing', document.id, error);
+        fail('namespace synchronization', `${graphId}:${namespace}`, error);
       }
     }
   }

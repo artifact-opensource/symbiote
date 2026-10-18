@@ -1,12 +1,23 @@
 // Symbiote — Tool type definitions
 
+export const DEFAULT_EXEC_TIMEOUT_SECONDS = 5;
+
+export function resolveExecTimeoutMs(timeout: unknown): number {
+  if (timeout === undefined) return DEFAULT_EXEC_TIMEOUT_SECONDS * 1000;
+  if (typeof timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0) {
+    throw new Error('timeout must be a positive number of seconds.');
+  }
+  return timeout * 1000;
+}
+
 export interface ToolParameter {
   type: string;
   description?: string;
-  required?: boolean;
+  required?: boolean | string[];
   enum?: string[];
-  items?: Record<string, unknown>;
+  items?: ToolParameter;
   properties?: Record<string, ToolParameter>;
+  additionalProperties?: boolean | ToolParameter;
 }
 
 export interface ToolDefinition {
@@ -18,10 +29,23 @@ export interface ToolDefinition {
     required?: string[];
   };
   execute: (input: Record<string, unknown>, opts?: ToolExecuteOptions) => Promise<string>;
+  executeWithImages?: (input: Record<string, unknown>, opts?: ToolExecuteOptions) => Promise<ToolExecutionOutput>;
+}
+
+export interface ToolImage {
+  mimeType: string;
+  dataBase64: string;
+}
+
+export interface ToolExecutionOutput {
+  text: string;
+  images?: ToolImage[];
+  isError?: boolean;
 }
 
 export interface ToolExecuteOptions {
   sessionId?: string;
+  sessionTier?: 'admin' | 'standard' | 'restricted';
   onProgress?: (chunk: string) => void;
   signal?: AbortSignal;
   googleWorkspaceAccessToken?: string;

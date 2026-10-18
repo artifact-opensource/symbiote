@@ -2,13 +2,19 @@
 import type { Message, ToolDef, ProviderConfig, StreamEvent, Provider } from './types.js';
 import { DEFAULT_LLM_REQUEST_TIMEOUT_MS } from './types.js';
 import { fetchWithRetry } from './retry.js';
+import { createDesktopImageMessage, extractOpenAIImages, extractToolText } from './openai-images.js';
 
 const DEFAULT_TIMEOUT_MS = DEFAULT_LLM_REQUEST_TIMEOUT_MS;
 
 function convertMessages(messages: Message[]): unknown[] {
   const out: unknown[] = [];
   let pendingToolCallIds = new Set<string>();
+  let pendingToolImages: unknown[] = [];
   for (const msg of messages) {
+    if (msg.role !== 'tool' && pendingToolImages.length > 0) {
+      out.push(createDesktopImageMessage(pendingToolImages));
+      pendingToolImages = [];
+    }
     if (msg.role === 'system') {
       pendingToolCallIds.clear();
       out.push({ role: 'system', content: typeof msg.content === 'string' ? msg.content : msg.content.map(b => b.text ?? '').join('') });
@@ -20,9 +26,11 @@ function convertMessages(messages: Message[]): unknown[] {
         continue;
       }
       pendingToolCallIds.delete(msg.tool_call_id);
-      out.push({ role: 'tool', tool_call_id: msg.tool_call_id, content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content) });
+      out.push({ role: 'tool', tool_call_id: msg.tool_call_id, content: extractToolText(msg.content) });
+      pendingToolImages.push(...extractOpenAIImages(msg.content));
       continue;
     }
+    if (pendingToolImages.length > 0) out.push(createDesktopImageMessage(pendingToolImages));
     if (msg.role === 'assistant' && msg.tool_calls?.length) {
       const content = typeof msg.content === 'string' && msg.content.trim() ? msg.content : '';
       const validToolCalls = msg.tool_calls

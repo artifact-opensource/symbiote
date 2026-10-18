@@ -28,8 +28,8 @@ export interface ResourceBudget {
 }
 
 const DEFAULT_LIMITS: Record<string, number> = {
-  simple: 10,
-  complex: 50,
+  simple: 100,
+  complex: 1000,
 };
 
 const DEFAULT_TOOL_POLICY: PolicyDecision = 'allow';
@@ -127,7 +127,7 @@ export class PolicyEngine {
 
     // Warn at 80%
     if (budget.used / budget.dailyLimit >= 0.8) {
-      console.warn(`⚠️  Resource "${resource}" at ${Math.round((budget.used / budget.dailyLimit) * 100)}% of daily budget (${budget.used}/${budget.dailyLimit})`);
+      console.warn(`Warning: resource "${resource}" at ${Math.round((budget.used / budget.dailyLimit) * 100)}% of daily budget (${budget.used}/${budget.dailyLimit})`);
     }
 
     return { allowed: true, remaining };

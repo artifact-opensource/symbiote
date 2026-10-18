@@ -86,6 +86,56 @@ test('Memograph import preserves shard topology, scopes, and permission boundari
       sessionId: 'test-session',
       graphNeighbors: 2,
     });
+
+    test('Memograph re-import updates changed shards, prunes deleted shards, and preserves data on partial snapshots', () => {
+      const root = mkdtempSync(join(tmpdir(), 'symbiote-memograph-sync-'));
+      const graphDir = join(root, 'graphs');
+      const snapshotPath = join(graphDir, 'workspace.json');
+      mkdirSync(graphDir, { recursive: true });
+      const db = new VectorDB(join(root, 'workspace'));
+      const shard = (hash: string, text: string) => ({
+        shard_hash: hash,
+        content: { summary: text },
+        owner: 'agent',
+        scope: 'project:alpha',
+        domain: 'project',
+        parent_hash: null,
+        permissions: ['*'],
+        timestamp: 1_790_000_000,
+        version: 1,
+        content_type: 'CONVERSATIONAL',
+      });
+
+      try {
+        writeFileSync(snapshotPath, JSON.stringify({
+          nodes: { first: shard('first-hash', 'Original shard summary.'), removed: shard('removed-hash', 'This shard will be removed.') },
+          edges: {},
+        }));
+        assert.equal(importMemoGraphSnapshots(db, graphDir).indexed, 2);
+
+        writeFileSync(snapshotPath, JSON.stringify({
+          nodes: { first: shard('first-hash', 'Revised shard summary.'), added: shard('added-hash', 'A newly added shard summary.') },
+          edges: {},
+        }));
+        const update = importMemoGraphSnapshots(db, graphDir);
+        assert.equal(update.indexed, 2);
+        assert.match(db.getDocument('memograph:workspace:first-hash')?.text ?? '', /Revised shard summary/);
+        assert.equal(db.getDocument('memograph:workspace:removed-hash'), undefined);
+
+        writeFileSync(snapshotPath, JSON.stringify({
+          nodes: {
+            first: shard('first-hash', 'Latest complete summary.'),
+            malformed: null,
+          },
+          edges: {},
+        }));
+        const partial = importMemoGraphSnapshots(db, graphDir);
+        assert.equal(partial.failures, 1);
+        assert.ok(db.getDocument('memograph:workspace:added-hash'), 'partial snapshots do not prune previously imported shards');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
     const context = contextStore.retrieve([
       { role: 'user', content: 'Explain the tenant scoped storage architecture and topology decision.' },
     ]);

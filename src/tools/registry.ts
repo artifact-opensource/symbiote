@@ -1,7 +1,7 @@
 // Symbiote — Tool registry: register, lookup, dispatch, convert to provider format
 
 import type { ToolDef } from '../providers/types.js';
-import type { ToolDefinition, ToolExecuteOptions } from './types.js';
+import type { ToolDefinition, ToolExecuteOptions, ToolExecutionOutput } from './types.js';
 
 export class ToolRegistry {
   private tools = new Map<string, ToolDefinition>();
@@ -36,6 +36,18 @@ export class ToolRegistry {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return JSON.stringify({ error: msg });
+    }
+  }
+
+  async executeWithImages(name: string, input: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolExecutionOutput> {
+    const tool = this.tools.get(name);
+    if (!tool) return { text: JSON.stringify({ error: `Unknown tool: ${name}` }), isError: true };
+    try {
+      if (tool.executeWithImages) return await tool.executeWithImages(input, options);
+      return { text: await tool.execute(input, options) };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { text: JSON.stringify({ error: msg }), isError: true };
     }
   }
 }
