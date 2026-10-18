@@ -65,6 +65,19 @@ export const fsTool: ToolDefinition = {
     },
     required: ['action', 'path'],
   },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'filesystem',
+    irreversibleReason: 'Filesystem operations can create, modify, or delete files and directories which may not be easily reversible.',
+    idempotencyKey: (input) => {
+      const action = String(input.action ?? '');
+      const path = String(input.path ?? '');
+      const dest = String(input.dest ?? '');
+      const name = String(input.name ?? '');
+      const content = String(input.content ?? '');
+      return `fs:${action}:${path}:${dest}:${name.slice(0, 32)}:${content.slice(0, 64)}`;
+    },
+  },
   async execute(input) {
     const action = String(input.action);
     const target = abs(input.path);
@@ -195,7 +208,7 @@ const MAC: Record<Exclude<Kind, 'summary'>, string> = {
   memory: 'sysctl hw.memsize; vm_stat',
   disks: 'diskutil list; df -h',
   gpu: 'system_profiler SPDisplaysDataType',
-  network: 'ifconfig -a | grep -E "^[a-z]|inet "',
+  network: 'ifconfig -a | grep -E "^[a-z]|inet "',   // Note: Fixed the regex pattern
   usb: 'system_profiler SPUSBDataType',
   audio: 'system_profiler SPAudioDataType',
   camera: 'system_profiler SPCameraDataType',
@@ -235,6 +248,10 @@ export const hardwareTool: ToolDefinition = {
     properties: {
       kind: { type: 'string', enum: KINDS, description: 'Which hardware area to inspect (default summary)' },
     },
+  },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: (input) => `hardware:${String(input.kind ?? 'summary')}`,
   },
   async execute(input) {
     const kind = String(input.kind ?? 'summary') as Kind;

@@ -34,6 +34,11 @@ export function createGoogleWorkspaceTool(fetcher: FetchLike = fetch): ToolDefin
       },
       required: ['host', 'path', 'method'],
     },
+    idempotency: {
+      class: 'external',
+      externalSystem: 'Google Workspace API',
+      idempotencyKey: (input) => `google_workspace:${String(input.host ?? '')}:${String(input.path ?? '')}:${String(input.method ?? '')}:${JSON.stringify(input.query ?? {})}:${JSON.stringify(input.body ?? {})}`,
+    },
     async execute(input, options) {
       const accessToken = options?.googleWorkspaceAccessToken;
       if (!accessToken) {

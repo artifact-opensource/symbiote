@@ -83,6 +83,17 @@ export const ttsTool: ToolDefinition = {
     },
     required: ['text'],
   },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'edge_tts',
+    irreversibleReason: 'TTS generation creates audio files on the local filesystem that persist until explicitly deleted.',
+    idempotencyKey: (input) => {
+      const text = String(input.text ?? '');
+      const voice = String(input.voice ?? 'nova');
+      const speed = input.speed ?? 1.0;
+      return `tts:${text.slice(0, 64)}:${voice}:${speed}`;
+    },
+  },
   async execute(input) {
     const text = input.text as string;
     const voice = (input.voice as string) ?? 'nova';

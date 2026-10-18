@@ -41,6 +41,18 @@ export const execTool: ToolDefinition = {
     },
     required: ['command'],
   },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'shell',
+    irreversibleReason: 'Shell commands can have permanent side effects (file modifications, network calls, etc.)',
+    idempotencyKey: (input) => {
+      // For safety, most exec calls should NOT be idempotent unless explicitly marked
+      // We'll generate a key based on the full command to detect exact duplicates
+      const workdir = input.workdir as string | undefined;
+      const background = input.background as boolean | undefined;
+      return `exec:${String(input.command ?? '')}:${workdir ?? 'cwd'}:${background ?? false}`;
+    },
+  },
   async execute(input, options) {
     const command = input.command as string;
     const workdir = (input.workdir as string) ?? process.cwd();

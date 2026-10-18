@@ -28,6 +28,11 @@ export function createWorkspaceManagementTool(controls: WorkspaceManagementContr
       },
       required: ['action'],
     },
+    idempotency: {
+      class: 'irreversible',
+      irreversibleReason: 'Workspace management creates projects and agent profiles that persist in the workspace registry. Once created, they cannot be removed through this tool.',
+      idempotencyKey: (input) => `workspace_manage:${String(input.action ?? '')}:${String(input.projectId ?? '')}:${String(input.name ?? '')}`,
+    },
     execute: async (input, options) => {
       if (options?.sessionTier !== 'admin') {
         throw new Error('Project and agent creation is only available in admin sessions.');

@@ -1,4 +1,4 @@
-// Symbiote — local SVG composition and validation
+// Symbiote — Builtin tool: image generation
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -103,6 +103,17 @@ export function createImageGenTool(outputDirectory?: string): ToolDefinition {
         filename: { type: 'string', description: 'Optional local output name; path components are removed and .svg is added.' },
       },
       required: ['prompt'],
+    },
+    idempotency: {
+      class: 'reversible_local',
+      reverseDescription: 'To reverse, delete the generated SVG file from the output directory. The original content can be recovered if a backup exists.',
+      idempotencyKey: (input) => {
+        const prompt = String(input.prompt ?? '');
+        const style = String(input.style ?? '');
+        const size = String(input.size ?? '');
+        const filename = String(input.filename ?? '');
+        return `image_gen:${prompt.slice(0, 64)}:${style}:${size}:${filename}`;
+      },
     },
     async execute(input) {
       const prompt = String(input.prompt ?? '').trim();

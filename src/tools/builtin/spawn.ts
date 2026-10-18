@@ -24,6 +24,16 @@ export function createSpawnTool(
       },
       required: ['task'],
     },
+    idempotency: {
+      class: 'external',
+      externalSystem: 'sub_agent_manager',
+      irreversibleReason: 'Spawning a sub-agent creates a new agent session with its own resource allocation and execution context that cannot be automatically reversed.',
+      idempotencyKey: (input) => {
+        const task = String(input.task ?? '');
+        const maxIterations = input.maxIterations ?? 0;
+        return `spawn:${task.slice(0, 64)}:${maxIterations}`;
+      },
+    },
     async execute(input, opts) {
       const task = String(input.task ?? '');
       const maxIterations = input.maxIterations === undefined ? undefined : Number(input.maxIterations);
@@ -79,6 +89,14 @@ export function createSubAgentStatusTool(subAgentManager: SubAgentManager): Tool
         message: { type: 'string', description: 'Steering message (when action="steer")' },
       },
       required: [],
+    },
+    idempotency: {
+      class: 'read',
+      idempotencyKey: (input) => {
+        const action = String(input.action ?? 'list');
+        const sessionId = String(input.sessionId ?? '');
+        return `subagent_status:${action}:${sessionId}`;
+      },
     },
     async execute(input) {
       const action = String(input.action ?? 'list');

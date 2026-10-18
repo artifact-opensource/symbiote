@@ -1,6 +1,4 @@
-// Symbiote — Builtin tool: proactive messaging & social actions
-// Send messages, media, reactions, typing indicators, presence updates.
-// Channel messaging lets the agent participate beyond direct responses.
+// Symbiote — Builtin tool: message management
 
 import type { ToolDefinition } from '../types.js';
 import type { ChannelRegistry } from '../../channels/registry.js';
@@ -62,6 +60,20 @@ export function createMessageTool(registry: ChannelRegistry): ToolDefinition {
       },
       required: ['channel', 'chatId'],
     },
+    idempotency: {
+      class: 'external',
+      externalSystem: 'discord/whatsapp',
+      irreversibleReason: 'Messages sent to external channels cannot be recalled or deleted by the system (except for bot messages on Discord).',
+      idempotencyKey: (input) => {
+        const channel = String(input.channel ?? '');
+        const chatId = String(input.chatId ?? '');
+        const action = String(input.action ?? 'send');
+        const content = String(input.content ?? '');
+        const emoji = String(input.emoji ?? '');
+        const messageId = String(input.messageId ?? '');
+        return `message:${channel}:${chatId}:${action}:${content.slice(0, 64)}:${emoji}:${messageId}`;
+      },
+    },
     async execute(input) {
       const channel = input.channel as string;
       const chatId = input.chatId as string;
@@ -79,7 +91,9 @@ export function createMessageTool(registry: ChannelRegistry): ToolDefinition {
       }
 
       const adapter = registry.get(target.id);
-      if (!adapter) return JSON.stringify({ error: 'Adapter not found' });
+      if (!adapter) {
+        return JSON.stringify({ error: 'Adapter not found' });
+      }
 
       // ── Reaction ──
       if (action === 'react') {
@@ -177,6 +191,11 @@ export function createTypingTool(registry: ChannelRegistry): ToolDefinition {
       },
       required: ['channel', 'chatId'],
     },
+    idempotency: {
+      class: 'reversible_local',
+      reverseDescription: 'Typing indicators are transient and automatically disappear. No reversal needed.',
+      idempotencyKey: (input) => `typing:${String(input.channel ?? '')}:${String(input.chatId ?? '')}:${input.duration ?? 3000}`,
+    },
     async execute(input) {
       const channel = input.channel as string;
       const chatId = input.chatId as string;
@@ -227,6 +246,12 @@ export function createPresenceTool(registry: ChannelRegistry): ToolDefinition {
         },
       },
       required: ['channel', 'chatId', 'state'],
+    },
+    idempotency: {
+      class: 'external',
+      externalSystem: 'whatsapp',
+      irreversibleReason: "Presence updates are external to Symbiote and depend on WhatsApp's server state.",
+      idempotencyKey: (input) => `presence:${String(input.chatId ?? '')}:${String(input.state ?? '')}`,
     },
     async execute(input) {
       const channel = input.channel as string;
@@ -283,6 +308,11 @@ export function createDeleteMessageTool(registry: ChannelRegistry): ToolDefiniti
       },
       required: ['channel', 'chatId', 'messageId'],
     },
+    idempotency: {
+      class: 'irreversible',
+      irreversibleReason: 'Deleting messages permanently removes them from the chat. Cannot be undone.',
+      idempotencyKey: (input) => `delete_message:${String(input.channel ?? '')}:${String(input.chatId ?? '')}:${String(input.messageId ?? '')}`,
+    },
     async execute(input) {
       const channel = input.channel as string;
       const chatId = input.chatId as string;
@@ -332,6 +362,10 @@ export function createMarkReadTool(registry: ChannelRegistry): ToolDefinition {
         },
       },
       required: ['channel', 'chatId', 'messageId'],
+    },
+    idempotency: {
+      class: 'read',
+      idempotencyKey: (input) => `mark_read:${String(input.channel ?? '')}:${String(input.chatId ?? '')}:${String(input.messageId ?? '')}`,
     },
     async execute(input) {
       const channel = input.channel as string;

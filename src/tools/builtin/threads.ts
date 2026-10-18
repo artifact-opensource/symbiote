@@ -1,3 +1,5 @@
+// Symbiote — Builtin tool: threads management
+
 import type { ThreadActor, ThreadManager, ThreadScope } from '../../threads/manager.js';
 import type { ToolDefinition } from '../types.js';
 
@@ -31,6 +33,19 @@ export function createThreadsTool(
         emoji: { type: 'string', description: 'A single emoji reaction.' },
       },
       required: ['action'],
+    },
+    idempotency: {
+      class: 'external',
+      externalSystem: 'threads_manager',
+      irreversibleReason: 'Thread operations can create/modify discussion threads and send notifications to other agents, which cannot be automatically reversed.',
+      idempotencyKey: (input) => {
+        const action = String(input.action ?? '');
+        const threadId = String(input.threadId ?? '');
+        const postId = String(input.postId ?? '');
+        const body = String(input.body ?? '');
+        const title = String(input.title ?? '');
+        return `threads_manage:${action}:${threadId}:${postId}:${title.slice(0, 32)}:${body.slice(0, 64)}`;
+      },
     },
     execute: async (input, options) => {
       const actor = resolveActor(options?.sessionId);

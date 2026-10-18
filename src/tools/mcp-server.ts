@@ -20,6 +20,7 @@ import * as readline from 'node:readline';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { ToolRegistry } from './registry.js';
+import type { ToolDefinition } from './types.js';
 import { readTool } from './builtin/read.js';
 import { writeTool } from './builtin/write.js';
 import { execTool } from './builtin/exec.js';
@@ -64,12 +65,13 @@ let initialized = false;
 const registry = new ToolRegistry();
 
 // Register all builtin tools
-for (const tool of [
+const builtinTools: ToolDefinition[] = [
   readTool, writeTool, execTool, editTool, imageTool,
   processStartTool, processPollTool, processKillTool, processListTool,
   ttsTool, webFetchTool, memorySearchTool, vdbSearchTool, vdbIngestTool, vdbStatsTool,
   combRecallTool, combStageTool, memoryOffloadTool, ...cuaTools, computerUseTool, personaDigestTool, ...adminTools,
-]) {
+];
+for (const tool of builtinTools) {
   registry.register(tool);
 }
 await initializeComputerUseRuntime();

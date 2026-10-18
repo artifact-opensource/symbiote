@@ -1232,6 +1232,35 @@ export class SymbioteGateway {
           },
         }),
         getSessions: () => this.sessionManager.list(),
+        ensureMemorySession: () => {
+          const filename = path.join(this.sessionManager.directory, 'memory.json');
+          if (fs.existsSync(filename) && fs.statSync(filename).size > 0) {
+            const existing = this.sessionManager.load('memory');
+            if (!existing || !Array.isArray(existing.messages)) {
+              throw new Error('The existing memory conversation is invalid and was not modified.');
+            }
+            return {
+              id: existing.id,
+              label: existing.metadata.label ?? 'Memory & Knowledge Base',
+              createdAt: existing.createdAt,
+              updatedAt: existing.updatedAt,
+              messageCount: existing.messages.length,
+            };
+          }
+          const session = this.sessionManager.create('memory', {
+            label: 'Memory & Knowledge Base',
+            provider: this.providerName,
+            model: this.model,
+            sessionKind: 'conversation',
+          });
+          return {
+            id: session.id,
+            label: session.metadata.label,
+            createdAt: session.createdAt,
+            updatedAt: session.updatedAt,
+            messageCount: session.messages.length,
+          };
+        },
         getProjects: (includeArchived) => this.workspaceRegistry.listProjects(includeArchived),
         archiveProject: async (projectId) => {
           const project = this.workspaceRegistry.getProject(projectId);

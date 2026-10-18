@@ -18,6 +18,11 @@ export const writeTool: ToolDefinition = {
     },
     required: ['path', 'content'],
   },
+  idempotency: {
+    class: 'reversible_local',
+    reverseDescription: 'To reverse, delete the file or restore from backup. The original content can be recovered if a backup exists.',
+    idempotencyKey: (input) => `write:${String(input.path ?? '')}:${input.append === true}:${String(input.encoding ?? 'utf8')}:${String(input.content ?? '')}`,
+  },
   async execute(input) {
     const filePath = path.resolve(expandHome(String(input.path ?? '')));
     const content = String(input.content ?? '');

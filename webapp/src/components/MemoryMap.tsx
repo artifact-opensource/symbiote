@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Download, Maximize2, Minus, Plus, Search, X } from 'lucide-react';
+import { Activity, Download, Eye, EyeOff, Maximize2, Minus, Plus, Search, Send, X } from 'lucide-react';
 import type { MemoryDocument, MemoryGraphData, MemoryGraphNode } from '../types';
 import ActivityOrb from './ActivityOrb';
 
@@ -194,7 +194,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function MemoryMap({ request }: { request: MemoryRequest }) {
+function MemoryMap({ request, onSendNode }: { request: MemoryRequest; onSendNode: (node: MemoryGraphNode) => Promise<void> }) {
   const shellRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const graphRef = useRef<GraphNode[]>([]);
@@ -214,6 +214,9 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
   const [refreshing, setRefreshing] = useState(false);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
+  const [legendOpen, setLegendOpen] = useState(true);
+  const [sendingNodeId, setSendingNodeId] = useState<string | null>(null);
+  const [sendError, setSendError] = useState('');
   hoveredIdRef.current = hoveredId;
   selectedIdRef.current = selected?.id ?? null;
 
@@ -388,11 +391,6 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
           context.globalAlpha = 1;
         }
 
-        if (node.id === focusId && transform.scale > 0.45) {
-          context.font = `${node.kind === 'system' ? '600 9px' : '500 8px'} 'Cascadia Code', Consolas, monospace`;
-          context.fillStyle = ink;
-          context.fillText(node.label.slice(0, 42), node.x, node.y - radius - 10);
-        }
       }
       context.restore();
 
@@ -646,7 +644,7 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
                 const bounds = shellRef.current?.getBoundingClientRect();
                 setHoverPosition(node ? {
                   x: Math.min(event.clientX - (bounds?.left ?? 0) + 14, Math.max(8, (bounds?.width ?? 300) - 290)),
-                  y: Math.min(event.clientY - (bounds?.top ?? 0) + 14, Math.max(8, (bounds?.height ?? 180) - 160)),
+                  y: Math.min(event.clientY - (bounds?.top ?? 0) + 14, Math.max(8, (bounds?.height ?? 180) - 245)),
                 } : null);
                 if (hoveredIdRef.current !== nextHoveredId) {
                   hoveredIdRef.current = nextHoveredId;
@@ -683,23 +681,36 @@ function MemoryMap({ request }: { request: MemoryRequest }) {
           />
           {data?.nodes.length ? (
             <>
-              <div className="memory-map-legend"><span><i className="legend-dot legend-docs" />Knowledge</span><span><i className="legend-dot legend-sessions" />Sessions</span><span><i className="legend-dot legend-projects" />Projects</span><span><i className="legend-vdb" />.vdb storage</span><span><i className="legend-link" />Similarity</span></div>
+              <button className="memory-legend-toggle" type="button" onClick={() => setLegendOpen(open => !open)} aria-expanded={legendOpen} aria-label={legendOpen ? 'Hide graph legend' : 'Show graph legend'} title={legendOpen ? 'Hide legend' : 'Show legend'}>
+                {legendOpen ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+              {legendOpen && <div className="memory-map-legend"><span><i className="legend-dot legend-docs" />Knowledge</span><span><i className="legend-dot legend-sessions" />Sessions</span><span><i className="legend-dot legend-projects" />Projects</span><span><i className="legend-vdb" />.vdb storage</span><span><i className="legend-link" />Similarity</span></div>}
               <div className="memory-zoom-controls">
                 <button type="button" onClick={() => updateZoom(1.2)} aria-label="Zoom in"><Plus size={15} /></button>
                 <button type="button" onClick={() => updateZoom(0.84)} aria-label="Zoom out"><Minus size={15} /></button>
                 <button type="button" onClick={resetMap} aria-label="Fit map to view"><Maximize2 size={14} /></button>
               </div>
-              <div className="memory-map-side-label memory-map-left">KNOWLEDGE</div>
-              <div className="memory-map-side-label memory-map-right">SESSIONS</div>
-              <div className="memory-map-side-label memory-map-bottom">PROJECT MEMORY</div>
             </>
           ) : null}
           {hoveredNode && hoverPosition && (
             <aside className="memory-hover-card" style={{ left: hoverPosition.x, top: hoverPosition.y }} aria-live="polite">
               <strong>{hoveredNode.label}</strong>
-              <span>{hoveredNode.source ?? hoveredNode.kind} · {hoveredNode.side}</span>
+              <span>{hoveredNode.source ?? hoveredNode.kind} · {hoveredNode.side} · {hoveredNode.document?.storage ?? 'graph node'}</span>
               {hoveredNode.document?.excerpt && <p>{hoveredNode.document.excerpt}</p>}
-              <small>{hoveredNode.kind === 'shard' ? `${hoveredDocumentCount} documents · ` : ''}{hoveredSimilarCount} connections{hoveredNode.document?.timestamp ? ` · ${new Date(hoveredNode.document.timestamp).toLocaleDateString()}` : ''}</small>
+              <small>{hoveredNode.kind === 'shard' ? `${hoveredDocumentCount} documents · ` : ''}{hoveredSimilarCount} connections{hoveredNode.document?.role ? ` · ${hoveredNode.document.role}` : ''}{hoveredNode.document?.timestamp ? ` · ${new Date(hoveredNode.document.timestamp).toLocaleString()}` : ''}{hoveredNode.document?.sessionId ? ` · session ${hoveredNode.document.sessionId}` : ''}</small>
+              {hoveredNode.document && <button type="button" className="memory-node-send" disabled={sendingNodeId === hoveredNode.document.id} onClick={async event => {
+                event.stopPropagation();
+                setSendingNodeId(hoveredNode.document!.id);
+                setSendError('');
+                try {
+                  await onSendNode(hoveredNode.document!);
+                } catch (failure) {
+                  setSendError(failure instanceof Error ? failure.message : 'Memory context could not be sent.');
+                } finally {
+                  setSendingNodeId(null);
+                }
+              }}><Send size={12} />{sendingNodeId === hoveredNode.document.id ? 'Sending…' : 'Ask agent about this'}</button>}
+              {sendError && <small className="memory-node-error" role="alert">{sendError}</small>}
             </aside>
           )}
         </div>

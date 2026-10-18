@@ -1,3 +1,5 @@
+// Symbiote — Builtin tool: cron management
+
 import type { CronManager, CronSchedule, UpdateCronJobInput } from '../../cron/manager.js';
 import type { ToolDefinition } from '../types.js';
 
@@ -40,6 +42,17 @@ export function createCronManageTool(manager: CronManager): ToolDefinition {
         defaultPrompt: { type: 'string', description: 'Replacement dedicated system instructions for the autonomous default agent.' },
       },
       required: ['action'],
+    },
+    idempotency: {
+      class: 'reversible_local',
+      reverseDescription: 'To reverse cron changes, use update/delete actions. Cron jobs are stored in the scheduler state file.',
+      idempotencyKey: (input) => {
+        const action = String(input.action ?? '');
+        const id = String(input.id ?? '');
+        const name = String(input.name ?? '');
+        const prompt = String(input.prompt ?? '');
+        return `cron_manage:${action}:${id}:${name}:${prompt.slice(0, 64)}`;
+      },
     },
     execute: async input => {
       switch (input.action) {

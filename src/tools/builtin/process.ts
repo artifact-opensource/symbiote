@@ -142,6 +142,12 @@ export const processStartTool: ToolDefinition = {
     },
     required: ['command'],
   },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'shell',
+    irreversibleReason: 'Starting a background process creates a new OS process that cannot be undone by re-running the same command.',
+    idempotencyKey: (input) => `process_start:${String(input.command ?? '')}:${input.workdir ?? 'cwd'}`,
+  },
   async execute(input, options) {
     const mgr = getProcessManager();
     const p = mgr.start(input.command as string, input.workdir as string | undefined, options?.sessionId);
@@ -159,6 +165,10 @@ export const processPollTool: ToolDefinition = {
       timeout: { type: 'number', description: 'Max wait time in ms (optional)' },
     },
     required: ['processId'],
+  },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: (input) => `process_poll:${String(input.processId ?? '')}:${input.timeout ?? 0}`,
   },
   async execute(input, options) {
     const mgr = getProcessManager();
@@ -192,6 +202,11 @@ export const processKillTool: ToolDefinition = {
     },
     required: ['processId'],
   },
+  idempotency: {
+    class: 'irreversible',
+    irreversibleReason: 'A killed process cannot be restored; the command must be started again as a new process.',
+    idempotencyKey: (input) => `process_kill:${String(input.processId ?? '')}`,
+  },
   async execute(input, options) {
     const mgr = getProcessManager();
     const ok = mgr.kill(input.processId as string, options?.sessionId);
@@ -203,6 +218,10 @@ export const processListTool: ToolDefinition = {
   name: 'process_list',
   description: 'List all background processes.',
   parameters: { type: 'object', properties: {}, required: [] },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: () => 'process_list',
+  },
   async execute(_input, options) {
     const mgr = getProcessManager();
     const procs = mgr.list(options?.sessionId);

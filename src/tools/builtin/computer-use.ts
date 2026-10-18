@@ -1,3 +1,5 @@
+// Symbiote — Builtin tool: computer use (desktop control via CUA Driver)
+
 import type { CuaDriverLike } from '@trycua/cua-driver';
 import type { ToolDefinition, ToolImage, ToolParameter } from '../types.js';
 
@@ -121,6 +123,15 @@ export function createComputerUseTool(getRuntime: () => ComputerUseRuntimeState)
         arguments: argumentsParameter,
       },
       required: ['action', 'arguments'],
+    },
+    idempotency: {
+      class: 'irreversible',
+      irreversibleReason: 'Desktop control actions can have permanent side effects on the host system (file operations, process control, UI state changes) that cannot be automatically reversed.',
+      idempotencyKey: (input) => {
+        const action = String(input.action ?? '');
+        const args = JSON.stringify(input.arguments ?? {});
+        return `computer_use:${action}:${args.slice(0, 128)}`;
+      },
     },
     execute: async (input, options) => {
       const output = await executeComputerUse(input, options, getRuntime());

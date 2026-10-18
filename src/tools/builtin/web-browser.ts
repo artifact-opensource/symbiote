@@ -156,6 +156,11 @@ export const webBrowseTool: ToolDefinition = {
     },
     required: ['url'],
   },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    idempotencyKey: (input) => `web_browse:${String(input.url ?? '')}:${String(input.profile ?? 'default')}`,
+  },
   async execute(input) {
     const result = await rpc('browse', { url: normalizeBrowserUrl(input.url as string), profile: input.profile as string, timeout: 30_000 });
     return '**' + result.title + '**\n' + result.url + '\n\n' + result.text;
@@ -171,6 +176,11 @@ export const webClickTool: ToolDefinition = {
       selector: { type: 'string', description: 'CSS selector or text to match (e.g. "button.submit" or "text=Sign In")' },
     },
     required: ['selector'],
+  },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    idempotencyKey: (input) => `web_click:${String(input.selector ?? '')}`,
   },
   async execute(input) {
     const result = await rpc('click', { selector: input.selector as string });
@@ -189,6 +199,11 @@ export const webTypeTool: ToolDefinition = {
       clear: { type: 'boolean', description: 'Clear field before typing (default: true)' },
     },
     required: ['selector', 'text'],
+  },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    idempotencyKey: (input) => `web_type:${String(input.selector ?? '')}:${String(input.text ?? '')}:${String(input.clear ?? true)}`,
   },
   async execute(input) {
     const result = await rpc('type', {
@@ -209,6 +224,11 @@ export const webScreenshotTool: ToolDefinition = {
       full_page: { type: 'boolean', description: 'Capture full page or just viewport (default: viewport)' },
     },
   },
+  idempotency: {
+    class: 'reversible_local',
+    reverseDescription: 'Delete the saved screenshot file to reverse.',
+    idempotencyKey: (input) => `web_screenshot:${String(input.full_page === true)}`,
+  },
   async execute(input) {
     const result = await rpc('screenshot', { full_page: input.full_page === true });
     return 'Screenshot saved: ' + result.path + ' (' + result.width + 'x' + result.height + ')';
@@ -223,6 +243,10 @@ export const webExtractTool: ToolDefinition = {
     properties: {
       selector: { type: 'string', description: 'CSS selector to extract from (omit for full page text)' },
     },
+  },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: (input) => `web_extract:${String(input.selector ?? 'full_page')}`,
   },
   async execute(input) {
     const result = await rpc('extract', { selector: input.selector as string });
@@ -241,6 +265,11 @@ export const webScrollTool: ToolDefinition = {
       amount: { type: 'number', description: 'Pixels to scroll (default: 500)' },
     },
     required: ['direction'],
+  },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    idempotencyKey: (input) => `web_scroll:${String(input.direction ?? '')}:${String(input.selector ?? '')}:${input.amount ?? 500}`,
   },
   async execute(input) {
     const result = await rpc('scroll', {
@@ -262,6 +291,10 @@ export const webWaitTool: ToolDefinition = {
       timeout: { type: 'number', description: 'Max wait time in ms (default: 10000)' },
     },
   },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: (input) => `web_wait:${String(input.selector ?? '')}:${input.timeout ?? 10000}`,
+  },
   async execute(input) {
     const result = await rpc('wait', {
       selector: input.selector as string,
@@ -281,6 +314,11 @@ export const webSessionTool: ToolDefinition = {
     },
     required: ['profile'],
   },
+  idempotency: {
+    class: 'reversible_local',
+    reverseDescription: 'Switch back to a previous profile to reverse.',
+    idempotencyKey: (input) => `web_session:${String(input.profile ?? '')}`,
+  },
   async execute(input) {
     const result = await rpc('session', { profile: input.profile as string });
     return 'Switched to profile: ' + result.profile;
@@ -295,6 +333,11 @@ export const webTabOpenTool: ToolDefinition = {
     properties: {
       url: { type: 'string', description: 'URL to open in new tab (optional)' },
     },
+  },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    idempotencyKey: (input) => `web_tab_open:${String(input.url ?? '')}`,
   },
   async execute(input) {
     const result = await rpc('tab_open', { url: input.url as string });
@@ -312,6 +355,11 @@ export const webTabSwitchTool: ToolDefinition = {
     },
     required: ['index'],
   },
+  idempotency: {
+    class: 'reversible_local',
+    reverseDescription: 'Switch back to the previous tab index to reverse.',
+    idempotencyKey: (input) => `web_tab_switch:${input.index ?? 0}`,
+  },
   async execute(input) {
     const result = await rpc('tab_switch', { index: input.index as number });
     return 'Switched to tab ' + input.index + ': **' + result.title + '** (' + result.url + ')';
@@ -325,6 +373,12 @@ export const webTabCloseTool: ToolDefinition = {
     type: 'object',
     properties: {},
   },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    irreversibleReason: 'Closing a tab is irreversible within the browser session; reopened tabs are not restored by this tool.',
+    idempotencyKey: () => 'web_tab_close',
+  },
   async execute() {
     const result = await rpc('tab_close', {});
     return 'Tab closed. ' + result.tab_count + ' tabs remaining.';
@@ -337,6 +391,10 @@ export const webTabsTool: ToolDefinition = {
   parameters: {
     type: 'object',
     properties: {},
+  },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: () => 'web_tabs',
   },
   async execute() {
     const result = await rpc('tabs', {});
@@ -357,6 +415,11 @@ export const webDownloadTool: ToolDefinition = {
       filename: { type: 'string', description: 'Save as filename (optional)' },
     },
   },
+  idempotency: {
+    class: 'reversible_local',
+    reverseDescription: 'Delete the downloaded file from ~/.symbiote/downloads/ to reverse.',
+    idempotencyKey: (input) => `web_download:${String(input.url ?? '')}:${String(input.filename ?? '')}`,
+  },
   async execute(input) {
     const result = await rpc('download', { url: input.url as string, filename: input.filename as string });
     return 'Downloaded: ' + result.path + ' (' + result.size + ' bytes)';
@@ -374,6 +437,11 @@ export const webUploadTool: ToolDefinition = {
     },
     required: ['selector', 'file_path'],
   },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    idempotencyKey: (input) => `web_upload:${String(input.selector ?? '')}:${String(input.file_path ?? '')}`,
+  },
   async execute(input) {
     const result = await rpc('upload', {
       selector: input.selector as string,
@@ -387,6 +455,10 @@ export const cuaScreenshotTool: ToolDefinition = {
   name: 'cua_screenshot',
   description: 'Capture the active browser viewport for visual computer-use inspection. This controls the browser, not the host desktop.',
   parameters: { type: 'object', properties: {} },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: () => 'cua_screenshot',
+  },
   async execute() {
     return JSON.stringify(await rpc('cua_screenshot'));
   },
@@ -405,6 +477,11 @@ export const cuaClickTool: ToolDefinition = {
     },
     required: ['x', 'y'],
   },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    idempotencyKey: (input) => `cua_click:${input.x ?? 0}:${input.y ?? 0}:${String(input.button ?? 'left')}:${input.click_count ?? 1}`,
+  },
   async execute(input) {
     return JSON.stringify(await rpc('cua_click', input));
   },
@@ -421,6 +498,11 @@ export const cuaMoveTool: ToolDefinition = {
     },
     required: ['x', 'y'],
   },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    idempotencyKey: (input) => `cua_move:${input.x ?? 0}:${input.y ?? 0}`,
+  },
   async execute(input) {
     return JSON.stringify(await rpc('cua_move', input));
   },
@@ -434,6 +516,11 @@ export const cuaTypeTool: ToolDefinition = {
     properties: { text: { type: 'string', description: 'Text to type into the focused control' } },
     required: ['text'],
   },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    idempotencyKey: (input) => `cua_type:${String(input.text ?? '')}`,
+  },
   async execute(input) {
     return JSON.stringify(await rpc('cua_type', input));
   },
@@ -446,6 +533,11 @@ export const cuaPressTool: ToolDefinition = {
     type: 'object',
     properties: { key: { type: 'string', description: 'Playwright key name or key chord' } },
     required: ['key'],
+  },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    idempotencyKey: (input) => `cua_press:${String(input.key ?? '')}`,
   },
   async execute(input) {
     return JSON.stringify(await rpc('cua_press', input));
@@ -464,6 +556,11 @@ export const cuaScrollTool: ToolDefinition = {
       delta_y: { type: 'number', description: 'Vertical wheel delta' },
     },
     required: ['x', 'y', 'delta_y'],
+  },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'target website via Playwright browser',
+    idempotencyKey: (input) => `cua_scroll:${input.x ?? 0}:${input.y ?? 0}:${input.delta_x ?? 0}:${input.delta_y ?? 0}`,
   },
   async execute(input) {
     return JSON.stringify(await rpc('cua_scroll', input));

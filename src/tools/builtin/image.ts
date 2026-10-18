@@ -188,6 +188,17 @@ export const imageTool: ToolDefinition = {
     },
     required: ['image'],
   },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'copilot',
+    irreversibleReason: 'Vision analysis calls are external to Symbiote and depend on external service availability and token status.',
+    idempotencyKey: (input) => {
+      const imagePath = String(input.image ?? '');
+      const prompt = String(input.prompt ?? '');
+      // Use a hash of the image path + prompt for idempotency
+      return `image:${imagePath}:${prompt.slice(0, 128)}`;
+    },
+  },
   async execute(input) {
     const imagePath = input.image as string;
     const prompt = (input.prompt as string) ?? 'Describe this image in detail.';

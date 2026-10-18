@@ -81,6 +81,10 @@ export const vdbSearchTool: ToolDefinition = {
     },
     required: ['query'],
   },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: (input) => `memory_recall:${String(input.query ?? '')}:${input.k ?? 5}:${String(input.source ?? '')}`,
+  },
   async execute(input) {
     const query = String(input.query ?? '');
     const k = Number(input.k ?? 5);
@@ -118,6 +122,10 @@ export const vdbIngestTool: ToolDefinition = {
     properties: {},
     required: [],
   },
+  idempotency: {
+    class: 'irreversible',
+    irreversibleReason: 'Ingestion writes conversation history into the persistent VDB index and durable archive. Once ingested, records cannot be selectively removed without manual archive deletion.',
+  },
   async execute() {
     const sessionDirs = getSessionDirectories();
     if (!sessionDirs.some(dir => fs.existsSync(dir))) {
@@ -144,6 +152,10 @@ export const vdbStatsTool: ToolDefinition = {
     type: 'object',
     properties: {},
     required: [],
+  },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: () => 'memory_stats',
   },
   async execute() {
     const db = getVDB();

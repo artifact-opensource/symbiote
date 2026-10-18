@@ -13,6 +13,10 @@ export const webFetchTool: ToolDefinition = {
     },
     required: ['url'],
   },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: (input) => `web_fetch:${String(input.url ?? '')}:${input.maxChars ?? 50000}`,
+  },
   async execute(input) {
     const url = input.url as string;
     const maxChars = (input.maxChars as number) ?? 50_000;

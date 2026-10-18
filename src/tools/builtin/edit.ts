@@ -17,6 +17,11 @@ export const editTool: ToolDefinition = {
     },
     required: ['path', 'oldText', 'newText'],
   },
+  idempotency: {
+    class: 'reversible_local',
+    reverseDescription: 'To reverse, re-edit the file back to its original content or restore from backup.',
+    idempotencyKey: (input) => `edit:${String(input.path ?? '')}:${String(input.oldText ?? '')}:${String(input.newText ?? '')}`,
+  },
   async execute(input) {
     const filePath = path.resolve(expandHome(String(input.path ?? '')));
     const oldText = input.oldText as string;

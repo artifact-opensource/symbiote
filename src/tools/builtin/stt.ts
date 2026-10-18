@@ -1,3 +1,5 @@
+// Symbiote — Builtin tool: STT (Speech-to-Text)
+
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolDefinition } from '../types.js';
@@ -13,6 +15,12 @@ export const sttTool: ToolDefinition = {
       audio_path: { type: 'string', description: 'Path to the local audio file to transcribe' },
     },
     required: ['audio_path'],
+  },
+  idempotency: {
+    class: 'external',
+    externalSystem: 'voice_runtime',
+    irreversibleReason: 'Speech transcription calls an external voice processing runtime that may produce different results on different runs.',
+    idempotencyKey: (input) => `stt:${String(input.audio_path ?? '')}`,
   },
   async execute(input) {
     const audioPath = typeof input.audio_path === 'string' ? input.audio_path.trim() : '';

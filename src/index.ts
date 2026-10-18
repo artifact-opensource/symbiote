@@ -25,6 +25,7 @@ import { ollamaProvider } from './providers/ollama.js';
 import { xaiProvider } from './providers/xai.js';
 import type { Provider, ProviderConfig } from './providers/types.js';
 import { ToolRegistry } from './tools/registry.js';
+import type { ToolDefinition } from './tools/types.js';
 import { readTool } from './tools/builtin/read.js';
 import { writeTool } from './tools/builtin/write.js';
 import { execTool } from './tools/builtin/exec.js';
@@ -113,7 +114,8 @@ async function main() {
 
   // Setup tools
   const registry = new ToolRegistry();
-  for (const tool of [readTool, writeTool, editTool, execTool, imageTool, processStartTool, processPollTool, processKillTool, processListTool, ttsTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool, memoryOffloadTool, todoTool, personaDigestTool, computerUseTool]) {
+  const cliTools: ToolDefinition[] = [readTool, writeTool, editTool, execTool, imageTool, processStartTool, processPollTool, processKillTool, processListTool, ttsTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool, memoryOffloadTool, todoTool, personaDigestTool, computerUseTool];
+  for (const tool of cliTools) {
     registry.register(tool);
   }
   for (const tool of [vdbSearchTool, vdbIngestTool, vdbStatsTool]) registry.register(tool);

@@ -30,6 +30,21 @@ export function createWorkspaceTaskTool(controls: WorkspaceTaskControls): ToolDe
       },
       required: ['action'],
     },
+    idempotency: {
+      class: 'external',
+      externalSystem: 'workspace_tasks',
+      irreversibleReason: 'Workspace task operations can modify task execution states and project plans, which may not be easily reversible.',
+      idempotencyKey: (input) => {
+        const action = String(input.action ?? '');
+        const runId = String(input.runId ?? '');
+        const message = String(input.message ?? '');
+        const taskId = String(input.taskId ?? '');
+        const title = String(input.title ?? '');
+        const description = String(input.description ?? '');
+        const status = String(input.status ?? '');
+        return `workspace_tasks:${action}:${runId}:${message.slice(0, 64)}:${taskId}:${title.slice(0, 32)}:${description.slice(0, 64)}:${status}`;
+      },
+    },
     execute: async (input, options) => {
       const action = input.action;
       if (action === 'list') return JSON.stringify(controls.listRuns(), null, 2);

@@ -27,12 +27,11 @@ const ProjectsPanel = lazy(() => import('./components/ProjectsPanel'));
 const NAVIGATION: { id: ViewId; label: string; icon: typeof LayoutDashboard; group: string }[] = [
   { id: 'workspace', label: 'Workspace', icon: LayoutDashboard, group: 'Work' },
   { id: 'runs', label: 'Tasks', icon: Activity, group: 'Work' },
-  { id: 'chat', label: 'Conversations', icon: MessageSquare, group: 'Work' },
   { id: 'browser', label: 'Browser', icon: Globe, group: 'Work' },
-  { id: 'ide', label: 'Agent IDE', icon: TerminalSquare, group: 'Work' },
+  { id: 'ide', label: 'IDE', icon: TerminalSquare, group: 'Work' },
   { id: 'memory', label: 'Memory', icon: Brain, group: 'Work' },
   { id: 'games', label: 'Zen', icon: Leaf, group: 'Play' },
-  { id: 'operations', label: 'Operations', icon: Activity, group: 'Runtime' },
+  { id: 'operations', label: 'Health', icon: Activity, group: 'Runtime' },
   { id: 'tools', label: 'Tool registry', icon: Wrench, group: 'Runtime' },
   { id: 'integrations', label: 'Integrations', icon: Network, group: 'Runtime' },
   { id: 'settings', label: 'Configuration', icon: Settings2, group: 'Runtime' },
@@ -1812,6 +1811,41 @@ export default function App() {
     }
   };
 
+  const sendMemoryNode = async (node: import('./types').MemoryGraphNode) => {
+    if (sending || activeTurnSessionId.current) throw new Error('Wait for the current agent turn to finish before sending memory context.');
+    const session = await api<SessionSummary>('/api/sessions/memory/ensure', { method: 'POST' });
+    const metadata = {
+      id: node.id,
+      label: node.label,
+      source: node.source,
+      storage: node.storage,
+      side: node.side,
+      role: node.role,
+      timestamp: node.timestamp,
+      sessionId: node.sessionId,
+      excerpt: node.excerpt,
+    };
+    const text = `Please inspect this memory graph node and use its metadata to answer my memory or knowledge-base question:\n\n${JSON.stringify(metadata, null, 2)}`;
+    activeTurnSessionId.current = session.id;
+    setSending(true);
+    setError('');
+    try {
+      const outcome = await streamApi<{ text: string }>('/api/chat', { text, sessionId: session.id }, () => {});
+      const [savedMessages, savedSessions] = await Promise.all([
+        api<ChatMessage[]>(`/api/sessions/${encodeURIComponent(session.id)}/messages`),
+        api<SessionSummary[]>('/api/sessions'),
+      ]);
+      setSessions(savedSessions);
+      setActiveSessionId(session.id);
+      setMessages(savedMessages);
+      setView('chat');
+      if (!outcome.complete) throw new Error('The memory conversation ended before the agent completed its response.');
+    } finally {
+      activeTurnSessionId.current = null;
+      setSending(false);
+    }
+  };
+
   const interruptChat = async () => {
     const sessionId = activeTurnSessionId.current;
     if (!sessionId || !sending) return;
@@ -1950,7 +1984,7 @@ export default function App() {
           {['Work', 'Play', 'Runtime'].map(group => (
             <div className="nav-group" key={group}>
               <div className="nav-label">{group}</div>
-              {NAVIGATION.filter(item => item.group === group).map(item => {
+              {NAVIGATION.filter(item => item.group === group && item.id !== 'runs').map(item => {
                 const Icon = item.icon;
                 return (
                   <button
@@ -2002,7 +2036,7 @@ export default function App() {
         <header className="topbar">
           <div className="topbar-left">
             <button className="icon-button mobile-menu" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation"><Menu size={19} /></button>
-            <div className="breadcrumb"><span className="breadcrumb-divider">/</span><strong>{currentNavigation.id}</strong></div>
+            <div className="breadcrumb"><span className="breadcrumb-divider">/</span><strong>{view === 'chat' ? 'Conversation' : currentNavigation.label}</strong></div>
           </div>
           <div className="topbar-right">
             {isDesktopApp && <button className="icon-button utility-button" onClick={() => void window.symbioteDesktop?.openMini()} aria-label="Open floating mini chat" title="Open floating mini chat"><Minimize2 size={16} /></button>}
@@ -2110,6 +2144,7 @@ export default function App() {
                   onArchive={archiveRun}
                   onRestore={restoreRun}
                   onOpenSession={openRunSession}
+                  request={api}
                 />
               )}
               {view === 'agents' && (
@@ -2136,7 +2171,7 @@ export default function App() {
                 />
               )}
               {view === 'browser' && <BrowserView />}
-              {view === 'memory' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading the memory map" loading /><span>Loading memory map…</span></div>}><MemoryMap request={api} /></Suspense>}
+              {view === 'memory' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading the memory map" loading /><span>Loading memory map…</span></div>}><MemoryMap request={api} onSendNode={sendMemoryNode} /></Suspense>}
               {view === 'integrations' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading integrations" loading /><span>Loading integrations…</span></div>}><IntegrationsView grant={googleWorkspaceGrant} onGrantChange={setGoogleWorkspaceGrant} request={api} cloudStatus={cloudProviderStatus} onCloudStatusChange={(provider, configured) => setCloudProviderStatus(previous => ({ ...previous, [provider]: configured }))} /></Suspense>}
               {view === 'operations' && (
                 <OperationsView
@@ -2166,6 +2201,7 @@ export default function App() {
         openThreadRequest={workspaceThreadOpenRequest}
         threadToOpen={threadToOpen}
         onOpenIDE={() => navigate('ide')}
+        onOpenTasks={() => navigate('runs')}
         projects={projects}
         profiles={workspaceAgents}
         subagents={agents}
@@ -2378,23 +2414,23 @@ function OverviewView(props: {
         }
       />
 
-      <div className="workspace-context surface-card">
-        <div className="workspace-context-project">
-          <span className="workspace-context-icon"><TerminalSquare size={17} /></span>
-          <span><span className="eyebrow">ACTIVE PROJECT DIRECTORY</span><code title={workspacePath}>{workspacePath}</code></span>
-        </div>
-        <div className="workspace-context-stats">
-          <button onClick={() => onNavigate('runs')}><strong>{activeRuns}</strong><span>Active runs</span></button>
-          <button onClick={() => onNavigate('agents')}><strong>{activeAgents}</strong><span>Active subagents</span></button>
-          <button onClick={() => onNavigate('workspace')}><strong>{projects.length}</strong><span>Active projects</span></button>
-        </div>
-      </div>
       <section className="overview-banner">
         <div className="banner-orbit orbit-one" /><div className="banner-orbit orbit-two" />
+        <div className="workspace-context workspace-context-hero">
+          <div className="workspace-context-project">
+            <span className="workspace-context-icon"><TerminalSquare size={17} /></span>
+            <span><span className="eyebrow">ACTIVE PROJECT DIRECTORY</span><code title={workspacePath}>{workspacePath}</code></span>
+          </div>
+          <div className="workspace-context-stats">
+            <button onClick={() => onNavigate('runs')}><strong>{activeRuns}</strong><span>Active runs</span></button>
+            <button onClick={() => onNavigate('agents')}><strong>{activeAgents}</strong><span>Active subagents</span></button>
+            <button onClick={() => onNavigate('workspace')}><strong>{projects.length}</strong><span>Active projects</span></button>
+          </div>
+        </div>
         <div className="banner-copy">
           {!status && <p>Start the Symbiote gateway to bring your control room online.</p>}
           {status && <HeroTaskForm sessionId={activeSessionId} onStart={onStartRun} starting={startingRun} onNavigate={onNavigate} />}
-          <button className="banner-link" onClick={() => onNavigate('operations')}>View runtime details <ArrowRight size={15} /></button>
+          <button className="banner-link" onClick={() => onNavigate('operations')}>View system health <ArrowRight size={15} /></button>
         </div>
         <WorkspaceGraph
           sessions={sessions}
@@ -2510,7 +2546,7 @@ function OverviewView(props: {
       <section className="surface-card channel-card">
         <div className="section-heading">
           <div><div className="eyebrow">CONNECTED SURFACES</div><h2>Channels</h2></div>
-          <button className="text-button" onClick={() => onNavigate('operations')}>Operations <ArrowUpRight size={14} /></button>
+          <button className="text-button" onClick={() => onNavigate('operations')}>Health <ArrowUpRight size={14} /></button>
         </div>
         {channels.length ? (
           <div className="channel-grid">
@@ -2876,7 +2912,7 @@ function RunStatus({ status }: { status: WorkspaceRun['status'] }) {
   return <span className={`run-status run-status-${status}`}><Icon size={13} />{status}</span>;
 }
 
-function RunsView({ runs, agents, onStop, onRestart, onGuide, onArchive, onRestore, onOpenSession }: {
+function RunsView({ runs, agents, onStop, onRestart, onGuide, onArchive, onRestore, onOpenSession, request }: {
   runs: WorkspaceRun[];
   agents: WorkspaceAgent[];
   onStop: (id: string) => void;
@@ -2885,6 +2921,7 @@ function RunsView({ runs, agents, onStop, onRestart, onGuide, onArchive, onResto
   onArchive: (id: string) => void;
   onRestore: (id: string) => void;
   onOpenSession: (sessionId: string) => void;
+  request: typeof api;
 }) {
   const [showArchived, setShowArchived] = useState(false);
   const archivedRuns = runs.filter(run => run.archivedAt);
@@ -2915,6 +2952,10 @@ function RunsView({ runs, agents, onStop, onRestart, onGuide, onArchive, onResto
           </section>
         ))}
       </div>
+      <section className="surface-card task-cron-panel">
+        <div className="section-heading"><div><div className="eyebrow">SCHEDULED AUTONOMY</div><h2>Cron jobs</h2></div></div>
+        <CronPanel request={request} />
+      </section>
       {showArchived && <section className="task-lane task-lane-archived" aria-label="Archived task runs">
         <header className="task-lane-heading"><div><h2>Archived</h2><p>Hidden from the active board; restore any run when needed.</p></div><span>{archivedRuns.length}</span></header>
         {archivedRuns.length ? archivedRuns.map(run => <TaskCard key={run.id} run={run} runAgents={agents.filter(agent => agent.parentSessionId === run.sessionId)} onStop={onStop} onRestart={onRestart} onGuide={onGuide} onRestore={onRestore} onOpenSession={onOpenSession} />) : <div className="task-lane-empty">No archived runs</div>}
@@ -3002,13 +3043,14 @@ function TaskCard({ run, runAgents, onStop, onRestart, onGuide, onArchive, onRes
   );
 }
 
-function WorkspaceDrawer({ openRequest, projectOpenRequest, projectToOpen, openThreadRequest, threadToOpen, onOpenIDE, projects, profiles, subagents, selectedProjectId, selectedAgentId, onSelectProject, onSelectAgent, onCreateProject, onCreateAgent, onOpenProfile, onOpenSubagent, onArchiveSubagent, onRestoreProject, onArchiveProject, onDeleteProject, onProjectUpdated, unreadThreadCount, onFailure, request }: {
+function WorkspaceDrawer({ openRequest, projectOpenRequest, projectToOpen, openThreadRequest, threadToOpen, onOpenIDE, onOpenTasks, projects, profiles, subagents, selectedProjectId, selectedAgentId, onSelectProject, onSelectAgent, onCreateProject, onCreateAgent, onOpenProfile, onOpenSubagent, onArchiveSubagent, onRestoreProject, onArchiveProject, onDeleteProject, onProjectUpdated, unreadThreadCount, onFailure, request }: {
   openRequest: number;
   projectOpenRequest: number;
   projectToOpen: string;
   openThreadRequest: number;
   threadToOpen: string;
   onOpenIDE: () => void;
+  onOpenTasks: () => void;
   projects: WorkspaceProject[];
   profiles: AgentProfile[];
   subagents: WorkspaceAgent[];
@@ -3029,7 +3071,7 @@ function WorkspaceDrawer({ openRequest, projectOpenRequest, projectToOpen, openT
   onFailure: (failure: unknown) => void;
   request: typeof api;
 }) {
-  const [section, setSection] = useState<'agents' | 'projects' | 'cron' | 'threads' | null>(null);
+  const [section, setSection] = useState<'agents' | 'projects' | 'threads' | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [projectName, setProjectName] = useState('');
   const [agentName, setAgentName] = useState('');
@@ -3134,18 +3176,18 @@ function WorkspaceDrawer({ openRequest, projectOpenRequest, projectToOpen, openT
   };
   return (
     <>
-      <aside className="workspace-rail" aria-label="Agents and projects">
+      <aside className="workspace-rail" aria-label="Agents, projects, tasks and threads">
         <button type="button" className={section === 'agents' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'agents' ? null : 'agents')} aria-label="Open agents" aria-expanded={section === 'agents'} title="Agents"><Users size={17} /></button>
         <button type="button" className={section === 'projects' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'projects' ? null : 'projects')} aria-label="Open projects" aria-expanded={section === 'projects'} title="Projects"><FolderOpen size={17} /></button>
-        <button type="button" className={section === 'cron' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'cron' ? null : 'cron')} aria-label="Open cron jobs and reminders" aria-expanded={section === 'cron'} title="Cron and reminders"><Clock3 size={17} /></button>
+        <button type="button" className="workspace-rail-button" onClick={() => { setSection(null); onOpenTasks(); }} aria-label="Open task board and scheduled jobs" title="Tasks and scheduled jobs"><Activity size={17} /></button>
         <button type="button" className={section === 'threads' ? 'workspace-rail-button rail-active' : 'workspace-rail-button'} onClick={() => setSection(current => current === 'threads' ? null : 'threads')} aria-label={`Open agent collaboration threads${unreadThreadCount ? `, ${unreadThreadCount} unread help requests` : ''}`} aria-expanded={section === 'threads'} title="Agent threads"><MessagesSquare size={17} />{unreadThreadCount > 0 && <span className="workspace-rail-unread-dot" aria-label={`${unreadThreadCount} unread help requests`} />}</button>
       </aside>
-      <section className={`workspace-drawer${section === 'cron' || section === 'threads' ? ' workspace-drawer-wide' : ''}`} data-open={section !== null} aria-label={section === 'projects' ? 'Projects' : section === 'cron' ? 'Cron and reminders' : section === 'threads' ? 'Agent threads' : 'Agents'} aria-hidden={section === null} inert={section === null}>
+      <section className="workspace-drawer" data-open={section !== null} aria-label={section === 'projects' ? 'Projects' : section === 'threads' ? 'Agent threads' : 'Agents'} aria-hidden={section === null} inert={section === null}>
         <header className="workspace-drawer-header">
-          <div><span className="eyebrow">{section === 'projects' ? 'WORKSPACES' : section === 'cron' ? 'AUTONOMOUS OPERATIONS' : section === 'threads' ? 'MULTI-AGENT COLLABORATION' : 'WORKSPACE AGENTS'}</span><h2>{section === 'projects' ? 'Projects' : section === 'cron' ? 'Cron' : section === 'threads' ? 'Threads' : 'Agents'}</h2></div>
+          <div><span className="eyebrow">{section === 'projects' ? 'WORKSPACES' : section === 'threads' ? 'MULTI-AGENT COLLABORATION' : 'WORKSPACE AGENTS'}</span><h2>{section === 'projects' ? 'Projects' : section === 'threads' ? 'Threads' : 'Agents'}</h2></div>
           <button className="icon-button small" type="button" onClick={() => setSection(null)} aria-label="Close workspace drawer"><X size={15} /></button>
         </header>
-        {section === 'cron' ? <CronPanel request={request} /> : section === 'projects' ? (
+        {section === 'projects' ? (
           projectDetailsId && projects.some(project => project.id === projectDetailsId) ? (
             <>
               <button type="button" className="text-button project-management-back" onClick={() => setProjectDetailsId('')}><ArrowRight size={13} />All projects</button>
@@ -3789,6 +3831,20 @@ function OperationsView(props: {
   const filteredLogLines = query.trim()
     ? logLines.split(/\r?\n/).filter(line => line.toLowerCase().includes(query.trim().toLowerCase())).join('\n')
     : logLines;
+  const host = status?.metrics?.system?.host;
+  const warmestSensor = host?.temperature.sensors.reduce((warmest, sensor) => !warmest || sensor.celsius > warmest.celsius ? sensor : warmest, undefined as HostResourceSnapshot['temperature']['sensors'][number] | undefined);
+  const telemetry = [
+    { label: 'Host CPU', icon: Cpu, value: host?.cpuPercent == null ? '—' : `${host.cpuPercent.toFixed(1)}%`, detail: host ? `${host.cpuLogicalCores} logical cores` : 'Awaiting host sample', percent: host?.cpuPercent ?? null },
+    { label: 'System memory', icon: HardDrive, value: host ? `${host.memory.usedPercent.toFixed(1)}%` : '—', detail: host ? `${formatBytes(host.memory.freeBytes)} free of ${formatBytes(host.memory.totalBytes)}` : 'Awaiting host sample', percent: host?.memory.usedPercent ?? null },
+    { label: 'GPU load', icon: Gauge, value: host?.gpu.loadPercent == null ? host?.gpu.state === 'unavailable' ? 'N/A' : '—' : `${host.gpu.loadPercent.toFixed(1)}%`, detail: host?.gpu.devices.map(device => device.name).join(', ') || host?.gpu.unavailableReason || 'No GPU telemetry', percent: host?.gpu.loadPercent ?? null },
+    { label: 'Temperature', icon: Thermometer, value: warmestSensor ? `${warmestSensor.celsius.toFixed(1)}°C` : 'N/A', detail: warmestSensor?.name ?? host?.temperature.unavailableReason ?? 'No readable sensor', percent: warmestSensor ? Math.min(100, warmestSensor.celsius) : null },
+    { label: 'Gateway uptime', icon: Clock3, value: status?.uptimeHuman ?? '—', detail: `Process ${status?.pid ? `PID ${status.pid}` : 'not reported'}`, percent: null },
+    { label: 'Runtime memory', icon: Database, value: formatBytes(status?.memory?.rss), detail: `Heap ${formatBytes(status?.memory?.heap)}`, percent: null },
+    { label: 'Active turns', icon: Activity, value: String(status?.activeTurns ?? '—'), detail: `${status?.sessions ?? '—'} saved sessions`, percent: null },
+    { label: 'Registered tools', icon: Wrench, value: String(status?.tools ?? '—'), detail: 'Available to this runtime', percent: null },
+    { label: 'Network throughput', icon: Network, value: `${formatRate(host?.network.receiveBytesPerSecond)} ↓`, detail: `${formatRate(host?.network.transmitBytesPerSecond)} transmitted`, percent: null },
+    { label: 'Disk throughput', icon: HardDrive, value: `${formatRate(host?.disk.readBytesPerSecond)} read`, detail: `${formatRate(host?.disk.writeBytesPerSecond)} written`, percent: null },
+  ];
   const health = status?.providerHealth;
   const providers = health && !Array.isArray(health) && typeof health === 'object' ? Object.entries(health) : [];
   const downloadLog = () => {
@@ -3811,12 +3867,29 @@ function OperationsView(props: {
   };
   return (
     <div className="page">
-      <PageHeading eyebrow="THE RUNNING SYSTEM, NOT A SIMULATION" title="Operations" detail="Live adapter health, provider availability, and the service log from this machine." action={<button className="button button-secondary" onClick={onRefresh}><RefreshCw size={15} />Refresh now</button>} />
+      <PageHeading eyebrow="LIVE SYSTEM TELEMETRY" title="Health" detail="Runtime, host resources, channel connectivity, provider resilience, and service diagnostics." action={<button className="button button-secondary" onClick={onRefresh}><RefreshCw size={15} />Refresh now</button>} />
       <div className="operation-summary">
         <div className="operation-summary-mark"><Gauge size={19} /></div>
         <div className="operation-summary-copy"><strong>{status ? 'Gateway is responding' : 'Gateway is unreachable'}</strong><span>{status ? `Process ${status.pid ?? '—'} · Running for ${status.uptimeHuman ?? '—'} · ${status.activeTurns ?? 0} active turns` : 'Check that the Symbiote gateway process is running.'}</span></div>
         <span className={`status-tag${status ? ' status-tag-live' : ' status-tag-idle'}`}><span />{status ? 'Operational' : 'Offline'}</span>
       </div>
+      <section className="health-telemetry" aria-label="Live system telemetry">
+        {telemetry.map(({ label, icon: Icon, value, detail, percent }) => {
+          const boundedPercent = percent === null ? null : Math.max(0, Math.min(100, percent));
+          const dialStyle = boundedPercent === null ? undefined : {
+            background: `conic-gradient(var(--appearance-primary) ${boundedPercent * 3.6}deg, var(--line) 0deg)`,
+          };
+          return <article className="health-telemetry-card" key={label}>
+            <div className="health-telemetry-heading"><span><Icon size={14} />{label}</span><small>{detail}</small></div>
+            <div className="health-telemetry-reading">
+              <div className={`health-telemetry-dial${boundedPercent === null ? ' health-telemetry-dial-static' : ''}`} style={dialStyle} aria-label={`${label}: ${value}`}>
+                <span>{value}</span>
+              </div>
+              {boundedPercent !== null && <div className="health-telemetry-track"><span style={{ width: `${boundedPercent}%` }} /></div>}
+            </div>
+          </article>;
+        })}
+      </section>
       <div className="operation-columns">
         <section className="surface-card operation-panel">
           <div className="section-heading"><div><div className="eyebrow">CHANNEL ADAPTERS</div><h2>Connections</h2></div><span className="subtle-label">{channels.length} TOTAL</span></div>

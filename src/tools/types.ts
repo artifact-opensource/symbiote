@@ -10,6 +10,20 @@ export function resolveExecTimeoutMs(timeout: unknown): number {
   return timeout * 1000;
 }
 
+export type IdempotencyClass = 'read' | 'reversible_local' | 'external' | 'irreversible';
+
+export interface IdempotencyData {
+  class: IdempotencyClass;
+  /** For reversible_local: description of how to reverse */
+  reverseDescription?: string;
+  /** For external: the external system being called */
+  externalSystem?: string;
+  /** For irreversible: what makes this irreversible */
+  irreversibleReason?: string;
+  /** Optional: custom idempotency key generator */
+  idempotencyKey?: (input: Record<string, unknown>) => string;
+}
+
 export interface ToolParameter {
   type: string;
   description?: string;
@@ -30,6 +44,7 @@ export interface ToolDefinition {
   };
   execute: (input: Record<string, unknown>, opts?: ToolExecuteOptions) => Promise<string>;
   executeWithImages?: (input: Record<string, unknown>, opts?: ToolExecuteOptions) => Promise<ToolExecutionOutput>;
+  idempotency?: IdempotencyData;
 }
 
 export interface ToolImage {

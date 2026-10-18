@@ -76,6 +76,7 @@ export interface WebControlPlane {
   getAppearanceSettings: () => { settings: AppearanceSettings; initialized: boolean };
   updateAppearanceSettings: (settings: unknown) => AppearanceSettings;
   getSessions: () => unknown[];
+  ensureMemorySession?: () => unknown;
   getSessionMessages: (id: string) => unknown[] | null;
   createSession: (name?: string, options?: { projectId?: string; agentId?: string }) => unknown;
   getProjects: (includeArchived?: boolean) => unknown[];
@@ -975,6 +976,14 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     }
     if (method === 'GET' && pathname === '/api/sessions') {
       return json(res, control.getSessions());
+    }
+    if (method === 'POST' && pathname === '/api/sessions/memory/ensure') {
+      if (!control.ensureMemorySession) return json(res, { error: 'Memory conversation initialization is unavailable.' }, 501);
+      try {
+        return json(res, control.ensureMemorySession());
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Memory conversation could not be initialized.' }, 500);
+      }
     }
     if (method === 'GET' && pathname === '/api/memory/graph') {
       return json(res, control.getMemoryGraph());

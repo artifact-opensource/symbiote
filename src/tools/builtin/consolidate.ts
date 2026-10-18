@@ -1,9 +1,4 @@
-// Symbiote — Persona consolidation digest
-//
-// Read-only tool: surfaces recently staged memory (COMB notes, session
-// highlights) so the agent can decide what's durable enough to fold into
-// USER.md. This never writes anything itself — consolidation stays an
-// explicit, reviewable edit/write call the agent (or owner) makes.
+// Symbiote — Builtin tool: persona consolidation digest
 
 import type { ToolDefinition } from '../types.js';
 import { getSharedVectorDB } from '../../memory/vdb.js';
@@ -28,6 +23,10 @@ export const personaDigestTool: ToolDefinition = {
     properties: {
       days: { type: 'number', description: 'How many days back to look (default 7)' },
     },
+  },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: (input) => `persona_digest:${input.days ?? 7}`,
   },
   async execute(input) {
     const days = Number(input.days ?? 7);

@@ -93,7 +93,7 @@ export function flushMessages(sessionLabel: string, messages: Array<{ role: stri
   if (tail.length === 0) return;
 
   const lines: string[] = [`[Session: ${sessionLabel}]`];
-  for (const msg of tail) {
+  for (const msg of messages) {
     const role = msg.role === 'assistant' ? 'Agent' : msg.role === 'user' ? 'Human' : msg.role;
     let content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
     if (content.length > 500) content = content.slice(0, 500) + '... [truncated]';
@@ -116,6 +116,10 @@ export const combRecallTool: ToolDefinition = {
     },
     required: [],
   },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: (input) => `comb_recall:${String(input.query ?? '')}:${input.k ?? 12}`,
+  },
   async execute(input) {
     try {
       return recall(input.query ? String(input.query) : undefined, Number(input.k ?? 12));
@@ -134,6 +138,11 @@ export const combStageTool: ToolDefinition = {
       content: { type: 'string', description: 'Information to stage for next session' },
     },
     required: ['content'],
+  },
+  idempotency: {
+    class: 'reversible_local',
+    reverseDescription: 'To reverse, delete the staged memory or overwrite with new content. The original content is recoverable from VDB history if not explicitly purged.',
+    idempotencyKey: (input) => `comb_stage:${String(input.content ?? '')}:${String(input.sessionId ?? 'main')}`,
   },
   async execute(input) {
     const content = String(input.content ?? '');
@@ -165,6 +174,11 @@ export const memoryOffloadTool: ToolDefinition = {
       sessionId: { type: 'string', description: 'Session or task identifier for provenance (defaults to main)' },
     },
     required: ['summary'],
+  },
+  idempotency: {
+    class: 'irreversible',
+    irreversibleReason: 'Durable memory is written to append-only JSONL, VDB index, and Memograph shard topology. Once stored, it cannot be undone without manual file deletion or archive purging.',
+    idempotencyKey: (input) => `memory_offload:${String(input.summary ?? '')}:${String(input.sessionId ?? 'main')}`,
   },
   async execute(input) {
     try {

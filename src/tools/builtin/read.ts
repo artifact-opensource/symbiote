@@ -65,6 +65,10 @@ export const readTool: ToolDefinition = {
     },
     required: ['path'],
   },
+  idempotency: {
+    class: 'read',
+    idempotencyKey: (input) => `read:${String(input.path ?? '')}:${input.offset ?? 1}:${input.limit ?? 2000}:${input.encoding ?? 'auto'}`,
+  },
   async execute(input) {
     const filePath = path.resolve(expandHome(String(input.path ?? '')));
     try {
