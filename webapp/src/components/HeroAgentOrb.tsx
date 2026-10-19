@@ -7,14 +7,24 @@ interface HeroAgentOrbProps {
   activity: AgentActivity;
 }
 
+const ORB_SIZE = 64;
+const ORB_VIEWBOX_SIZE = 124;
+
 export default function HeroAgentOrb({ x, y, activity }: HeroAgentOrbProps) {
+  const idle = activity === 'listening';
   return (
-    <foreignObject x={x - 32} y={y - 32} width={64} height={64}>
+    <foreignObject
+      x={x - ORB_VIEWBOX_SIZE / 2}
+      y={y - ORB_VIEWBOX_SIZE / 2}
+      width={ORB_VIEWBOX_SIZE}
+      height={ORB_VIEWBOX_SIZE}
+    >
       <div className="hero-agent-orb">
         <ThinkingOrb
-          state={getActivityOrbState(activity)}
-          size={64}
-          aria-label={`Symbiote ${getActivityLabel(activity)}`}
+          state={idle ? 'breathing' : getActivityOrbState(activity)}
+          size={ORB_SIZE}
+          aria-label={`Symbiote ${idle ? 'idle' : getActivityLabel(activity)}`}
+          style={{ width: ORB_VIEWBOX_SIZE, height: ORB_VIEWBOX_SIZE }}
         />
       </div>
     </foreignObject>

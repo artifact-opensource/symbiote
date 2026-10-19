@@ -349,7 +349,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .graph-link-project { stroke: color-mix(in srgb, #e8ba4b 76%, transparent); stroke-width: 1.35; }
 .graph-link-conversation { stroke: color-mix(in srgb, #5796f5 60%, transparent); }
 .graph-link-agent, .graph-link-profile { stroke: color-mix(in srgb, var(--appearance-primary) 58%, transparent); }
-.hero-agent-orb { width: 64px; height: 64px; }
+.hero-agent-orb { display: grid; width: 124px; height: 124px; place-items: center; }
 .graph-agent-orbit { fill: color-mix(in srgb, var(--appearance-primary) 17%, var(--paper-raised)); stroke: color-mix(in srgb, var(--appearance-primary) 74%, var(--ink)); stroke-width: 1.1; transform-box: view-box; transform-origin: 280px 220px; animation: core-breathe 8s ease-in-out infinite; }
 .graph-agent-sphere { fill: url(#agent-surface); stroke: color-mix(in srgb, var(--appearance-primary) 70%, var(--ink)); stroke-width: .8; filter: drop-shadow(0 2px 5px color-mix(in srgb, var(--appearance-primary) 55%, transparent)); }
 .graph-agent-sheen { fill: color-mix(in srgb, white 78%, var(--appearance-primary)); opacity: .78; transform: rotate(-35deg); transform-box: fill-box; transform-origin: center; }
