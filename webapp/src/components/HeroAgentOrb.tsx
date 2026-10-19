@@ -9,7 +9,8 @@ interface HeroAgentOrbProps {
 }
 
 const ORB_SIZE = 64;
-const INITIAL_ORB_VIEWBOX_SIZE = 124;
+const ORB_DISPLAY_SIZE = 70;
+const INITIAL_ORB_VIEWBOX_SIZE = 136;
 
 export default function HeroAgentOrb({ x, y, activity }: HeroAgentOrbProps) {
   const orbContainerRef = useRef<HTMLDivElement>(null);
@@ -26,7 +27,7 @@ export default function HeroAgentOrb({ x, y, activity }: HeroAgentOrbProps) {
       const scale = Math.min(bounds.width / viewBox.width, bounds.height / viewBox.height);
       if (scale <= 0) return;
 
-      const nextSize = Math.ceil(ORB_SIZE / scale);
+      const nextSize = Math.ceil(ORB_DISPLAY_SIZE / scale);
       setOrbViewboxSize(current => current === nextSize ? current : nextSize);
     };
 
@@ -45,7 +46,7 @@ export default function HeroAgentOrb({ x, y, activity }: HeroAgentOrbProps) {
     >
       <div ref={orbContainerRef} className="hero-agent-orb">
         <ThinkingOrb
-          state={idle ? 'searching' : getActivityOrbState(activity)}
+          state={idle ? 'working' : getActivityOrbState(activity)}
           size={ORB_SIZE}
           aria-label={`Symbiote ${idle ? 'idle' : getActivityLabel(activity)}`}
           style={{ width: orbViewboxSize, height: orbViewboxSize }}

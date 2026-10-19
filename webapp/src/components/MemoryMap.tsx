@@ -1,28 +1,38 @@
+/// <reference path="../types/d3-force-3d.d.ts" />
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Download, Eye, EyeOff, Maximize2, Minus, Plus, Search, Send, X } from 'lucide-react';
-import type { MemoryDocument, MemoryGraphData, MemoryGraphNode } from '../types';
+import ForceGraph3D, { type ForceGraph3DInstance } from '3d-force-graph';
+import { forceCollide, forceX, forceY, forceZ } from 'd3-force-3d';
+import type { GraphData, LinkObject, NodeObject } from 'three-forcegraph';
+import * as THREE from 'three';
+import { Activity, ChevronDown, CircleHelp, Download, Maximize2, Minus, Plus, RefreshCw, Search, Send, X } from 'lucide-react';
+import type { MemoryDocument, MemoryGraphData, MemoryGraphNode, MemoryNodeContext } from '../types';
 import ActivityOrb from './ActivityOrb';
 
 type MemoryRequest = <T>(endpoint: string, options?: RequestInit) => Promise<T>;
 type Side = 'system' | 'documents' | 'sessions' | 'projects';
-type NodeKind = 'system' | 'domain' | 'shard' | 'document';
-type GraphNode = {
+type NodeKind = 'system' | 'domain' | 'source' | 'document';
+type GraphNode = NodeObject & {
   id: string;
   label: string;
   kind: NodeKind;
   side: Side;
   source?: string;
+  parentId?: string;
+  targetX: number;
+  targetY: number;
+  targetZ: number;
+  documentCount?: number;
   document?: MemoryGraphNode;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  anchorX: number;
-  anchorY: number;
-  radius: number;
+  val: number;
 };
-type GraphEdge = { source: string; target: string; similarity: number; kind: 'structure' | 'similarity' };
-type Transform = { x: number; y: number; scale: number };
+type GraphEdge = LinkObject<GraphNode> & {
+  source: string | GraphNode;
+  target: string | GraphNode;
+  similarity: number;
+  kind: 'structure' | 'similarity';
+  layoutDistance?: number;
+};
+type GraphInstance = ForceGraph3DInstance<GraphNode, GraphEdge>;
 
 const MEMORY_COLORS = {
   symbiote: '#55c982',
@@ -41,151 +51,166 @@ function stableHash(value: string): number {
   return hash >>> 0;
 }
 
-function buildGraph(data: MemoryGraphData, width: number, height: number): { nodes: GraphNode[]; edges: GraphEdge[] } {
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const nodes: GraphNode[] = [];
-  const edges: GraphEdge[] = [];
-  const addNode = (node: Omit<GraphNode, 'vx' | 'vy'>) => nodes.push({ ...node, vx: 0, vy: 0 });
-  addNode({
-    id: 'system', label: 'SYMBIOTE', kind: 'system', side: 'system',
-    x: centerX, y: centerY, anchorX: centerX, anchorY: centerY, radius: 12,
-  });
+function initialPosition(id: string, center: { x: number; y: number; z: number }, radius = 0): { x: number; y: number; z: number } {
+  let state = stableHash(id);
+  const random = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 0xffffffff;
+  };
+  const vertical = random() * 2 - 1;
+  const angle = random() * Math.PI * 2;
+  const spread = radius * Math.cbrt(random());
+  const horizontal = Math.sqrt(1 - vertical * vertical) * spread;
+  return {
+    x: center.x + horizontal * Math.cos(angle),
+    y: center.y + vertical * spread,
+    z: center.z + horizontal * Math.sin(angle),
+  };
+}
 
-  const sides: Array<{ id: Exclude<Side, 'system'>; label: string; x: number; y: number; dx: number; dy: number }> = [
-    { id: 'documents', label: 'KNOWLEDGE', x: centerX - Math.min(215, width * 0.27), y: centerY, dx: -1, dy: 0 },
-    { id: 'sessions', label: 'SESSIONS', x: centerX + Math.min(215, width * 0.27), y: centerY, dx: 1, dy: 0 },
-    { id: 'projects', label: 'PROJECTS', x: centerX, y: centerY + Math.min(130, height * 0.26), dx: 0, dy: 1 },
-  ];
-  const parent = new Map(data.nodes.map(document => [document.id, document.id]));
-  const find = (id: string): string => {
-    const current = parent.get(id) ?? id;
-    if (current === id) return id;
-    const root = find(current);
-    parent.set(id, root);
-    return root;
-  };
-  const join = (left: string, right: string) => {
-    const leftRoot = find(left);
-    const rightRoot = find(right);
-    if (leftRoot !== rightRoot) parent.set(leftRoot < rightRoot ? rightRoot : leftRoot, leftRoot < rightRoot ? leftRoot : rightRoot);
-  };
-  const sideById = new Map(data.nodes.map(document => [document.id, document.side]));
-  const documentIds = new Set(data.nodes.map(document => document.id));
+function endpointId(endpoint: string | number | GraphNode): string {
+  return typeof endpoint === 'object' ? endpoint.id : String(endpoint);
+}
+
+function graphBackgroundColor(color: string): string {
+  const srgb = /^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)$/i.exec(color);
+  if (!srgb) return color;
+  const channels = srgb.slice(1, 4).map(channel => Math.round(Math.min(1, Math.max(0, Number(channel))) * 255));
+  return `rgb(${channels.join(', ')})`;
+}
+
+function graphSignature(data: MemoryGraphData): string {
+  const fingerprint = JSON.stringify([
+    data.stats.lastIndexed,
+    data.stats.documentCount,
+    data.nodes.map(node => [node.id, node.timestamp, node.source, node.side, node.namespace, node.metadata]),
+    data.edges.map(edge => [edge.source, edge.target, edge.similarity]),
+  ]);
+  return `${data.stats.lastIndexed}:${stableHash(fingerprint)}`;
+}
+
+function nodeColor(node: GraphNode): string {
+  if (node.kind === 'system') return MEMORY_COLORS.symbiote;
+  if (node.kind === 'source') return MEMORY_COLORS.vdb;
+  if (node.side === 'documents') return MEMORY_COLORS.knowledge;
+  if (node.side === 'sessions') return MEMORY_COLORS.sessions;
+  if (node.side === 'projects') return MEMORY_COLORS.projects;
+  return MEMORY_COLORS.knowledge;
+}
+
+function buildGraph(data: MemoryGraphData, documents: MemoryGraphNode[]): GraphData<GraphNode, GraphEdge> {
+  const documentIds = new Set(documents.map(document => document.id));
   const similarityEdges = data.edges.filter(edge =>
     edge.source !== edge.target
       && documentIds.has(edge.source)
       && documentIds.has(edge.target)
       && Number.isFinite(edge.similarity)
-      && edge.similarity >= 0
+      && edge.similarity >= 0.7
       && edge.similarity <= 1,
+  ).sort((left, right) =>
+    right.similarity - left.similarity || left.source.localeCompare(right.source) || left.target.localeCompare(right.target),
   );
-  const strongestSimilarity = new Map<string, number>();
-  for (const edge of similarityEdges) {
-    strongestSimilarity.set(edge.source, Math.max(strongestSimilarity.get(edge.source) ?? 0, edge.similarity));
-    strongestSimilarity.set(edge.target, Math.max(strongestSimilarity.get(edge.target) ?? 0, edge.similarity));
-  }
-  for (const edge of similarityEdges) {
-    const localBaseline = Math.min(
-      strongestSimilarity.get(edge.source) ?? 0,
-      strongestSimilarity.get(edge.target) ?? 0,
-    );
-    const clusterThreshold = Math.max(0.12, localBaseline * 0.68);
-    if (edge.similarity >= clusterThreshold && sideById.get(edge.source) === sideById.get(edge.target)) {
-      join(edge.source, edge.target);
-    }
-  }
-  const components = new Map<string, MemoryGraphNode[]>();
-  for (const document of data.nodes) {
-    const root = find(document.id);
-    const component = components.get(root) ?? [];
-    component.push(document);
-    components.set(root, component);
-  }
-  const multiDocumentComponents = [...components.entries()]
-    .filter(([, documents]) => documents.length > 1)
-    .sort(([left], [right]) => left.localeCompare(right));
-  const componentNumbers = new Map(multiDocumentComponents.map(([root], index) => [root, index + 1]));
-  const shards = new Map<string, { side: Exclude<Side, 'system'>; source: string; label: string; documents: MemoryGraphNode[] }>();
-  const isolated = new Map<string, MemoryGraphNode[]>();
-  for (const [root, documents] of components) {
-    const side = documents[0].side;
-    const sources = new Map<string, number>();
-    for (const document of documents) sources.set(document.source, (sources.get(document.source) ?? 0) + 1);
-    const source = [...sources].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? 'other';
-    if (documents.length === 1) {
-      const key = `${side}\0${source}`;
-      const group = isolated.get(key) ?? [];
-      group.push(...documents);
-      isolated.set(key, group);
-    } else {
-      const number = String(componentNumbers.get(root) ?? 1).padStart(2, '0');
-      shards.set(`cluster:${side}:${root}`, {
-        side, source, label: `${source.toUpperCase()} · ${number}`, documents,
-      });
-    }
-  }
-  for (const [key, documents] of isolated) {
-    const [side, source] = key.split('\0') as [Exclude<Side, 'system'>, string];
-    shards.set(`isolated:${side}:${source}`, {
-      side, source, label: `${source.toUpperCase()} · OTHER`, documents,
-    });
+  const sourceGroups = new Map<string, MemoryGraphNode[]>();
+  for (const document of documents) {
+    const key = `${document.side}\0${document.source}`;
+    const group = sourceGroups.get(key) ?? [];
+    group.push(document);
+    sourceGroups.set(key, group);
   }
 
-  for (const side of sides) {
-    const domainId = `domain:${side.id}`;
-    addNode({
-      id: domainId, label: side.label, kind: 'domain', side: side.id,
-      x: side.x, y: side.y, anchorX: side.x, anchorY: side.y, radius: 8,
-    });
-    edges.push({ source: 'system', target: domainId, similarity: 1, kind: 'structure' });
-    const groups = [...shards.entries()]
-      .filter(([, shard]) => shard.side === side.id)
+  const nodes: GraphNode[] = [];
+  const links: GraphEdge[] = [];
+  const addNode = (node: Omit<GraphNode, 'x' | 'y' | 'z'>, target: { x: number; y: number; z: number }, spread = 0) => {
+    nodes.push({ ...node, ...target, ...initialPosition(node.id, target, spread) });
+  };
+  const addLink = (source: string, target: string, similarity: number, kind: GraphEdge['kind'], layoutDistance?: number) => {
+    links.push({ source, target, similarity, kind, layoutDistance });
+  };
+
+  const rootPosition = { x: 0, y: 270, z: 0 };
+  addNode({ id: 'system', label: 'SYMBIOTE', kind: 'system', side: 'system', val: 1.5, targetX: rootPosition.x, targetY: rootPosition.y, targetZ: rootPosition.z }, rootPosition);
+  const sideLabels: Array<{ id: Exclude<Side, 'system'>; label: string; x: number }> = [
+    { id: 'documents', label: 'KNOWLEDGE', x: -360 },
+    { id: 'sessions', label: 'SESSIONS', x: 0 },
+    { id: 'projects', label: 'PROJECTS', x: 360 },
+  ];
+  for (const side of sideLabels) {
+    const groups = [...sourceGroups.entries()]
+      .filter(([, group]) => group[0].side === side.id)
       .sort(([left], [right]) => left.localeCompare(right));
-    const perpendicularX = -side.dy;
-    const perpendicularY = side.dx;
-    const sourceX = side.x + side.dx * 72;
-    const sourceY = side.y + side.dy * 72;
-    groups.forEach(([key, shard], groupIndex) => {
-      const { source, documents } = shard;
-      const rows = Math.max(1, groups.length);
-      const offset = (groupIndex - (rows - 1) / 2) * Math.min(125, Math.max(24, width / rows * 0.12));
-      const shardX = sourceX + perpendicularX * offset;
-      const shardY = sourceY + perpendicularY * offset;
-      const shardId = `shard:${key}`;
+    if (!groups.length) continue;
+
+    const domainPosition = { x: side.x, y: 130, z: 0 };
+    const domainId = `domain:${side.id}`;
+    addNode({ id: domainId, label: side.label, kind: 'domain', side: side.id, parentId: 'system', val: 0.8, targetX: domainPosition.x, targetY: domainPosition.y, targetZ: domainPosition.z }, domainPosition);
+    addLink('system', domainId, 0.5, 'structure', 165);
+    const columns = Math.ceil(Math.sqrt(groups.length));
+    const rows = Math.ceil(groups.length / columns);
+    groups.forEach(([, group], index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const sourcePosition = {
+        x: side.x + (column - (columns - 1) / 2) * 300,
+        y: -20,
+        z: (row - (rows - 1) / 2) * 270,
+      };
+      const source = group[0].source;
+      const hubId = `source:${encodeURIComponent(side.id)}:${encodeURIComponent(source)}`;
+      const spread = Math.min(150, 18 + Math.sqrt(group.length) * 5);
       addNode({
-        id: shardId, label: shard.label, kind: 'shard', side: side.id, source,
-        x: shardX, y: shardY, anchorX: shardX, anchorY: shardY, radius: 5,
-      });
-      edges.push({ source: domainId, target: shardId, similarity: 1, kind: 'structure' });
-      documents.forEach(document => {
-        const hash = stableHash(document.id);
-        const angle = (hash % 3600) / 3600 * Math.PI * 2;
-        const distance = 24 + ((hash >>> 9) % 100) / 100 * 77;
-        const x = shardX + Math.cos(angle) * distance;
-        const y = shardY + Math.sin(angle) * distance;
+        id: hubId,
+        label: `${source.toUpperCase()} · ${group.length}`,
+        kind: 'source',
+        side: side.id,
+        source,
+        parentId: domainId,
+        val: 0.75,
+        documentCount: group.length,
+        targetX: sourcePosition.x,
+        targetY: sourcePosition.y,
+        targetZ: sourcePosition.z,
+      }, sourcePosition);
+      addLink(domainId, hubId, 0.65, 'structure', 95);
+      for (const document of group) {
+        const documentPosition = initialPosition(document.id, sourcePosition, spread);
         addNode({
-          id: document.id, label: document.label, kind: 'document', side: side.id,
-          source: document.source, document,
-          x, y, anchorX: x, anchorY: y, radius: 2.2,
-        });
-        edges.push({ source: shardId, target: document.id, similarity: 1, kind: 'structure' });
-      });
+          id: document.id,
+          label: document.label,
+          kind: 'document',
+          side: side.id,
+          source: document.source,
+          parentId: hubId,
+          document,
+          targetX: documentPosition.x,
+          targetY: documentPosition.y,
+          targetZ: documentPosition.z,
+          val: document.storage === 'vdb' ? 0.24 : 0.18,
+        }, documentPosition);
+        addLink(hubId, document.id, 0.78, 'structure', Math.max(24, spread * 0.72));
+      }
     });
   }
 
+  const bestNeighbors = new Map<string, typeof similarityEdges>();
   for (const edge of similarityEdges) {
-    edges.push({ ...edge, kind: 'similarity' });
+    for (const id of [edge.source, edge.target]) {
+      const neighbors = bestNeighbors.get(id) ?? [];
+      if (neighbors.length < 3) {
+        neighbors.push(edge);
+        bestNeighbors.set(id, neighbors);
+      }
+    }
   }
-  return { nodes, edges };
-}
-
-function sideColor(node: GraphNode): string {
-  if (node.kind === 'system') return MEMORY_COLORS.symbiote;
-  if (node.side === 'documents') return MEMORY_COLORS.knowledge;
-  if (node.side === 'sessions') return MEMORY_COLORS.sessions;
-  if (node.side === 'projects') return MEMORY_COLORS.projects;
-  return MEMORY_COLORS.knowledge;
+  const selectedEdges = new Map<string, (typeof similarityEdges)[number]>();
+  for (const neighbors of bestNeighbors.values()) {
+    for (const edge of neighbors) {
+      const key = edge.source < edge.target ? `${edge.source}\0${edge.target}` : `${edge.target}\0${edge.source}`;
+      const previous = selectedEdges.get(key);
+      if (!previous || edge.similarity > previous.similarity) selectedEdges.set(key, edge);
+    }
+  }
+  for (const edge of selectedEdges.values()) addLink(edge.source, edge.target, edge.similarity, 'similarity');
+  return { nodes, links };
 }
 
 function formatBytes(bytes: number): string {
@@ -194,37 +219,42 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function MemoryMap({ request, onSendNode }: { request: MemoryRequest; onSendNode: (node: MemoryGraphNode) => Promise<void> }) {
-  const shellRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const graphRef = useRef<GraphNode[]>([]);
-  const graphEdgesRef = useRef<GraphEdge[]>([]);
-  const renderGraphRef = useRef<() => void>(() => {});
-  const hoveredIdRef = useRef<string | null>(null);
+function MemoryMap({ request, onSendNode }: { request: MemoryRequest; onSendNode: (context: MemoryNodeContext, question: string) => Promise<void> }) {
+  const graphMountRef = useRef<HTMLDivElement>(null);
+  const graphRef = useRef<GraphInstance | null>(null);
+  const focusedIdRef = useRef<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
-  const hasAutoFitRef = useRef(false);
-  const transformRef = useRef<Transform>({ x: 0, y: 0, scale: 1 });
-  const pointerRef = useRef<{ x: number; y: number; startX: number; startY: number; nodeId: string | null; moved: boolean } | null>(null);
+  const hoveredNodeRef = useRef<GraphNode | null>(null);
+  const visibleDocumentIdsRef = useRef(new Set<string>());
+  const visibleNodeIdsRef = useRef(new Set<string>());
+  const nodePositionsRef = useRef(new Map<string, { x: number; y: number; z: number }>());
+  const pinnedPositionsRef = useRef(new Map<string, { x: number; y: number; z: number }>());
+  const dataSignatureRef = useRef('');
+  const didAutoFitRef = useRef(false);
+  const hoverTimeoutRef = useRef<number | null>(null);
   const [data, setData] = useState<MemoryGraphData | null>(null);
   const [selected, setSelected] = useState<MemoryDocument | null>(null);
+  const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [query, setQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
-  const [legendOpen, setLegendOpen] = useState(true);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [questionOpen, setQuestionOpen] = useState(false);
+  const [question, setQuestion] = useState('');
   const [sendingNodeId, setSendingNodeId] = useState<string | null>(null);
   const [sendError, setSendError] = useState('');
-  hoveredIdRef.current = hoveredId;
-  selectedIdRef.current = selected?.id ?? null;
 
   const loadGraph = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     try {
       const graph = await request<MemoryGraphData>('/api/memory/graph');
-      setData(graph);
+      const signature = graphSignature(graph);
+      if (signature !== dataSignatureRef.current) {
+        dataSignatureRef.current = signature;
+        setData(graph);
+      }
       setError('');
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not load the memory map.');
@@ -236,306 +266,373 @@ function MemoryMap({ request, onSendNode }: { request: MemoryRequest; onSendNode
 
   useEffect(() => {
     void loadGraph();
-    const timer = window.setInterval(() => void loadGraph(), 30_000);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && !hoveredNodeRef.current && !selectedIdRef.current) void loadGraph();
+    }, 45_000);
     return () => window.clearInterval(timer);
   }, [loadGraph]);
 
-  const sources = useMemo(() => [...new Set(data?.nodes.map(node => node.source) ?? [])].sort(), [data]);
+  const sources = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const node of data?.nodes ?? []) counts.set(node.source, (counts.get(node.source) ?? 0) + 1);
+    return [...counts].sort(([left], [right]) => left.localeCompare(right));
+  }, [data]);
   const queryLower = query.trim().toLowerCase();
   const shownDocuments = useMemo(() => (data?.nodes ?? []).filter(node =>
-    (sourceFilter === 'all' || (sourceFilter === 'projects' && node.side === 'projects') || node.storage === sourceFilter || node.source === sourceFilter)
+    (sourceFilter === 'all'
+      || sourceFilter === `side:${node.side}`
+      || sourceFilter === `source:${encodeURIComponent(node.source)}`)
     && (!queryLower || `${node.label} ${node.source} ${node.excerpt}`.toLowerCase().includes(queryLower)),
   ), [data, queryLower, sourceFilter]);
+  const graphData = useMemo(() => data ? buildGraph(data, data.nodes) : null, [data]);
+  const inspectedNode = hoveredNode ?? (selectedIdRef.current
+    ? graphData?.nodes.find(node => node.id === selectedIdRef.current) ?? null
+    : null);
+  const similarityNeighbors = useMemo(() => {
+    if (!inspectedNode?.document) return [];
+    const documentsById = new Map((data?.nodes ?? []).map(node => [node.id, node]));
+    return (graphData?.links ?? [])
+      .filter(link => link.kind === 'similarity'
+        && (endpointId(link.source) === inspectedNode.id || endpointId(link.target) === inspectedNode.id))
+      .map(link => {
+        const id = endpointId(link.source) === inspectedNode.id ? endpointId(link.target) : endpointId(link.source);
+        const document = documentsById.get(id);
+        return document ? {
+          id,
+          label: document.label,
+          source: document.source,
+          side: document.side,
+          role: document.role,
+          similarity: link.similarity,
+        } : null;
+      })
+      .filter((neighbor): neighbor is NonNullable<typeof neighbor> => neighbor !== null)
+      .sort((left, right) => right.similarity - left.similarity);
+  }, [data, graphData, inspectedNode]);
+  const similarityAverage = similarityNeighbors.length
+    ? similarityNeighbors.reduce((sum, neighbor) => sum + neighbor.similarity, 0) / similarityNeighbors.length
+    : 0;
+  const inspectorDocument = inspectedNode?.document;
+  const inspectorContext: MemoryNodeContext | null = inspectedNode ? {
+    selected: {
+      id: inspectedNode.id,
+      label: inspectedNode.label,
+      kind: inspectedNode.kind,
+      side: inspectedNode.side,
+      source: inspectedNode.source,
+      storage: inspectorDocument?.storage ?? data?.storage,
+      role: inspectorDocument?.role,
+      timestamp: inspectorDocument?.timestamp ?? data?.stats.lastIndexed,
+      sessionId: inspectorDocument?.sessionId,
+      namespace: inspectorDocument?.namespace,
+      metadata: inspectorDocument?.metadata,
+      excerpt: inspectorDocument?.excerpt ?? `${inspectedNode.documentCount ?? 0} documents in this ${inspectedNode.kind} location.`,
+      text: selected?.id === inspectedNode.id ? selected.text : undefined,
+      documentCount: inspectedNode.documentCount,
+    },
+    similarity: {
+      threshold: 0.7,
+      count: similarityNeighbors.length,
+      average: similarityAverage,
+      highest: similarityNeighbors[0]?.similarity ?? 0,
+      neighbors: similarityNeighbors,
+    },
+  } : null;
 
-  useEffect(() => {
-    const shell = shellRef.current;
-    const canvas = canvasRef.current;
-    if (!shell || !canvas || !data) return;
-    let width = Math.max(1, shell.clientWidth);
-    let height = Math.max(1, shell.clientHeight);
-    let frame = 0;
-    let tick = 0;
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const setSize = () => {
-      const previousWidth = width;
-      const previousHeight = height;
-      width = Math.max(1, shell.clientWidth);
-      height = Math.max(1, shell.clientHeight);
-      if (hasAutoFitRef.current) {
-        transformRef.current.x += (width - previousWidth) / 2;
-        transformRef.current.y += (height - previousHeight) / 2;
-      }
-      const ratio = Math.min(2, window.devicePixelRatio || 1);
-      canvas.width = Math.round(width * ratio);
-      canvas.height = Math.round(height * ratio);
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      const context = canvas.getContext('2d');
-      context?.setTransform(ratio, 0, 0, ratio, 0, 0);
-    };
-    setSize();
-    const observer = new ResizeObserver(() => {
-      setSize();
-      renderGraphRef.current();
-    });
-    observer.observe(shell);
-
-    const graph = buildGraph(data, width, height);
-    const previous = new Map(graphRef.current.map(node => [node.id, node]));
-    for (const node of graph.nodes) {
-      const old = previous.get(node.id);
-      if (old) {
-        node.x = old.x;
-        node.y = old.y;
-        node.anchorX = old.anchorX;
-        node.anchorY = old.anchorY;
-      }
-    }
-    graphRef.current = graph.nodes;
-    graphEdgesRef.current = graph.edges;
-    if (!hasAutoFitRef.current && graph.nodes.length) {
-      const bounds = graph.nodes.reduce((result, node) => ({
-        minX: Math.min(result.minX, node.x),
-        maxX: Math.max(result.maxX, node.x),
-        minY: Math.min(result.minY, node.y),
-        maxY: Math.max(result.maxY, node.y),
-      }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
-      const graphWidth = Math.max(1, bounds.maxX - bounds.minX);
-      const graphHeight = Math.max(1, bounds.maxY - bounds.minY);
-      const scale = Math.max(0.3, Math.min(1.2, 1, (width - 76) / graphWidth, (height - 76) / graphHeight));
-      transformRef.current = {
-        x: width / 2 - (bounds.minX + bounds.maxX) / 2 * scale,
-        y: height / 2 - (bounds.minY + bounds.maxY) / 2 * scale,
-        scale,
-      };
-      hasAutoFitRef.current = true;
-    }
-
-    const render = () => {
-      const context = canvas.getContext('2d');
-      if (!context) return;
-      const themeRoot = document.documentElement;
-      const themeStyles = getComputedStyle(themeRoot);
-      const canvasBackground = themeStyles.getPropertyValue('--paper-raised').trim() || themeStyles.backgroundColor;
-      const ink = themeStyles.getPropertyValue('--appearance-paper-ink').trim() || themeStyles.color || '#111';
-      context.clearRect(0, 0, width, height);
-      context.fillStyle = canvasBackground;
-      context.fillRect(0, 0, width, height);
-      const transform = transformRef.current;
-      context.save();
-      context.translate(transform.x, transform.y);
-      context.scale(transform.scale, transform.scale);
-
-      const byId = new Map(graph.nodes.map(node => [node.id, node]));
-      const visibleIds = new Set(['system', 'domain:documents', 'domain:sessions', 'domain:projects']);
-      for (const document of shownDocuments) {
-        visibleIds.add(document.id);
-        const parentEdge = graph.edges.find(edge => edge.kind === 'structure' && edge.target === document.id);
-        if (parentEdge) visibleIds.add(parentEdge.source);
-      }
-      const visibleEdges = graph.edges.filter(edge => visibleIds.has(edge.source) && visibleIds.has(edge.target));
-      const focusId = hoveredIdRef.current ?? selectedIdRef.current;
-      const focusEdges = focusId ? visibleEdges.filter(edge => edge.source === focusId || edge.target === focusId) : [];
-      const focusSet = new Set(focusEdges);
-      for (const edge of visibleEdges) {
-        const source = byId.get(edge.source);
-        const target = byId.get(edge.target);
-        if (!source || !target) continue;
-        const focused = focusSet.has(edge);
-        context.beginPath();
-        context.moveTo(source.x, source.y);
-        context.lineTo(target.x, target.y);
-        if (edge.kind === 'similarity') {
-          context.strokeStyle = focused ? MEMORY_COLORS.knowledge : ink;
-          context.globalAlpha = focused ? 0.28 + edge.similarity * 0.62 : 0.025 + edge.similarity * 0.2;
-          context.lineWidth = focused ? 0.85 + edge.similarity : 0.45;
-        } else {
-          const sourceNode = byId.get(edge.source);
-          context.strokeStyle = sourceNode ? sideColor(sourceNode) : MEMORY_COLORS.symbiote;
-          context.globalAlpha = focused ? 0.78 : edge.source === 'system' ? 0.38 : 0.2;
-          context.lineWidth = focused ? 1.1 : edge.source === 'system' ? 1.15 : 0.75;
-        }
-        context.stroke();
-        context.globalAlpha = 1;
-      }
-
-      context.textAlign = 'center';
-      context.textBaseline = 'middle';
-      for (const node of graph.nodes) {
-        if (!visibleIds.has(node.id)) continue;
-        const color = sideColor(node);
-        const isFocused = node.id === focusId;
-        const radius = node.radius * (isFocused ? 1.6 : 1);
-        if (node.kind !== 'document') {
-          context.beginPath();
-          context.arc(node.x, node.y, radius + (node.kind === 'system' ? 11 : 5), 0, Math.PI * 2);
-          context.strokeStyle = color;
-          context.globalAlpha = node.kind === 'system' ? 0.24 : 0.12;
-          context.lineWidth = node.kind === 'system' ? 1.2 : 0.8;
-          context.stroke();
-          context.globalAlpha = 1;
-        }
-        context.beginPath();
-        context.arc(node.x, node.y, radius, 0, Math.PI * 2);
-        context.fillStyle = color;
-        context.globalAlpha = node.kind === 'document' && focusId && !focusEdges.some(edge => edge.source === node.id || edge.target === node.id) ? 0.38 : 0.92;
-        context.fill();
-        context.globalAlpha = 1;
-        if (node.kind === 'document' && node.document?.storage === 'vdb') {
-          context.beginPath();
-          context.arc(node.x, node.y, radius + 2.1, 0, Math.PI * 2);
-          context.strokeStyle = MEMORY_COLORS.vdb;
-          context.globalAlpha = 0.8;
-          context.lineWidth = 0.8;
-          context.stroke();
-          context.globalAlpha = 1;
-        }
-
-      }
-      context.restore();
-
-      if (!reducedMotion && tick < 150 && graph.nodes.length <= 5000) {
-        tick++;
-        const cellSize = 42;
-        const grid = new Map<string, GraphNode[]>();
-        const nodeIndexes = new Map(graph.nodes.map((node, index) => [node, index]));
-        for (const node of graph.nodes) {
-          const key = `${Math.floor(node.x / cellSize)},${Math.floor(node.y / cellSize)}`;
-          const cell = grid.get(key) ?? [];
-          cell.push(node);
-          grid.set(key, cell);
-        }
-        for (let nodeIndex = 0; nodeIndex < graph.nodes.length; nodeIndex++) {
-          const node = graph.nodes[nodeIndex];
-          if (node.kind === 'system') continue;
-          const cellX = Math.floor(node.x / cellSize);
-          const cellY = Math.floor(node.y / cellSize);
-          for (let dx = -1; dx <= 1; dx++) {
-            for (let dy = -1; dy <= 1; dy++) {
-              for (const other of grid.get(`${cellX + dx},${cellY + dy}`) ?? []) {
-                const otherIndex = nodeIndexes.get(other) ?? -1;
-                if (otherIndex <= nodeIndex) continue;
-                const differenceX = node.x - other.x;
-                const differenceY = node.y - other.y;
-                const distanceSquared = differenceX * differenceX + differenceY * differenceY;
-                if (distanceSquared > 0 && distanceSquared < cellSize * cellSize) {
-                  const force = (node.kind === 'document' && other.kind === 'document' ? 2.8 : 6) / distanceSquared;
-                  node.vx += differenceX * force;
-                  node.vy += differenceY * force;
-                  other.vx -= differenceX * force;
-                  other.vy -= differenceY * force;
-                }
-              }
-            }
-          }
-        }
-        for (const edge of graph.edges) {
-          const source = byId.get(edge.source);
-          const target = byId.get(edge.target);
-          if (!source || !target || edge.kind === 'similarity' && edge.similarity < 0.16) continue;
-          const differenceX = target.x - source.x;
-          const differenceY = target.y - source.y;
-          const distance = Math.max(1, Math.hypot(differenceX, differenceY));
-          const targetDistance = edge.kind === 'similarity' ? 55 + (1 - edge.similarity) * 62 : 88;
-          const force = edge.kind === 'similarity' ? edge.similarity * 0.004 : 0.009;
-          const attraction = (distance - targetDistance) * force;
-          if (source.kind !== 'system') {
-            source.vx += differenceX / distance * attraction;
-            source.vy += differenceY / distance * attraction;
-          }
-          if (target.kind !== 'system') {
-            target.vx -= differenceX / distance * attraction;
-            target.vy -= differenceY / distance * attraction;
-          }
-        }
-        for (const node of graph.nodes) {
-          const anchorForce = node.kind === 'system' ? 0 : node.kind === 'document' ? 0.006 : 0.02;
-          node.vx += (node.anchorX - node.x) * anchorForce;
-          node.vy += (node.anchorY - node.y) * anchorForce;
-          node.vx *= 0.84;
-          node.vy *= 0.84;
-          node.x += Math.max(-3, Math.min(3, node.vx));
-          node.y += Math.max(-3, Math.min(3, node.vy));
-        }
-        frame = window.requestAnimationFrame(render);
-      }
-    };
-    renderGraphRef.current = render;
-    render();
-    const themeObserver = new MutationObserver(() => renderGraphRef.current());
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] });
-    return () => {
-      window.cancelAnimationFrame(frame);
-      observer.disconnect();
-      themeObserver.disconnect();
-    };
-  }, [data, shownDocuments]);
-
-  const getPointerNode = (event: { currentTarget: HTMLCanvasElement; clientX: number; clientY: number }): GraphNode | null => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const transform = transformRef.current;
-    const x = (event.clientX - bounds.left - transform.x) / transform.scale;
-    const y = (event.clientY - bounds.top - transform.y) / transform.scale;
-    for (let index = graphRef.current.length - 1; index >= 0; index--) {
-      const node = graphRef.current[index];
-      if (node.kind === 'document' && !shownDocuments.some(document => document.id === node.id)) continue;
-      const hitRadius = Math.max(node.radius + 6, node.kind === 'document' ? 6 : node.radius + 4);
-      if ((node.x - x) ** 2 + (node.y - y) ** 2 <= hitRadius ** 2) return node;
-    }
-    return null;
-  };
-
-  const selectNode = async (node: GraphNode | null) => {
+  const selectNode = useCallback(async (node: GraphNode | null) => {
     if (!node?.document) {
       setSelected(null);
+      selectedIdRef.current = null;
+      graphRef.current?.refresh();
       return;
     }
     try {
       const document = await request<MemoryDocument>(`/api/memory/documents/${encodeURIComponent(node.id)}`);
       setSelected(document);
-      selectedIdRef.current = document.id;
-      renderGraphRef.current();
+      selectedIdRef.current = node.id;
+      graphRef.current?.refresh();
       setError('');
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not load this memory document.');
     }
+  }, [request]);
+
+  const submitQuestion = async () => {
+    if (!inspectorContext || !inspectedNode || !question.trim() || sendingNodeId) return;
+    setSendingNodeId(inspectedNode.id);
+    setSendError('');
+    try {
+      await onSendNode(inspectorContext, question.trim());
+      setQuestion('');
+      setQuestionOpen(false);
+    } catch (failure) {
+      setSendError(failure instanceof Error ? failure.message : 'The memory question could not be sent.');
+    } finally {
+      setSendingNodeId(null);
+    }
   };
 
-  const focusNode = (node: GraphNode) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const scale = Math.max(0.7, Math.min(2.2, transformRef.current.scale * 1.7));
-    transformRef.current = {
-      x: canvas.clientWidth / 2 - node.x * scale,
-      y: canvas.clientHeight / 2 - node.y * scale,
-      scale,
-    };
-    renderGraphRef.current();
+  const focusNeighbor = (id: string) => {
+    const node = graphData?.nodes.find(candidate => candidate.id === id);
+    if (!node) return;
+    focusedIdRef.current = node.id;
+    hoveredNodeRef.current = node;
+    setHoveredNode(node);
+    setInspectorCollapsed(false);
+    setQuestionOpen(false);
+    void selectNode(node);
+    const point = { x: node.x ?? 0, y: node.y ?? 0, z: node.z ?? 0 };
+    graphRef.current?.cameraPosition({ x: point.x, y: point.y, z: point.z + 120 }, point, 500);
   };
+
+  useEffect(() => {
+    const mount = graphMountRef.current;
+    if (!mount) return;
+
+    const graph = new ForceGraph3D(mount, {
+      controlType: 'orbit',
+      rendererConfig: { antialias: true, alpha: true, preserveDrawingBuffer: true },
+    }) as unknown as GraphInstance;
+    const sphereGeometry = new THREE.SphereGeometry(1, 8, 8);
+    const materials = new Map(
+      Object.values(MEMORY_COLORS).map(color => [color, new THREE.MeshStandardMaterial({ color, roughness: 0.68 })]),
+    );
+    const linkMaterials = new Map<string, THREE.LineBasicMaterial>();
+    const getLinkMaterial = (link: GraphEdge) => {
+      const color = getComputedStyle(document.documentElement).getPropertyValue('--appearance-icon').trim() || MEMORY_COLORS.knowledge;
+      const focusedId = focusedIdRef.current ?? selectedIdRef.current;
+      const focused = !!focusedId && (endpointId(link.source) === focusedId || endpointId(link.target) === focusedId);
+      const key = `${color}:${focused ? 'focus' : 'context'}`;
+      let material = linkMaterials.get(key);
+      if (!material) {
+        material = new THREE.LineBasicMaterial({
+          color,
+          transparent: true,
+          opacity: focused ? 0.82 : 0.1,
+          depthWrite: false,
+        });
+        linkMaterials.set(key, material);
+      }
+      return material;
+    };
+    graphRef.current = graph;
+    graph
+      .backgroundColor(graphBackgroundColor(getComputedStyle(mount.parentElement ?? mount).backgroundColor) || '#f8f7f2')
+      .showNavInfo(false)
+      .nodeId('id')
+      .nodeLabel(node => `${node.label} · ${node.source ?? node.kind} · ${node.side}`)
+      .nodeColor(node => nodeColor(node))
+      .nodeVal(node => node.val)
+      .nodeRelSize(3)
+      .nodeResolution(8)
+      .nodeVisibility(node => visibleNodeIdsRef.current.has(node.id))
+      .nodeThreeObject(node => {
+        const material = materials.get(nodeColor(node));
+        if (!material) throw new Error(`Missing memory graph material for ${nodeColor(node)}.`);
+        const mesh = new THREE.Mesh(sphereGeometry, material);
+        mesh.scale.setScalar(3 * Math.cbrt(node.val));
+        return mesh;
+      })
+      .linkSource('source')
+      .linkTarget('target')
+      .linkVisibility(link => {
+        if (!visibleNodeIdsRef.current.has(endpointId(link.source)) || !visibleNodeIdsRef.current.has(endpointId(link.target))) return false;
+        const focusId = focusedIdRef.current ?? selectedIdRef.current;
+        const source = typeof link.source === 'object' ? link.source : null;
+        const target = typeof link.target === 'object' ? link.target : null;
+        const documentLink = source?.kind === 'document' || target?.kind === 'document';
+        if (documentLink) return !!focusId && (endpointId(link.source) === focusId || endpointId(link.target) === focusId);
+        if (link.kind === 'similarity') return !!focusId && (endpointId(link.source) === focusId || endpointId(link.target) === focusId);
+        return true;
+      })
+      .linkMaterial(getLinkMaterial)
+      .linkWidth(link => {
+        const focusedId = focusedIdRef.current ?? selectedIdRef.current;
+        return focusedId && (endpointId(link.source) === focusedId || endpointId(link.target) === focusedId) ? 1 : 0.5;
+      })
+      .linkResolution(4)
+      .cooldownTicks(140)
+      .cooldownTime(1200)
+      .d3AlphaDecay(0.055)
+      .d3VelocityDecay(0.42)
+      .onNodeHover(node => {
+        if (hoverTimeoutRef.current !== null) {
+          window.clearTimeout(hoverTimeoutRef.current);
+          hoverTimeoutRef.current = null;
+        }
+        focusedIdRef.current = node?.id ?? null;
+        if (node) {
+          hoveredNodeRef.current = node;
+          setHoveredNode(node);
+          setInspectorCollapsed(false);
+        }
+        else {
+          hoverTimeoutRef.current = window.setTimeout(() => {
+            hoveredNodeRef.current = null;
+            setHoveredNode(selectedIdRef.current
+              ? graph.graphData().nodes.find(candidate => candidate.id === selectedIdRef.current) ?? null
+              : null);
+            hoverTimeoutRef.current = null;
+          }, 300);
+        }
+        graph.refresh();
+      })
+      .onNodeClick((node, event) => {
+        focusedIdRef.current = node.id;
+        hoveredNodeRef.current = node;
+        setHoveredNode(node);
+        if (event.detail > 1) {
+          const point = { x: node.x ?? 0, y: node.y ?? 0, z: node.z ?? 0 };
+          graph.cameraPosition({ x: point.x, y: point.y, z: point.z + 120 }, point, 500);
+        }
+        void selectNode(node);
+      })
+      .onNodeDragEnd(node => {
+        if (typeof node.x !== 'number' || typeof node.y !== 'number' || typeof node.z !== 'number') return;
+        const position = { x: node.x, y: node.y, z: node.z };
+        node.targetX = node.x;
+        node.targetY = node.y;
+        node.targetZ = node.z;
+        node.fx = node.x;
+        node.fy = node.y;
+        node.fz = node.z;
+        nodePositionsRef.current.set(node.id, position);
+        pinnedPositionsRef.current.set(node.id, position);
+      })
+      .onBackgroundClick(() => {
+        focusedIdRef.current = null;
+        hoveredNodeRef.current = null;
+        void selectNode(null);
+        setHoveredNode(null);
+        graph.refresh();
+      })
+      .onEngineStop(() => {
+        if (!didAutoFitRef.current) {
+          didAutoFitRef.current = true;
+          graph.zoomToFit(400, 36);
+        }
+      });
+
+    graph.d3Force('link')
+      ?.distance((link: GraphEdge) => link.kind === 'similarity' ? (1 - link.similarity) * 120 : link.layoutDistance ?? 80)
+      .strength((link: GraphEdge) => link.kind === 'similarity' ? link.similarity ** 2 : 0.14);
+    graph.d3Force('charge')?.strength(-120).distanceMax(280);
+    graph.d3Force('center')?.strength(0.012);
+    graph.d3Force('collide', forceCollide<GraphNode>(node => node.kind === 'document' ? 4.5 : node.val * 5 + 4).strength(0.72).iterations(1));
+    graph.d3Force('x', forceX<GraphNode>(node => node.targetX).strength(0.075));
+    graph.d3Force('y', forceY<GraphNode>(node => node.targetY).strength(0.075));
+    graph.d3Force('z', forceZ<GraphNode>(node => node.targetZ).strength(0.075));
+
+    const resize = () => {
+      const bounds = mount.getBoundingClientRect();
+      graph.width(Math.max(1, Math.floor(bounds.width)));
+      graph.height(Math.max(1, Math.floor(bounds.height)));
+      if (didAutoFitRef.current) graph.zoomToFit(250, 36, node => visibleNodeIdsRef.current.has(node.id));
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(mount);
+    window.addEventListener('resize', resize);
+    graph.renderer().setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+    resize();
+    const syncAppearance = () => {
+      const background = getComputedStyle(mount.parentElement ?? mount).backgroundColor;
+      const secondary = getComputedStyle(document.documentElement).getPropertyValue('--appearance-icon').trim() || MEMORY_COLORS.knowledge;
+      graph.backgroundColor(graphBackgroundColor(background) || '#f8f7f2');
+      for (const material of linkMaterials.values()) material.color.set(secondary);
+      graph.refresh();
+    };
+    const appearanceObserver = new MutationObserver(syncAppearance);
+    appearanceObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'data-theme'] });
+
+    return () => {
+      observer.disconnect();
+      appearanceObserver.disconnect();
+      window.removeEventListener('resize', resize);
+      if (hoverTimeoutRef.current !== null) window.clearTimeout(hoverTimeoutRef.current);
+      sphereGeometry.dispose();
+      for (const material of materials.values()) material.dispose();
+      for (const material of linkMaterials.values()) material.dispose();
+      graph._destructor();
+      graphRef.current = null;
+    };
+  }, [selectNode]);
+
+  useEffect(() => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    visibleDocumentIdsRef.current = new Set(shownDocuments.map(node => node.id));
+    const visibleIds = new Set<string>();
+    const nodesById = new Map((graphData?.nodes ?? []).map(node => [node.id, node]));
+    const scopedView = sourceFilter !== 'all' || queryLower.length > 0;
+    for (const id of visibleDocumentIdsRef.current) {
+      let current = nodesById.get(id);
+      while (current && !visibleIds.has(current.id)) {
+        if (!scopedView || (current.kind !== 'system' && current.kind !== 'domain')) visibleIds.add(current.id);
+        current = current.parentId ? nodesById.get(current.parentId) : undefined;
+      }
+    }
+    visibleNodeIdsRef.current = visibleIds;
+    if (hoveredNodeRef.current && !visibleIds.has(hoveredNodeRef.current.id)) {
+      focusedIdRef.current = null;
+      hoveredNodeRef.current = null;
+      setHoveredNode(null);
+    }
+    if (selectedIdRef.current && !visibleIds.has(selectedIdRef.current)) {
+      selectedIdRef.current = null;
+      setSelected(null);
+    }
+    const positions = nodePositionsRef.current;
+    for (const node of graph.graphData().nodes) {
+      if (typeof node.x === 'number' && Number.isFinite(node.x)
+        && typeof node.y === 'number' && Number.isFinite(node.y)
+        && typeof node.z === 'number' && Number.isFinite(node.z)) {
+        positions.set(node.id, { x: node.x, y: node.y, z: node.z });
+      }
+    }
+    const visibleNodes = (graphData?.nodes ?? [])
+      .filter(node => visibleIds.has(node.id))
+      .map(node => {
+        const pinned = pinnedPositionsRef.current.get(node.id);
+        const previous = scopedView ? undefined : positions.get(node.id);
+        if (pinned) return { ...node, ...pinned, fx: pinned.x, fy: pinned.y, fz: pinned.z };
+        return previous ? { ...node, ...previous } : node;
+      });
+    const visibleLinks = (graphData?.links ?? []).filter(link =>
+      visibleIds.has(endpointId(link.source)) && visibleIds.has(endpointId(link.target)),
+    );
+    for (const node of visibleNodes) {
+      if (typeof node.x === 'number' && Number.isFinite(node.x)
+        && typeof node.y === 'number' && Number.isFinite(node.y)
+        && typeof node.z === 'number' && Number.isFinite(node.z)) {
+        positions.set(node.id, { x: node.x, y: node.y, z: node.z });
+      }
+    }
+    didAutoFitRef.current = true;
+    graph.graphData({ nodes: visibleNodes, links: visibleLinks });
+    const frame = window.requestAnimationFrame(() => {
+      if (visibleIds.size) graph.zoomToFit(320, 44, node => visibleIds.has(node.id));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [shownDocuments, graphData, sourceFilter, queryLower]);
 
   const resetMap = () => {
-    const canvas = canvasRef.current;
-    const nodes = graphRef.current;
-    if (!canvas || !nodes.length) return;
-    const bounds = nodes.reduce((result, node) => ({
-      minX: Math.min(result.minX, node.x),
-      maxX: Math.max(result.maxX, node.x),
-      minY: Math.min(result.minY, node.y),
-      maxY: Math.max(result.maxY, node.y),
-    }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity });
-    const graphWidth = Math.max(1, bounds.maxX - bounds.minX);
-    const graphHeight = Math.max(1, bounds.maxY - bounds.minY);
-    const scale = Math.max(0.3, Math.min(1.2, 1, (canvas.clientWidth - 76) / graphWidth, (canvas.clientHeight - 76) / graphHeight));
-    transformRef.current = {
-      x: canvas.clientWidth / 2 - (bounds.minX + bounds.maxX) / 2 * scale,
-      y: canvas.clientHeight / 2 - (bounds.minY + bounds.maxY) / 2 * scale,
-      scale,
-    };
-    renderGraphRef.current();
+    didAutoFitRef.current = true;
+    graphRef.current?.zoomToFit(400, 36, node => visibleNodeIdsRef.current.has(node.id));
+  };
+
+  const updateZoom = (factor: number) => {
+    const graph = graphRef.current;
+    if (!graph) return;
+    const camera = graph.cameraPosition();
+    graph.cameraPosition({
+      x: camera.x * factor,
+      y: camera.y * factor,
+      z: camera.z * factor,
+    }, undefined, 250);
   };
 
   const saveImage = () => {
-    const canvas = canvasRef.current;
+    const canvas = graphRef.current?.renderer().domElement;
     if (!canvas) return;
     canvas.toBlob(blob => {
       if (!blob) {
@@ -546,35 +643,14 @@ function MemoryMap({ request, onSendNode }: { request: MemoryRequest; onSendNode
       const link = window.document.createElement('a');
       link.href = url;
       link.download = `symbiote-memory-map-${new Date().toISOString().slice(0, 10)}.png`;
+      window.document.body.append(link);
       link.click();
-      URL.revokeObjectURL(url);
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     }, 'image/png');
   };
 
-  const updateZoom = (factor: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const transform = transformRef.current;
-    const nextScale = Math.max(0.3, Math.min(3.5, transform.scale * factor));
-    const centerX = canvas.clientWidth / 2;
-    const centerY = canvas.clientHeight / 2;
-    const ratio = nextScale / transform.scale;
-    transformRef.current = {
-      x: centerX - (centerX - transform.x) * ratio,
-      y: centerY - (centerY - transform.y) * ratio,
-      scale: nextScale,
-    };
-    renderGraphRef.current();
-  };
-
   const stats = data?.stats;
-  const hoveredNode = hoveredId ? graphRef.current.find(node => node.id === hoveredId) : null;
-  const hoveredDocumentCount = hoveredNode
-    ? graphEdgesRef.current.filter(edge => edge.kind === 'structure' && edge.source === hoveredNode.id).length
-    : 0;
-  const hoveredSimilarCount = hoveredNode
-    ? graphEdgesRef.current.filter(edge => edge.source === hoveredNode.id || edge.target === hoveredNode.id).length
-    : 0;
   const sessionCount = data?.nodes.filter(node => node.side === 'sessions').length ?? 0;
   const projectCount = data?.nodes.filter(node => node.side === 'projects').length ?? 0;
   const documentCount = data?.nodes.length ? data.nodes.length - sessionCount - projectCount : 0;
@@ -582,8 +658,11 @@ function MemoryMap({ request, onSendNode }: { request: MemoryRequest; onSendNode
   return (
     <div className="page memory-page">
       <header className="memory-heading">
-        <div><div className="eyebrow">PERSISTENT KNOWLEDGE · LIVE SIMILARITY</div><h1>Memory map</h1><p>Indexed from {data?.storage ?? '.vdb/'} · Knowledge, sessions, and project work stay distinct and connect through semantic similarity.</p></div>
-        <button className="button button-secondary memory-export" type="button" onClick={saveImage} disabled={!data?.nodes.length}><Download size={15} />Save as image</button>
+        <div><div className="eyebrow">PERSISTENT KNOWLEDGE · LIVE SIMILARITY</div><h1>Memory map</h1><p>Indexed from {data?.storage ?? '.vdb/'} · Explore knowledge, sessions, and project memory in three dimensions.</p></div>
+        <div className="memory-heading-actions">
+          <button className="button button-secondary" type="button" onClick={() => void loadGraph(true)} disabled={refreshing}><RefreshCw size={14} className={refreshing ? 'memory-refresh-spin' : ''} />{refreshing ? 'Refreshing…' : 'Refresh index'}</button>
+          <button className="button button-secondary memory-export" type="button" onClick={saveImage} disabled={!data?.nodes.length}><Download size={15} />Save as image</button>
+        </div>
       </header>
 
       {error && <div className="notice notice-error memory-error" role="alert"><span>{error}</span><button type="button" className="icon-button small" onClick={() => void loadGraph(true)} aria-label="Retry memory map"><Activity size={14} /></button></div>}
@@ -600,130 +679,106 @@ function MemoryMap({ request, onSendNode }: { request: MemoryRequest; onSendNode
       <section className="memory-map-card surface-card">
         <div className="memory-toolbar">
           <label className="search-field memory-search"><Search size={15} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a memory…" aria-label="Search memory map" />{query && <button className="icon-button small" onClick={() => setQuery('')} aria-label="Clear search"><X size={13} /></button>}</label>
-          <label className="memory-source-filter"><span className="sr-only">Filter by source</span><select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)}><option value="all">All sources</option><option value="vdb">.vdb vector store</option><option value="projects">Projects</option>{sources.map(source => <option key={source} value={source}>{source}</option>)}</select></label>
+          <label className="memory-source-filter"><span className="sr-only">Filter by source</span><select value={sourceFilter} onChange={event => setSourceFilter(event.target.value)} aria-label="Filter memory graph"><option value="all">All sources</option><optgroup label="Memory locations"><option value="side:documents">Knowledge</option><option value="side:sessions">Sessions</option><option value="side:projects">Projects</option></optgroup><optgroup label="Exact VDB sources">{sources.map(([source, count]) => <option key={source} value={`source:${encodeURIComponent(source)}`}>{source} · {count.toLocaleString()}</option>)}</optgroup></select></label>
           <span className={`memory-refresh-label${refreshing ? ' is-refreshing' : ''}`}>{refreshing && <ActivityOrb label="Synchronizing memory" compact loading />}{refreshing ? 'SYNCING' : stats ? `${shownDocuments.length.toLocaleString()} / ${stats.documentCount.toLocaleString()} NODES` : loading ? 'INDEXING' : 'NO INDEX'}</span>
         </div>
-        <div className="memory-map-shell" ref={shellRef}>
+        <div className="memory-map-shell">
+          <div
+            ref={graphMountRef}
+            className="memory-graph3d"
+            role="application"
+            aria-label="Interactive three-dimensional similarity graph of indexed memory. Drag to rotate, scroll to zoom, and select a node to inspect its source."
+          />
           {loading && <div className="memory-loading"><ActivityOrb label="Loading indexed knowledge" loading /><span>Loading indexed knowledge…</span></div>}
           {!loading && !data?.nodes.length && <div className="memory-empty">No indexed knowledge yet. Memory documents, sessions, and project files appear here as they are synchronized.</div>}
-          <canvas
-            ref={canvasRef}
-            className="memory-canvas"
-            role="img"
-            aria-label="Interactive similarity map of indexed memory. The system connects separate knowledge and session-memory fields, with closer dots representing more similar documents."
-            onPointerDown={event => {
-              const node = getPointerNode(event);
-              pointerRef.current = { x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, nodeId: node?.id ?? null, moved: false };
-              event.currentTarget.setPointerCapture(event.pointerId);
-            }}
-            onPointerMove={event => {
-              const point = pointerRef.current;
-              if (point) {
-                const dx = event.clientX - point.x;
-                const dy = event.clientY - point.y;
-                if (Math.abs(event.clientX - point.startX) + Math.abs(event.clientY - point.startY) > 4) point.moved = true;
-                if (point.nodeId && point.moved) {
-                  const node = graphRef.current.find(item => item.id === point.nodeId);
-                  if (node) {
-                    node.x += dx / transformRef.current.scale;
-                    node.y += dy / transformRef.current.scale;
-                    node.anchorX = node.x;
-                    node.anchorY = node.y;
-                  }
-                } else if (point.moved) {
-                  transformRef.current.x += dx;
-                  transformRef.current.y += dy;
+          {!loading && data?.nodes.length && !shownDocuments.length && <div className="memory-empty">No memory sources match this filter.</div>}
+          {data?.nodes.length ? <div className="memory-zoom-controls">
+            <button type="button" onClick={() => updateZoom(0.8)} aria-label="Zoom in"><Plus size={15} /></button>
+            <button type="button" onClick={() => updateZoom(1.25)} aria-label="Zoom out"><Minus size={15} /></button>
+            <button type="button" onClick={resetMap} aria-label="Fit map to view"><Maximize2 size={14} /></button>
+          </div> : null}
+          {inspectedNode && inspectorContext && (
+            <aside
+              className={`memory-inspector${inspectorCollapsed ? ' memory-inspector-collapsed' : ''}`}
+              aria-label="Memory node details"
+              aria-live="polite"
+              onPointerEnter={() => {
+                if (hoverTimeoutRef.current !== null) {
+                  window.clearTimeout(hoverTimeoutRef.current);
+                  hoverTimeoutRef.current = null;
                 }
-                point.x = event.clientX;
-                point.y = event.clientY;
-                renderGraphRef.current();
-              } else {
-                const node = getPointerNode(event);
-                event.currentTarget.style.cursor = node ? 'pointer' : 'grab';
-                const nextHoveredId = node?.id ?? null;
-                const bounds = shellRef.current?.getBoundingClientRect();
-                setHoverPosition(node ? {
-                  x: Math.min(event.clientX - (bounds?.left ?? 0) + 14, Math.max(8, (bounds?.width ?? 300) - 290)),
-                  y: Math.min(event.clientY - (bounds?.top ?? 0) + 14, Math.max(8, (bounds?.height ?? 180) - 245)),
-                } : null);
-                if (hoveredIdRef.current !== nextHoveredId) {
-                  hoveredIdRef.current = nextHoveredId;
-                  setHoveredId(nextHoveredId);
-                  renderGraphRef.current();
-                }
-              }
-            }}
-            onPointerUp={event => {
-              const pointer = pointerRef.current;
-              if (pointer && !pointer.moved) void selectNode(getPointerNode(event));
-              pointerRef.current = null;
-            }}
-            onDoubleClick={event => {
-              const node = getPointerNode(event);
-              if (node) {
-                focusNode(node);
-                void selectNode(node);
-              }
-            }}
-            onPointerLeave={() => {
-              if (!pointerRef.current) {
-                hoveredIdRef.current = null;
-                setHoveredId(null);
-                setHoverPosition(null);
-                renderGraphRef.current();
-              }
-            }}
-            onPointerCancel={() => { pointerRef.current = null; }}
-            onWheel={event => {
-              event.preventDefault();
-              updateZoom(event.deltaY < 0 ? 1.1 : 0.9);
-            }}
-          />
-          {data?.nodes.length ? (
-            <>
-              <button className="memory-legend-toggle" type="button" onClick={() => setLegendOpen(open => !open)} aria-expanded={legendOpen} aria-label={legendOpen ? 'Hide graph legend' : 'Show graph legend'} title={legendOpen ? 'Hide legend' : 'Show legend'}>
-                {legendOpen ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-              {legendOpen && <div className="memory-map-legend"><span><i className="legend-dot legend-docs" />Knowledge</span><span><i className="legend-dot legend-sessions" />Sessions</span><span><i className="legend-dot legend-projects" />Projects</span><span><i className="legend-vdb" />.vdb storage</span><span><i className="legend-link" />Similarity</span></div>}
-              <div className="memory-zoom-controls">
-                <button type="button" onClick={() => updateZoom(1.2)} aria-label="Zoom in"><Plus size={15} /></button>
-                <button type="button" onClick={() => updateZoom(0.84)} aria-label="Zoom out"><Minus size={15} /></button>
-                <button type="button" onClick={resetMap} aria-label="Fit map to view"><Maximize2 size={14} /></button>
+                focusedIdRef.current = inspectedNode.id;
+                graphRef.current?.refresh();
+              }}
+              onPointerLeave={() => {
+                focusedIdRef.current = null;
+                graphRef.current?.refresh();
+                if (hoverTimeoutRef.current !== null) window.clearTimeout(hoverTimeoutRef.current);
+                hoverTimeoutRef.current = window.setTimeout(() => {
+                  hoveredNodeRef.current = null;
+                  setHoveredNode(selectedIdRef.current
+                    ? graphRef.current?.graphData().nodes.find(node => node.id === selectedIdRef.current) ?? null
+                    : null);
+                  hoverTimeoutRef.current = null;
+                }, 300);
+              }}
+            >
+              <div className="memory-inspector-header">
+                <button className="memory-inspector-title" type="button" onClick={() => setInspectorCollapsed(collapsed => !collapsed)} aria-expanded={!inspectorCollapsed} aria-label={inspectorCollapsed ? 'Expand memory details' : 'Collapse memory details'}>
+                  <span className="memory-inspector-kicker">{inspectedNode.kind} · {inspectedNode.side}</span>
+                  <strong>{inspectedNode.label}</strong>
+                  <ChevronDown size={15} />
+                </button>
+                <button className="memory-inspector-help" type="button" aria-label={questionOpen ? 'Close memory question' : 'Ask the agent about this node'} aria-expanded={questionOpen} onClick={() => { setInspectorCollapsed(false); setQuestionOpen(open => !open); }}><CircleHelp size={16} /></button>
               </div>
-            </>
-          ) : null}
-          {hoveredNode && hoverPosition && (
-            <aside className="memory-hover-card" style={{ left: hoverPosition.x, top: hoverPosition.y }} aria-live="polite">
-              <strong>{hoveredNode.label}</strong>
-              <span>{hoveredNode.source ?? hoveredNode.kind} · {hoveredNode.side} · {hoveredNode.document?.storage ?? 'graph node'}</span>
-              {hoveredNode.document?.excerpt && <p>{hoveredNode.document.excerpt}</p>}
-              <small>{hoveredNode.kind === 'shard' ? `${hoveredDocumentCount} documents · ` : ''}{hoveredSimilarCount} connections{hoveredNode.document?.role ? ` · ${hoveredNode.document.role}` : ''}{hoveredNode.document?.timestamp ? ` · ${new Date(hoveredNode.document.timestamp).toLocaleString()}` : ''}{hoveredNode.document?.sessionId ? ` · session ${hoveredNode.document.sessionId}` : ''}</small>
-              {hoveredNode.document && <button type="button" className="memory-node-send" disabled={sendingNodeId === hoveredNode.document.id} onClick={async event => {
-                event.stopPropagation();
-                setSendingNodeId(hoveredNode.document!.id);
-                setSendError('');
-                try {
-                  await onSendNode(hoveredNode.document!);
-                } catch (failure) {
-                  setSendError(failure instanceof Error ? failure.message : 'Memory context could not be sent.');
-                } finally {
-                  setSendingNodeId(null);
-                }
-              }}><Send size={12} />{sendingNodeId === hoveredNode.document.id ? 'Sending…' : 'Ask agent about this'}</button>}
-              {sendError && <small className="memory-node-error" role="alert">{sendError}</small>}
+              {!inspectorCollapsed && (
+                <div className="memory-inspector-body">
+                  <div className="memory-inspector-facts">
+                    <div><span>SOURCE</span><strong>{inspectedNode.source ?? 'Symbiote'}</strong></div>
+                    <div><span>STORAGE</span><strong>{inspectorDocument?.storage ?? (inspectedNode.kind === 'source' ? 'VDB source' : data?.storage ?? 'Graph')}</strong></div>
+                    {inspectedNode.documentCount !== undefined && <div><span>DOCUMENTS</span><strong>{inspectedNode.documentCount.toLocaleString()}</strong></div>}
+                    {inspectorDocument?.role && <div><span>ROLE</span><strong>{inspectorDocument.role}</strong></div>}
+                    {inspectorDocument?.timestamp && <div><span>INDEXED</span><strong>{new Date(inspectorDocument.timestamp).toLocaleString()}</strong></div>}
+                    {inspectorDocument?.sessionId && <div><span>SESSION</span><strong>{inspectorDocument.sessionId}</strong></div>}
+                    {inspectorDocument?.namespace && <div className="memory-inspector-fact-wide"><span>NAMESPACE</span><strong>{inspectorDocument.namespace}</strong></div>}
+                  </div>
+                  {(selected?.id === inspectedNode.id ? selected.text : inspectorDocument?.excerpt) && (
+                    <p className="memory-inspector-excerpt">{selected?.id === inspectedNode.id ? selected.text : inspectorDocument?.excerpt}</p>
+                  )}
+                  {similarityNeighbors.length > 0 && (
+                    <section className="memory-similarity-analysis" aria-label="Programmatic similarity analysis">
+                      <header><strong>Semantic similarities</strong><span>TF–IDF cosine · threshold 70%</span></header>
+                      <div className="memory-similarity-metrics">
+                        <div><span>MATCHES</span><strong>{similarityNeighbors.length}</strong></div>
+                        <div><span>AVERAGE</span><strong>{(similarityAverage * 100).toFixed(1)}%</strong></div>
+                        <div><span>STRONGEST</span><strong>{(similarityNeighbors[0].similarity * 100).toFixed(1)}%</strong></div>
+                      </div>
+                      <div className="memory-similarity-list">
+                        {similarityNeighbors.map((neighbor, index) => <button type="button" key={neighbor.id} onClick={() => focusNeighbor(neighbor.id)}>
+                          <span className="memory-similarity-rank">{String(index + 1).padStart(2, '0')}</span>
+                          <span className="memory-similarity-copy"><strong>{neighbor.label}</strong><small>{neighbor.source} · {neighbor.side} · {neighbor.role}</small></span>
+                          <b>{(neighbor.similarity * 100).toFixed(1)}%</b>
+                        </button>)}
+                      </div>
+                    </section>
+                  )}
+                  {inspectorDocument?.metadata && Object.keys(inspectorDocument.metadata).length > 0 && (
+                    <section className="memory-inspector-metadata"><span>DOCUMENT METADATA</span>
+                      {Object.entries(inspectorDocument.metadata).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}
+                    </section>
+                  )}
+                  {questionOpen && <form className="memory-question-form" onSubmit={event => { event.preventDefault(); void submitQuestion(); }}>
+                    <input value={question} onChange={event => setQuestion(event.target.value)} aria-label="Question for the agent" placeholder="Ask about this memory…" autoFocus />
+                    <button type="submit" aria-label="Send memory question" title="Send" disabled={!question.trim() || sendingNodeId !== null}><Send size={15} /></button>
+                  </form>}
+                  {sendError && <div className="memory-node-error" role="alert">{sendError}</div>}
+                </div>
+              )}
             </aside>
           )}
         </div>
-        {selected && (
-          <aside className="memory-detail" aria-label="Selected memory document">
-            <div className="memory-detail-heading"><div><div className="eyebrow">{selected.source} · {selected.role}</div><h2>{selected.label}</h2></div><button className="icon-button small" type="button" onClick={() => { setSelected(null); selectedIdRef.current = null; renderGraphRef.current(); }} aria-label="Close memory details"><X size={15} /></button></div>
-            <p>{selected.text}</p>
-            <div className="memory-detail-meta"><span>{new Date(selected.timestamp).toLocaleString()}</span>{selected.sessionId && <span>Session {selected.sessionId}</span>}</div>
-          </aside>
-        )}
-        <div className="memory-card-footer"><span><i className="memory-live-dot" />Shared VDB · {refreshing ? 'updating' : 'refreshes every 30 seconds'}</span><span>Drag to explore · Scroll to zoom · Select a node for its source</span></div>
+        <div className="memory-card-footer"><span><i className="memory-live-dot" />Shared VDB · updates when idle every 45 seconds</span><span>Drag to rotate · Scroll to zoom · Drag a node to pin it</span></div>
       </section>
-
     </div>
   );
 }

@@ -9,6 +9,8 @@ export interface MemoryGraphNode {
   role: string;
   timestamp: number;
   sessionId?: string;
+  namespace?: string;
+  metadata?: Record<string, string>;
   side: 'documents' | 'sessions' | 'projects';
 }
 
@@ -33,8 +35,39 @@ export interface MemoryGraphData {
 
 export interface MemoryDocument extends MemoryGraphNode {
   text: string;
-  namespace?: string;
-  metadata?: Record<string, string>;
+}
+
+export interface MemoryNodeContext {
+  selected: {
+    id: string;
+    label: string;
+    kind: 'system' | 'domain' | 'source' | 'document';
+    side: string;
+    source?: string;
+    storage?: string;
+    role?: string;
+    timestamp?: number;
+    sessionId?: string;
+    namespace?: string;
+    metadata?: Record<string, string>;
+    excerpt?: string;
+    text?: string;
+    documentCount?: number;
+  };
+  similarity: {
+    threshold: number;
+    count: number;
+    average: number;
+    highest: number;
+    neighbors: Array<{
+      id: string;
+      label: string;
+      source: string;
+      side: MemoryGraphNode['side'];
+      role: string;
+      similarity: number;
+    }>;
+  };
 }
 
 export interface WorkspaceRun {

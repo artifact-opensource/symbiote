@@ -1373,6 +1373,8 @@ export class SymbioteGateway {
               role: document.role,
               timestamp: document.timestamp,
               sessionId: document.sessionId,
+              namespace: document.namespace,
+              metadata: document.metadata,
               side: document.namespace?.startsWith('session:')
                 || sessionSources.has(document.source)
                 ? 'sessions'

@@ -7,7 +7,7 @@ import {
   Archive, Bookmark, Brain, Cloud, Database, Download, Gauge, Globe, HardDrive, History, Info, LayoutDashboard, Leaf, Maximize2, Menu, MessageSquare, Minimize2, Moon, Network,
   Biohazard, ChevronUp, FolderOpen, MessagesSquare, Plus, RefreshCw, Search, Send, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
 } from 'lucide-react';
-import type { AgentProfile, ChatMessage, GatewayConfig, GatewayStatus, HostResourceSnapshot, SessionSummary, ThreadUserHelpRequest, ToolSummary, ViewId, WorkspaceAgent, WorkspaceProject, WorkspaceRun } from './types';
+import type { AgentProfile, ChatMessage, GatewayConfig, GatewayStatus, HostResourceSnapshot, MemoryNodeContext, SessionSummary, ThreadUserHelpRequest, ToolSummary, ViewId, WorkspaceAgent, WorkspaceProject, WorkspaceRun } from './types';
 import type { CloudProviderStatus, GoogleWorkspaceGrant } from './components/IntegrationsView';
 import ActivityOrb from './components/ActivityOrb';
 import BrowserLoading from './components/BrowserLoading';
@@ -1822,35 +1822,110 @@ export default function App() {
     }
   };
 
-  const sendMemoryNode = async (node: import('./types').MemoryGraphNode) => {
+  const sendMemoryNode = async (context: MemoryNodeContext, question: string) => {
     if (sending || activeTurnSessionId.current) throw new Error('Wait for the current agent turn to finish before sending memory context.');
-    const session = await api<SessionSummary>('/api/sessions/memory/ensure', { method: 'POST' });
-    const metadata = {
-      id: node.id,
-      label: node.label,
-      source: node.source,
-      storage: node.storage,
-      side: node.side,
-      role: node.role,
-      timestamp: node.timestamp,
-      sessionId: node.sessionId,
-      excerpt: node.excerpt,
-    };
-    const text = `Please inspect this memory graph node and use its metadata to answer my memory or knowledge-base question:\n\n${JSON.stringify(metadata, null, 2)}`;
+    const label = `Memory · ${context.selected.label.replace(/\s+/g, ' ').trim().slice(0, 64)}`;
+    const session = await api<SessionSummary>('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ name: label }),
+    });
+    const text = `${question}\n\nUse this selected memory node and its locally computed graph analytics as context. The similarity values are exact VDB TF–IDF cosine scores; no additional graph analysis is needed:\n\n${JSON.stringify(context, null, 2)}`;
+    const userMessage: ChatMessage = { id: createClientId(), role: 'user', content: text, timestamp: Date.now(), tokensIn: Math.ceil(text.length / 4), tokenCountsEstimated: true };
+    const assistantId = createClientId();
+    let streamedText = '';
+    setSessions(previous => [session, ...previous.filter(item => item.id !== session.id)]);
+    setActiveSessionId(session.id);
+    setMessages([userMessage, { id: assistantId, role: 'assistant', content: '', timestamp: Date.now(), streaming: true, thinking: true, activityState: 'thinking' }]);
+    navigate('chat');
     activeTurnSessionId.current = session.id;
     setSending(true);
     setError('');
     try {
-      const outcome = await streamApi<{ text: string }>('/api/chat', { text, sessionId: session.id }, () => {});
-      const [savedMessages, savedSessions] = await Promise.all([
-        api<ChatMessage[]>(`/api/sessions/${encodeURIComponent(session.id)}/messages`),
-        api<SessionSummary[]>('/api/sessions'),
-      ]);
+      const outcome = await streamApi<{
+        text: string;
+        durationMs?: number;
+        iterations?: number;
+        inputTokens?: number;
+        outputTokens?: number;
+        toolCalls?: Array<{ name: string; input: Record<string, unknown>; result: string }>;
+      }>('/api/chat', { text, sessionId: session.id }, streamed => {
+        if (streamed.type === 'text_delta') {
+          const delta = String(streamed.text ?? '');
+          streamedText += delta;
+          setMessages(previous => previous.map(message => message.id === assistantId
+            ? { ...message, content: message.content + delta, thinking: false, activityState: 'responding' }
+            : message));
+        } else if (streamed.type === 'thinking_delta') {
+          setMessages(previous => previous.map(message => message.id === assistantId ? { ...message, thinking: true, activityState: 'reasoning' } : message));
+        } else if (streamed.type === 'tool_start') {
+          const name = String(streamed.name ?? 'tool');
+          setMessages(previous => previous.map(message => message.id === assistantId ? {
+            ...message,
+            thinking: false,
+            activityState: getToolActivity(name).activity,
+            activeTool: name,
+            activeTools: [...(message.activeTools ?? []), name],
+            toolActivity: [...(message.toolActivity ?? []), { name, status: 'running' as const }],
+          } : message));
+        } else if (streamed.type === 'tool_end') {
+          const name = String(streamed.name ?? 'tool');
+          setMessages(previous => previous.map(message => {
+            if (message.id !== assistantId) return message;
+            const toolActivity = [...(message.toolActivity ?? [])];
+            let runningIndex = -1;
+            for (let index = toolActivity.length - 1; index >= 0; index--) {
+              if (toolActivity[index].name === name && toolActivity[index].status === 'running') {
+                runningIndex = index;
+                break;
+              }
+            }
+            if (runningIndex >= 0) toolActivity[runningIndex] = { ...toolActivity[runningIndex], status: 'done' };
+            const activeTools = toolActivity.filter(tool => tool.status === 'running').map(tool => tool.name);
+            const activeTool = activeTools[activeTools.length - 1];
+            return { ...message, activeTools, activeTool, toolActivity, thinking: activeTools.length === 0, activityState: activeTool ? getToolActivity(activeTool).activity : 'thinking' };
+          }));
+        }
+      });
+      if (!outcome.complete) {
+        const savedMessages = await api<ChatMessage[]>(`/api/sessions/${encodeURIComponent(session.id)}/messages`);
+        setMessages(savedMessages);
+        if (!savedMessages.some(message => message.role === 'assistant' && message.content)) {
+          throw new Error('The memory conversation ended before the agent completed its response.');
+        }
+      } else {
+        const savedMessages = await api<ChatMessage[]>(`/api/sessions/${encodeURIComponent(session.id)}/messages`);
+        const response = outcome.result;
+        setMessages(savedMessages.length ? savedMessages : [userMessage, {
+          id: assistantId,
+          role: 'assistant',
+          content: response.text || streamedText || 'The turn completed without a text response.',
+          timestamp: Date.now(),
+          streaming: false,
+          thinking: false,
+          durationMs: response.durationMs,
+          iterations: response.iterations,
+          tokensIn: response.inputTokens,
+          tokensOut: response.outputTokens,
+          tokenCountsEstimated: response.outputTokens === undefined,
+          toolCalls: response.toolCalls ?? [],
+        }]);
+      }
+      const savedSessions = await api<SessionSummary[]>('/api/sessions');
       setSessions(savedSessions);
-      setActiveSessionId(session.id);
-      setMessages(savedMessages);
-      setView('chat');
-      if (!outcome.complete) throw new Error('The memory conversation ended before the agent completed its response.');
+      void refreshStatus().catch(() => undefined);
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : 'The memory conversation failed.';
+      setError(message);
+      setMessages(previous => previous.map(item => item.id === assistantId ? {
+        ...item,
+        content: item.content || streamedText || message,
+        streaming: false,
+        thinking: false,
+        interrupted: true,
+        activeTools: [],
+        activeTool: undefined,
+        toolActivity: [],
+      } : item));
     } finally {
       activeTurnSessionId.current = null;
       setSending(false);
@@ -2049,7 +2124,7 @@ export default function App() {
         <header className="topbar">
           <div className="topbar-left">
             <button className="icon-button mobile-menu" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation"><Menu size={19} /></button>
-            <div className="breadcrumb"><span className="breadcrumb-divider">/</span><strong>{view === 'chat' ? 'Conversation' : currentNavigation.label}</strong></div>
+            <div className="breadcrumb"><span className="breadcrumb-divider">/</span><strong>{view === 'chat' ? activeSession?.label || 'Conversation' : currentNavigation.label}</strong></div>
           </div>
           <div className="topbar-right">
             {isDesktopApp && <button className="icon-button utility-button" onClick={() => void window.symbioteDesktop?.openMini()} aria-label="Open floating mini chat" title="Open floating mini chat"><Minimize2 size={16} /></button>}
@@ -2460,7 +2535,6 @@ function OverviewView(props: {
         <div className="banner-copy">
           {!status && <p>Start the Symbiote gateway to bring your control room online.</p>}
           {status && <HeroTaskForm sessionId={activeSessionId} onStart={onStartRun} starting={startingRun} onNavigate={onNavigate} />}
-          <button className="banner-link" onClick={() => onNavigate('operations')}>View system health <ArrowRight size={15} /></button>
         </div>
         <WorkspaceGraph
           sessions={sessions}
@@ -2472,7 +2546,6 @@ function OverviewView(props: {
           onOpenProject={onOpenProject}
           onOpenProfile={onOpenProfile}
         />
-        <div className="banner-index">SYS / 01</div>
       </section>
 
       <section className="metric-grid" aria-label="Runtime summary">
@@ -2890,7 +2963,7 @@ function WorkspaceGraph({ sessions, projects, profiles, agents, activity, onOpen
         const edgePath = `M ${parent.x} ${parent.y} Q ${controlX} ${controlY} ${child.x} ${child.y}`;
         return <path
           key={`link-${node.id}`}
-          className={`graph-link graph-link-${node.kind}${node.status === 'running' ? ' graph-link-active' : ''}`}
+          className={`graph-link graph-link-${node.kind}${node.parentId === 'main' ? ' graph-link-root' : ''}${node.status === 'running' ? ' graph-link-active' : ''}`}
           d={edgePath}
         />;
       })}
@@ -3834,7 +3907,7 @@ function ChatView(props: {
     <div className="page page-chat">
       <PageHeading
         eyebrow="A DIRECT LINE TO YOUR AGENT"
-        title="Conversations"
+        title={session?.label || 'Conversations'}
         detail={session ? `${session.messageCount} saved messages · Updated ${formatRelative(session.updatedAt)}` : 'Choose a saved session, or start a new conversation.'}
         action={<div className="chat-session-actions">
           <label className="sr-only" htmlFor="session-picker">Select conversation</label>
