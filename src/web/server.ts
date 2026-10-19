@@ -623,6 +623,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     }
     if (method === 'GET' && pathname === '/api/telemetry') {
       if (!control.getTelemetry) return json(res, { error: 'Live telemetry is unavailable in this runtime.' }, 501);
+      res.setHeader('Cache-Control', 'no-store');
       return json(res, control.getTelemetry());
     }
     if (pathname === '/api/update/download' && method === 'POST') {

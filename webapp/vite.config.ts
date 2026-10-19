@@ -28,5 +28,18 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // The Three.js graph chunk is lazy-loaded and about 318 KB compressed.
+    chunkSizeWarningLimit: 1300,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const moduleId = id.replaceAll('\\', '/');
+          if (moduleId.includes('/node_modules/three/')) return 'three-vendor';
+          if (/\/node_modules\/(?:3d-force-graph|three-forcegraph|3d-force-graph-vr|3d-force-graph-ar)\//.test(moduleId)) return 'force-graph-vendor';
+          if (/\/node_modules\/d3-[^/]+\//.test(moduleId)) return 'd3-vendor';
+          return undefined;
+        },
+      },
+    },
   },
 });

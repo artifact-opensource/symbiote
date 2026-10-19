@@ -163,7 +163,11 @@ export class HealthTelemetryStore {
         byProvider,
       },
       recentEvents: windowEvents
-        .filter(event => event.type !== 'gateway.heartbeat')
+        .filter(event =>
+          event.type === 'gateway.issue'
+          || event.type === 'gateway.outage'
+          || event.type === 'provider.call' && !event.succeeded,
+        )
         .slice(-100)
         .reverse(),
     };

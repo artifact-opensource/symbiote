@@ -1000,6 +1000,7 @@ export default function App() {
   const [recentThreadsOpen, setRecentThreadsOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const telemetryRequestActive = useRef(false);
   const activeTurnSessionId = useRef<string | null>(null);
   const nativeNotifiedIds = useRef(new Set<string>());
   const toolSearchRef = useRef<HTMLInputElement>(null);
@@ -1238,16 +1239,32 @@ export default function App() {
   }, []);
 
   const refreshTelemetry = useCallback(async () => {
-    const fresh = await api<Pick<GatewayStatus, 'healthTelemetry' | 'metrics'>>('/api/telemetry');
-    setStatus(previous => previous ? { ...previous, ...fresh } : previous);
-    setGatewayConnected(true);
-    const hostSample = fresh.metrics?.system?.host;
-    if (hostSample?.sampledAt) {
-      setHostHistory(previous => previous[previous.length - 1]?.sampledAt === hostSample.sampledAt
-        ? previous
-        : [...previous.slice(-59), hostSample]);
+    if (telemetryRequestActive.current) return;
+    telemetryRequestActive.current = true;
+    try {
+      const fresh = await api<Pick<GatewayStatus, 'healthTelemetry' | 'providerHealth' | 'uptime' | 'uptimeHuman' | 'activeTurns' | 'memory' | 'metrics'>>('/api/telemetry');
+      setStatus(previous => previous ? {
+        ...previous,
+        ...fresh,
+        metrics: {
+          ...previous.metrics,
+          ...fresh.metrics,
+          system: { ...previous.metrics?.system, ...fresh.metrics?.system },
+        },
+      } : previous);
+      setGatewayConnected(true);
+      const processRss = fresh.memory?.rss;
+      if (processRss !== undefined) setMemoryHistory(previous => [...previous.slice(-59), processRss]);
+      const hostSample = fresh.metrics?.system?.host;
+      if (hostSample?.sampledAt) {
+        setHostHistory(previous => previous[previous.length - 1]?.sampledAt === hostSample.sampledAt
+          ? previous
+          : [...previous.slice(-59), hostSample]);
+      }
+      setLastUpdated(Date.now());
+    } finally {
+      telemetryRequestActive.current = false;
     }
-    setLastUpdated(Date.now());
   }, []);
 
   const installUpdate = async () => {
@@ -1293,7 +1310,9 @@ export default function App() {
       api<ToolSummary[]>('/api/tools').then(setTools),
       refreshWork(),
     ]);
-    const firstError = results.find(result => result.status === 'rejected');
+    const firstError = results.find(result => result.status === 'rejected'
+      && !(result.reason instanceof TypeError)
+      && !(result.reason instanceof Error && /failed to fetch|networkerror|load failed/i.test(result.reason.message)));
     if (firstError?.status === 'rejected') setError(firstError.reason instanceof Error ? firstError.reason.message : 'Could not load gateway data.');
     setLoading(false);
     if (showSpinner) setRefreshing(false);
@@ -1351,15 +1370,17 @@ export default function App() {
   useEffect(() => {
     if (!accessGranted) return;
     const statusTimer = window.setInterval(() => {
-      void refreshStatus().catch(() => setError('Gateway connection was interrupted. Retrying…'));
+      void refreshStatus().catch(() => undefined);
     }, view === 'workspace' ? 3000 : 5000);
-    const telemetryTimer = view === 'workspace' || view === 'operations'
-      ? window.setInterval(() => {
-        void refreshTelemetry().catch(() => {
-          setGatewayConnected(false);
-          setError('Gateway telemetry connection was interrupted. Retrying…');
-        });
-      }, refreshIntervalMs)
+    const refreshLiveTelemetry = () => {
+      void refreshTelemetry().catch(() => {
+        setGatewayConnected(false);
+      });
+    };
+    const liveTelemetryActive = view === 'workspace' || view === 'operations';
+    if (liveTelemetryActive) refreshLiveTelemetry();
+    const telemetryTimer = liveTelemetryActive
+      ? window.setInterval(refreshLiveTelemetry, refreshIntervalMs)
       : undefined;
     const activityTimer = window.setInterval(() => {
       if (view === 'workspace' || view === 'runs' || view === 'agents' || view === 'projects') {
@@ -2159,7 +2180,7 @@ export default function App() {
             </div>
           </div>
         </div>
-        <div className="sidebar-footer">
+          <div className="sidebar-footer">
           <img className="sidebar-footer-logo" src="/av-mark-white.png" alt="Artifact Virtual" />
           <span className="version-label">{__SYMBIOTE_VERSION__}</span>
         </div>
@@ -2175,7 +2196,7 @@ export default function App() {
           </div>
           <div className="topbar-right">
             {isDesktopApp && <button className="icon-button utility-button" onClick={() => void window.symbioteDesktop?.openMini()} aria-label="Open floating mini chat" title="Open floating mini chat"><Minimize2 size={16} /></button>}
-            <span className={`live-indicator${isOnline ? ' live-indicator-on' : ''}`}><span />{isOnline ? 'LIVE' : 'OFFLINE'}</span>
+            <span className={`live-indicator${isOnline ? ' live-indicator-on' : ' live-indicator-retrying'}`}><span />{isOnline ? 'LIVE' : 'RETRYING'}</span>
             <button className="icon-button utility-button" onClick={() => { setCommandOpen(true); setCommandQuery(''); }} aria-label="Open command menu (Ctrl+K)" title="Command menu · Ctrl+K">
               <Command size={16} />
             </button>
@@ -4394,8 +4415,8 @@ function OperationsView(props: {
       <PageHeading eyebrow="LIVE SYSTEM TELEMETRY" title="Health" detail="24-hour gateway availability, provider call reliability, and live hardware resource headroom." action={<button className="button button-secondary" onClick={onRefresh}><RefreshCw size={15} />Refresh now</button>} />
       <div className="operation-summary">
         <div className="operation-summary-mark"><Gauge size={19} /></div>
-        <div className="operation-summary-copy"><strong>{connected ? 'Gateway is responding' : 'Gateway is unreachable'}</strong><span>{connected && status ? `Process ${status.pid ?? '—'} · Running for ${status.uptimeHuman ?? '—'} · ${status.activeTurns ?? 0} active turns` : 'Check that the Symbiote gateway process is running.'}</span></div>
-        <span className={`status-tag${connected ? ' status-tag-live' : ' status-tag-idle'}`}><span />{connected ? 'Operational' : 'Offline'}</span>
+        <div className="operation-summary-copy"><strong>{connected ? 'Gateway is responding' : 'Reconnecting to gateway'}</strong><span>{connected && status ? `Process ${status.pid ?? '—'} · Running for ${status.uptimeHuman ?? '—'} · ${status.activeTurns ?? 0} active turns` : 'The gateway connection will be retried automatically.'}</span></div>
+        <span className={`status-tag${connected ? ' status-tag-live' : ' status-tag-idle'}`}><span />{connected ? 'Operational' : 'Retrying'}</span>
       </div>
       <section className="health-telemetry" aria-label="Live system telemetry">
         {telemetry.map(({ label, icon: Icon, value, detail, percent }) => {

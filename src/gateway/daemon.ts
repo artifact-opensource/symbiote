@@ -535,6 +535,7 @@ export class SymbioteGateway {
       initSarsi();
       startMetaLoop();
     } catch (err) {
+      this.recordGatewayIssue('self-improvement', err instanceof Error ? err.message : String(err));
       console.log(warn(`SARSI/Meta^n init failed — continuing without self-improvement loop: ${err instanceof Error ? err.message : err}`));
     }
 
@@ -558,6 +559,7 @@ export class SymbioteGateway {
       this.cronManager.start(async alert => { await this.handleCronAlert(alert); });
     } catch (error) {
       this.cronManager.stop();
+      this.recordGatewayIssue('cron', error instanceof Error ? error.message : String(error));
       console.error(`[cron] Scheduler could not start: ${error instanceof Error ? error.message : String(error)}`);
     }
     try {
@@ -566,6 +568,7 @@ export class SymbioteGateway {
       });
     } catch (error) {
       this.threadManager.stopNotifications();
+      this.recordGatewayIssue('threads', error instanceof Error ? error.message : String(error));
       console.error(`[threads] Notification worker could not start: ${error instanceof Error ? error.message : String(error)}`);
     }
 
@@ -1238,8 +1241,18 @@ export class SymbioteGateway {
         getStatus: () => this.status(),
         getTelemetry: () => {
           const metrics = this.metrics.snapshot();
+          const uptime = Date.now() - this.startTime;
+          const memoryUsage = process.memoryUsage();
           return {
             healthTelemetry: this.healthTelemetry.getSnapshot(),
+            providerHealth: this.providerHealth.getAllHealth(),
+            uptime,
+            uptimeHuman: this.formatUptime(uptime),
+            activeTurns: this.activeTurns.size,
+            memory: {
+              rss: Math.round(memoryUsage.rss / 1024 / 1024),
+              heap: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+            },
             metrics: { system: { host: metrics.system.host } },
           };
         },
@@ -1573,7 +1586,11 @@ export class SymbioteGateway {
         webAccessToken,
         logPath: path.join(process.cwd(), 'symbiote.log'),
       });
+      this.webServer?.on('close', () => {
+        if (!this.shutdownRequested) this.recordGatewayIssue('web-server', 'Web server closed unexpectedly.');
+      });
     } catch (err) {
+      this.recordGatewayIssue('web-server', err instanceof Error ? err.message : String(err));
       console.log(warn(`Web UI failed to start — ${(err as Error).message}`));
     }
   }
@@ -3076,6 +3093,7 @@ export class SymbioteGateway {
       console.log(`${palette.dim}  [gateway]${palette.reset} System prompt refreshed ${palette.dim}(${this.systemPrompt.length} chars)${palette.reset}`);
       console.log(ok('Config reloaded successfully'));
     } catch (err) {
+      this.recordGatewayIssue('config', err instanceof Error ? err.message : String(err));
       console.error(`  ${palette.red}✗ [gateway]${palette.reset} Config reload failed: ${err}`);
     }
   }

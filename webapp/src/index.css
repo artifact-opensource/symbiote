@@ -125,6 +125,7 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .sidebar-empty { padding: 0 6px; color: #aab4aa; font-size: 10px; line-height: 1.6; }
 .sidebar-footer { display: flex; min-height: 40px; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 6px 6px 0; border-top: 1px solid #3a4b40; }
 .sidebar-footer-logo { display: block; width: 25px; height: 25px; object-fit: contain; opacity: .9; }
+:root[data-theme="dark"] .sidebar-footer-logo { filter: brightness(0); }
 .version-label { color: #8c9b90; font-family: var(--mono); font-size: 9px; }
 
 /* Main canvas and utility bar */
@@ -170,6 +171,9 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .live-indicator > span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .live-indicator-on { color: #496b4e; }
 .live-indicator-on > span { background: #72994f; box-shadow: 0 0 0 3px rgb(114 153 79 / 13%); }
+.live-indicator-retrying { color: #a27a45; }
+.live-indicator-retrying > span { animation: retrying-pulse 1.4s ease-in-out infinite; }
+@keyframes retrying-pulse { 50% { opacity: .3; } }
 .topbar-separator { width: 1px; height: 18px; background: var(--line-strong); }
 .topbar-provider { max-width: 210px; overflow: hidden; color: var(--ink-soft); font-family: var(--mono); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .profile-avatar { width: 29px; height: 29px; flex-basis: 29px; border: 1px solid #ded6c8; color: #574a40; background: #e9ded0; font-family: Inter, 'Segoe UI', sans-serif; font-size: 11px; font-weight: 650; }
@@ -986,6 +990,7 @@ svg.lucide { color: var(--appearance-icon, var(--lime)) !important; }
 :root[data-theme="dark"] .profile-avatar { border-color: #5a6253; color: #e8e6da; background: #3c463b; }
 :root[data-theme="dark"] .live-indicator { color: #d0937d; }
 :root[data-theme="dark"] .live-indicator-on { color: #a9c47e; }
+:root[data-theme="dark"] .live-indicator-retrying { color: #d4ad70; }
 :root[data-theme="dark"] .metric-card,
 :root[data-theme="dark"] .surface-card { border-color: var(--line); background: var(--paper-raised); }
 :root[data-theme="dark"] .metric-label,
