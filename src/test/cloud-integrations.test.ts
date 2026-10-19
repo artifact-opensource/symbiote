@@ -36,6 +36,11 @@ test('Azure requests obtain a token and stay inside the configured subscription'
       : response({ value: [{ name: 'group' }] });
   };
   const tool = createCloudIntegrationTool('azure', vault, fetcher);
+  assert.equal(tool.idempotency?.class, 'external');
+  assert.notEqual(
+    tool.idempotency?.idempotencyKey?.({ method: 'GET', path: '/subscriptions/a' }),
+    tool.idempotency?.idempotencyKey?.({ method: 'GET', path: '/subscriptions/b' }),
+  );
   const result = JSON.parse(await tool.execute({
     method: 'GET',
     path: '/subscriptions/subscription-id/resourcegroups',
@@ -146,6 +151,11 @@ test('Kaggle kernel tool uploads a private GPU notebook archive', async () => wi
   };
   const tool = createCloudIntegrationTools(vault, fetcher).find(candidate => candidate.name === 'kaggle_kernel_push');
   assert.ok(tool);
+  assert.equal(tool.idempotency?.class, 'external');
+  assert.notEqual(
+    tool.idempotency?.idempotencyKey?.({ metadata: { id: 'researcher/notebook' }, source: 'first' }),
+    tool.idempotency?.idempotencyKey?.({ metadata: { id: 'researcher/notebook' }, source: 'second' }),
+  );
   const result = JSON.parse(await tool.execute({
     metadata: {
       id: 'researcher/transformer-training',
