@@ -22,6 +22,16 @@ test('appearance settings persist across store instances in the workspace data d
       primaryHue: 280,
       secondaryHue: 42,
     });
+    assert.deepEqual(first.write({ brightness: 25, primaryHue: 280, secondaryHue: 42, sidebarTransparency: 37 }), {
+      brightness: 25,
+      primaryHue: 280,
+      secondaryHue: 42,
+    });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(workspace, '.agents', 'appearance.json'), 'utf8')), {
+      brightness: 25,
+      primaryHue: 280,
+      secondaryHue: 42,
+    });
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

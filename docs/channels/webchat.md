@@ -40,7 +40,7 @@ Open **Cron** in the workspace drawer to create one-time reminders or recurring 
 
 ## Shared appearance and release notices
 
-The sliders control adjusts brightness (from AMOLED black to full light) and the primary and accent hues. These settings are stored by the gateway under `<workspace>/.agents/appearance.json` and shared by Control Room browser tabs and Electron; browser-local values provide a fallback while connecting.
+The Appearance controls adjust brightness (from AMOLED black to full light) and the primary and accent hues. These settings are stored by the gateway under `<workspace>/.agents/appearance.json` and shared by Control Room browser tabs and Electron; browser-local values provide a fallback while connecting.
 
 When the gateway can reach GitHub, it checks the latest stable release at startup and periodically afterward. If a newer version is found, the Control Room links to its release page. This is a notice only: Symbiote does not download or install updates automatically. Offline or failed checks do not prevent the gateway from running.
 

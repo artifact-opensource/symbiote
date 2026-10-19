@@ -7,7 +7,7 @@ import test from 'node:test';
 import { readWorkspaceIdentity, updateWorkspaceIdentity } from '../agent/workspace-identity.js';
 import { createWorkspaceSessionManager, SessionManager } from '../sessions/manager.js';
 import { createWorkspaceTaskTool } from '../tools/builtin/workspace-tasks.js';
-import { validateAppearanceSettings } from '../appearance/settings.js';
+import { validateAppearanceSettings, type AppearanceSettings } from '../appearance/settings.js';
 import { startWebServer, type WebControlPlane } from '../web/server.js';
 import type { AgentThread, ThreadContact } from '../threads/manager.js';
 
@@ -51,7 +51,7 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   let includedArchivedProjects = false;
   let integrationTests = 0;
   let defaultAgentPrompt = 'test prompt';
-  let appearanceSettings = { brightness: 64, primaryHue: 145, secondaryHue: 13 };
+  let appearanceSettings: AppearanceSettings = { brightness: 64, primaryHue: 145, secondaryHue: 13 };
   let updatePrepareCalls = 0;
   const updateDownload = {
     state: 'ready' as const,

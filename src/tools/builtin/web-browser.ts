@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ToolDefinition } from '../types.js';
-import { appHomeDir, pythonCommand } from '../../runtime/platform.js';
+import { appHomeDir, pythonCommandWithRequiredModule } from '../../runtime/platform.js';
 
 const __filename_esm = fileURLToPath(import.meta.url);
 const __dirname_esm = dirname(__filename_esm);
@@ -21,8 +21,15 @@ const pending = new Map<number, { resolve: (v: any) => void; reject: (e: any) =>
 let buffer = '';
 export const DEFAULT_BROWSER_HOMEPAGE = 'https://symbiote.artifactvirtual.com';
 
+function rejectPending(error: Error): void {
+  for (const [id, request] of pending) {
+    pending.delete(id);
+    request.reject(error);
+  }
+}
+
 function ensureSidecar(): ChildProcess {
-  if (sidecar && !sidecar.killed) {
+  if (sidecar && !sidecar.killed && sidecar.exitCode === null && sidecar.signalCode === null) {
     resetIdle();
     return sidecar;
   }
@@ -43,7 +50,8 @@ function ensureSidecar(): ChildProcess {
     throw new Error('browser-sidecar.py not found. Rebuild Symbiote to copy its runtime sidecars.');
   }
 
-  const python = pythonCommand(sidecarPath);
+  const python = pythonCommandWithRequiredModule(sidecarPath, 'playwright');
+  buffer = '';
   const proc = spawn(python.file, python.args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {
@@ -71,6 +79,11 @@ function ensureSidecar(): ChildProcess {
     }
   });
 
+  proc.stdin!.on('error', (error) => {
+    if (sidecar === proc) sidecar = null;
+    rejectPending(error);
+  });
+
   proc.stderr!.on('data', (chunk: Buffer) => {
     const text = chunk.toString().trim();
     if (text) console.error('[symbiote:web] ' + text);
@@ -78,19 +91,17 @@ function ensureSidecar(): ChildProcess {
 
   proc.on('exit', (code) => {
     console.log('[symbiote:web] sidecar exited (code ' + code + ')');
-    if (sidecar === proc) sidecar = null;
-    for (const [id, p] of pending) {
-      p.reject(new Error('Sidecar process exited'));
-      pending.delete(id);
+    if (sidecar === proc) {
+      sidecar = null;
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = null;
     }
+    rejectPending(new Error(`Browser sidecar exited (code ${code ?? 'unknown'}).`));
   });
   proc.on('error', (error) => {
     console.error('[symbiote:web] sidecar process error:', error);
     if (sidecar === proc) sidecar = null;
-    for (const [id, request] of pending) {
-      request.reject(error);
-      pending.delete(id);
-    }
+    rejectPending(error);
   });
 
   resetIdle();
@@ -125,6 +136,7 @@ function rpc(method: string, params: Record<string, any> = {}): Promise<any> {
     const msg = JSON.stringify({ id, method, params }) + '\n';
     proc.stdin!.write(msg, error => {
       if (!error) return;
+      if (!pending.has(id)) return;
       pending.delete(id);
       clearTimeout(timeout);
       reject(error);
@@ -577,28 +589,28 @@ export async function browserNavigate(url: string): Promise<{ url: string; title
   return { url: result.url, title: result.title };
 }
 
-export async function browserCapture(): Promise<{ url: string; title: string; viewport: { width: number; height: number }; image: string }> {
-  const tabs = await rpc('tabs');
-  const activeTab = Array.isArray(tabs.tabs) ? tabs.tabs.find((tab: { active?: boolean }) => tab.active) : undefined;
-  if (!activeTab || !activeTab.url || activeTab.url === 'about:blank') {
-    await browserNavigate(DEFAULT_BROWSER_HOMEPAGE);
-  }
+export async function browserCapture(): Promise<{ url: string; title: string; viewport: { width: number; height: number }; image: string; tabs: Array<{ index: number; url: string; title: string; active: boolean }> }> {
   const result = await rpc('cua_screenshot');
   if (!result.success) throw new Error(result.error || 'Browser screenshot failed.');
   if (typeof result.path !== 'string' || result.path.startsWith('error:')) {
     throw new Error(typeof result.path === 'string' ? result.path.slice(6) : 'Browser screenshot did not return a file path.');
   }
   const image = readFileSync(result.path).toString('base64');
+  const latestTabs = await rpc('tabs');
   return {
     url: result.url,
     title: result.title,
     viewport: result.viewport,
     image: `data:image/jpeg;base64,${image}`,
+    tabs: Array.isArray(latestTabs.tabs) ? latestTabs.tabs : [],
   };
 }
 
-export async function browserControl(action: 'click' | 'move' | 'type' | 'press' | 'scroll', params: Record<string, unknown>): Promise<void> {
-  const method = `cua_${action}`;
+export async function browserControl(
+  action: 'click' | 'move' | 'type' | 'press' | 'scroll' | 'tab_open' | 'tab_switch' | 'tab_close',
+  params: Record<string, unknown>,
+): Promise<void> {
+  const method = action.startsWith('tab_') ? action : `cua_${action}`;
   const result = await rpc(method, params);
   if (!result.success) throw new Error(result.error || `Browser ${action} failed.`);
 }

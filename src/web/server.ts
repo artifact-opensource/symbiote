@@ -160,7 +160,7 @@ export interface WebControlPlane {
   getMemoryDocument: (id: string) => unknown | null;
   browserNavigate: (url: string) => Promise<unknown>;
   browserCapture: () => Promise<unknown>;
-  browserControl: (action: 'click' | 'move' | 'type' | 'press' | 'scroll', params: Record<string, unknown>) => Promise<void>;
+  browserControl: (action: 'click' | 'move' | 'type' | 'press' | 'scroll' | 'tab_open' | 'tab_switch' | 'tab_close', params: Record<string, unknown>) => Promise<void>;
   getChessState: () => unknown;
   saveChessState: (state: Record<string, unknown>) => unknown;
   webAccessToken?: string;
@@ -1054,7 +1054,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       return json(res, await control.browserNavigate(target.toString()));
     }
     if (method === 'POST' && pathname === '/api/browser/action') {
-      const body = JSON.parse(await readBody(req) || '{}') as { action?: unknown; x?: unknown; y?: unknown; text?: unknown; key?: unknown; deltaX?: unknown; deltaY?: unknown };
+      const body = JSON.parse(await readBody(req) || '{}') as { action?: unknown; x?: unknown; y?: unknown; text?: unknown; key?: unknown; deltaX?: unknown; deltaY?: unknown; index?: unknown; url?: unknown };
       if (body.action === 'click' || body.action === 'move') {
         if (![body.x, body.y].every(value => typeof value === 'number' && Number.isFinite(value))) return json(res, { error: 'Finite browser viewport coordinates are required.' }, 400);
         await control.browserControl(body.action, { x: body.x, y: body.y });
@@ -1067,6 +1067,25 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       } else if (body.action === 'scroll') {
         if (![body.x, body.y, body.deltaX, body.deltaY].every(value => typeof value === 'number' && Number.isFinite(value))) return json(res, { error: 'Finite browser scroll coordinates and deltas are required.' }, 400);
         await control.browserControl('scroll', { x: body.x, y: body.y, delta_x: body.deltaX, delta_y: body.deltaY });
+      } else if (body.action === 'tab_open') {
+        if (body.url !== undefined && (typeof body.url !== 'string' || body.url.length > 4_000)) return json(res, { error: 'A valid browser URL is required.' }, 400);
+        let url: string | undefined;
+        if (typeof body.url === 'string' && body.url.trim()) {
+          let target: URL;
+          try {
+            target = new URL(body.url.includes('://') ? body.url : `https://${body.url}`);
+          } catch {
+            return json(res, { error: 'The browser URL is invalid.' }, 400);
+          }
+          if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) return json(res, { error: 'Only HTTP and HTTPS browser URLs are supported.' }, 400);
+          url = target.toString();
+        }
+        await control.browserControl('tab_open', url ? { url } : {});
+      } else if (body.action === 'tab_switch') {
+        if (typeof body.index !== 'number' || !Number.isInteger(body.index) || body.index < 0) return json(res, { error: 'A non-negative browser tab index is required.' }, 400);
+        await control.browserControl('tab_switch', { index: body.index });
+      } else if (body.action === 'tab_close') {
+        await control.browserControl('tab_close', {});
       } else {
         return json(res, { error: 'Unsupported browser action.' }, 400);
       }

@@ -196,3 +196,61 @@ export function pythonCommand(scriptPath: string): { file: string; args: string[
   if (isWindows()) return { file: 'py', args: ['-3', scriptPath] };
   return { file: 'python3', args: [scriptPath] };
 }
+
+function pythonCommandWithModule(scriptPath: string, requiredModule: string): { file: string; args: string[] } {
+  const override = process.env.SYMBIOTE_PYTHON;
+
+  const candidates: Array<{ file: string; args: string[] }> = override
+    ? [{ file: override, args: [] }]
+    : isWindows()
+      ? windowsPythonCandidates()
+      : [{ file: 'python3', args: [] }];
+  const probe = `import importlib.util, sys; sys.exit(0 if importlib.util.find_spec(${JSON.stringify(requiredModule)}) else 1)`;
+  for (const candidate of candidates) {
+    const result = spawnSync(candidate.file, [...candidate.args, '-c', probe], {
+      encoding: 'utf-8',
+      timeout: 5_000,
+      windowsHide: true,
+    });
+    if (!result.error && result.status === 0) {
+      return { file: candidate.file, args: [...candidate.args, scriptPath] };
+    }
+  }
+
+  const interpreter = override ? `SYMBIOTE_PYTHON (${override})` : 'the available Python interpreters';
+  throw new Error(`Python module "${requiredModule}" is unavailable in ${interpreter}. Install it for the selected Python, or set SYMBIOTE_PYTHON to the interpreter that has it.`);
+}
+
+export function pythonCommandWithRequiredModule(scriptPath: string, requiredModule: string): { file: string; args: string[] } {
+  return pythonCommandWithModule(scriptPath, requiredModule);
+}
+
+function windowsPythonCandidates(): Array<{ file: string; args: string[] }> {
+  const candidates: Array<{ file: string; args: string[] }> = [];
+  const launcher = spawnSync('py', ['-0p'], {
+    encoding: 'utf-8',
+    timeout: 5_000,
+    windowsHide: true,
+  });
+  for (const line of (launcher.stdout ?? '').split(/\r?\n/)) {
+    const match = line.match(/^\s*-V:\S+(?:\s+\*)?\s{2,}(.+?)\s*$/);
+    if (match) candidates.push({ file: match[1], args: [] });
+  }
+
+  const pathPython = spawnSync('where.exe', ['python'], {
+    encoding: 'utf-8',
+    timeout: 5_000,
+    windowsHide: true,
+  });
+  for (const file of (pathPython.stdout ?? '').split(/\r?\n/).filter(Boolean)) {
+    candidates.push({ file: file.trim(), args: [] });
+  }
+
+  const seen = new Set<string>();
+  return candidates.filter(candidate => {
+    const key = candidate.file.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}

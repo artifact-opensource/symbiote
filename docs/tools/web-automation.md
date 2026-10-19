@@ -30,6 +30,15 @@ pip3 install playwright
 python3 -m playwright install chromium
 ```
 
+On Windows, install Playwright and Chromium for the same Python interpreter:
+
+```powershell
+py -m pip install playwright
+py -m playwright install chromium
+```
+
+The browser sidecar checks installed Python interpreters and selects one that can import Playwright. Set `SYMBIOTE_PYTHON` to a specific interpreter when Playwright is installed in a custom environment.
+
 ## Tools (14)
 
 ### Navigation

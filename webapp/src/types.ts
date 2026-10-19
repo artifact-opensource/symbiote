@@ -1,4 +1,4 @@
-export type ViewId = 'workspace' | 'ide' | 'runs' | 'agents' | 'chat' | 'browser' | 'memory' | 'games' | 'integrations' | 'operations' | 'tools' | 'settings';
+export type ViewId = 'workspace' | 'ide' | 'runs' | 'agents' | 'projects' | 'threads' | 'chat' | 'browser' | 'memory' | 'games' | 'integrations' | 'operations' | 'tools' | 'settings';
 
 export interface MemoryGraphNode {
   id: string;
