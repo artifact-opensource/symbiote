@@ -94,14 +94,16 @@ export class HealthTelemetryStore {
       ['gateway.started', 'gateway.heartbeat', 'gateway.stopped', 'gateway.outage'].includes(event.type)
       && event.timestamp <= now,
     );
-    const firstTrackedAt = Math.max(start, lifecycleEvents[0]?.timestamp ?? now);
-    let online = false;
-    let onlineSince = firstTrackedAt;
+    const priorLifecycle = lifecycleEvents.filter(event => event.timestamp < start).at(-1);
+    const windowLifecycle = lifecycleEvents.filter(event => event.timestamp >= start);
+    const firstTrackedAt = priorLifecycle ? start : Math.max(start, windowLifecycle[0]?.timestamp ?? now);
+    let online = priorLifecycle?.type === 'gateway.started' || priorLifecycle?.type === 'gateway.heartbeat';
+    let onlineSince = online ? start : firstTrackedAt;
     let uptimeMs = 0;
     let downtimeMs = 0;
-    let offlineSince = firstTrackedAt;
+    let offlineSince = online ? start : firstTrackedAt;
 
-    for (const event of lifecycleEvents) {
+    for (const event of windowLifecycle) {
       if (event.type === 'gateway.started') {
         if (!online && event.timestamp >= firstTrackedAt) {
           downtimeMs += Math.max(0, event.timestamp - offlineSince);
@@ -169,6 +171,14 @@ export class HealthTelemetryStore {
     return this.cachedSnapshot;
   }
 
+  getLatestGatewayLifecycleEvent(): HealthEvent | undefined {
+    for (let index = this.events.length - 1; index >= 0; index--) {
+      const event = this.events[index];
+      if (['gateway.started', 'gateway.heartbeat', 'gateway.stopped', 'gateway.outage'].includes(event.type)) return event;
+    }
+    return undefined;
+  }
+
   private loadEvents(): HealthEvent[] {
     let contents: string;
     try {
@@ -201,8 +211,10 @@ export class HealthTelemetryStore {
 
   private pruneInMemory(now: number): void {
     const cutoff = now - RETENTION_MS;
+    const previousLength = this.events.length;
+    const exceededLimit = previousLength > MAX_EVENTS;
     this.events = this.events.filter(event => event.timestamp >= cutoff).slice(-MAX_EVENTS);
-    if (this.events.length === MAX_EVENTS || this.events.length % 500 === 0) {
+    if (this.events.length < previousLength || exceededLimit) {
       this.persistCurrentEvents();
     }
   }

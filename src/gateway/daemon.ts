@@ -121,6 +121,7 @@ import { McpBridge } from '../tools/mcp-bridge.js';
 import { MetricsCollector, getMetrics } from '../metrics/collector.js';
 import { HotResumeManager } from '../sessions/hot-resume.js';
 import { ProviderHealthMonitor } from '../providers/health.js';
+import { HealthTelemetryStore } from '../health/telemetry.js';
 import { APP_VERSION } from '../meta/version.js';
 import { ReleaseChecker } from '../updates/release-checker.js';
 import { ReleaseUpdater } from '../updates/release-updater.js';
@@ -267,6 +268,8 @@ export class SymbioteGateway {
   private hotResume: HotResumeManager;
   /** v2.0 — Provider health: circuit breaker, latency tracking, health states */
   private providerHealth: ProviderHealthMonitor;
+  private healthTelemetry!: HealthTelemetryStore;
+  private healthHeartbeat: ReturnType<typeof setInterval> | null = null;
   private readonly releaseChecker = new ReleaseChecker(APP_VERSION);
   private readonly releaseUpdater = new ReleaseUpdater(
     () => this.releaseChecker.getStatus(),
@@ -334,6 +337,7 @@ export class SymbioteGateway {
     this.sessionManager = createWorkspaceSessionManager(this.config.workspace, this.config.sessionsDir);
     this.workspaceRegistry = new WorkspaceRegistry(this.config.workspace);
     console.log(`${palette.dim}  [sessions] Store: ${palette.cyan}${this.sessionManager.directory}${palette.reset}`);
+    this.healthTelemetry = new HealthTelemetryStore(this.sessionManager.directory);
 
     // v2.0 — Metrics collector
     this.metrics = getMetrics({
@@ -342,7 +346,15 @@ export class SymbioteGateway {
     });
 
     // v2.0 — Provider health monitor (circuit breaker + latency tracking)
-    this.providerHealth = new ProviderHealthMonitor();
+    this.providerHealth = new ProviderHealthMonitor(undefined, event => {
+      this.healthTelemetry.record({
+        type: 'provider.call',
+        provider: event.provider,
+        succeeded: event.succeeded,
+        ...(event.latencyMs !== undefined ? { latencyMs: event.latencyMs } : {}),
+        ...(event.error ? { message: event.error } : {}),
+      });
+    });
 
     // v2.0 — Hot resume manager (session state persistence across restarts)
     this.hotResume = new HotResumeManager({
@@ -395,6 +407,9 @@ export class SymbioteGateway {
       onSessionRoute: (route) => this.sessionManager.saveRoute(route),
       onAdapterHealthChange: (id, health) => {
         console.log(`${palette.dim}  [gateway]${palette.reset} Adapter ${palette.cyan}${id}${palette.reset}: ${palette.silver}${health.state}${palette.reset}${health.lastError ? ` ${palette.dim}(${health.lastError})${palette.reset}` : ''}`);
+        if (health.state === 'disconnected') {
+          this.recordGatewayIssue(`channel:${id}`, health.lastError ?? 'Channel disconnected.');
+        }
       },
     });
 
@@ -472,6 +487,23 @@ export class SymbioteGateway {
   // ── Start ──────────────────────────────────────────────────────────────
 
   async start(): Promise<void> {
+    const previousLifecycle = this.healthTelemetry.getLatestGatewayLifecycleEvent();
+    if (previousLifecycle && ['gateway.started', 'gateway.heartbeat'].includes(previousLifecycle.type)) {
+      this.healthTelemetry.record({
+        type: 'gateway.outage',
+        outageStartedAt: previousLifecycle.timestamp,
+        message: 'Gateway stopped without recording a graceful shutdown.',
+      });
+    }
+    this.healthTelemetry.record({ type: 'gateway.started', message: `Gateway started (PID ${process.pid}).` });
+    this.healthHeartbeat = setInterval(() => {
+      try {
+        this.healthTelemetry.record({ type: 'gateway.heartbeat' });
+      } catch (error) {
+        console.error('[health] Could not persist gateway heartbeat:', error);
+      }
+    }, 15_000);
+    this.healthHeartbeat.unref?.();
     this.releaseChecker.start();
     console.log(versionBanner(APP_VERSION));
     if (this.toolRegistry.get('computer_use')) {
@@ -1204,6 +1236,14 @@ export class SymbioteGateway {
       }
       this.webServer = startWebServer(webPort, webHost, {
         getStatus: () => this.status(),
+        getTelemetry: () => {
+          const metrics = this.metrics.snapshot();
+          return {
+            healthTelemetry: this.healthTelemetry.getSnapshot(),
+            metrics: { system: { host: metrics.system.host } },
+          };
+        },
+        recordGatewayIssue: (subsystem, message) => this.recordGatewayIssue(subsystem, message),
         getUpdateDownload: () => this.releaseUpdater.getStatus(),
         prepareUpdateDownload: () => this.releaseUpdater.prepareWindowsInstaller(),
         getUpdateInstallerPath: () => this.releaseUpdater.getInstallerPath(),
@@ -2926,6 +2966,13 @@ export class SymbioteGateway {
     const shutdown = async (signal: string) => {
       if (this.shutdownRequested) return;
       this.shutdownRequested = true;
+      if (this.healthHeartbeat) clearInterval(this.healthHeartbeat);
+      this.healthHeartbeat = null;
+      try {
+        this.healthTelemetry.record({ type: 'gateway.stopped', message: `Gateway stopped cleanly (${signal}).` });
+      } catch (error) {
+        console.error('[health] Could not persist gateway shutdown event:', error);
+      }
       console.log(`\n${palette.dim}  [gateway]${palette.reset} ${palette.yellow}${signal}${palette.reset} — shutting down...`);
 
       // Cancel all active turns
@@ -2974,6 +3021,12 @@ export class SymbioteGateway {
 
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('uncaughtExceptionMonitor', (error, origin) => {
+      this.recordGatewayIssue('process', `Uncaught ${origin}: ${error.message}`);
+    });
+    process.on('unhandledRejection', reason => {
+      this.recordGatewayIssue('process', `Unhandled rejection: ${reason instanceof Error ? reason.message : String(reason)}`);
+    });
 
     // Hot-reload config. SIGUSR1 works on Linux/macOS; Windows has no POSIX
     // signals, so fall back to watching the config file for changes instead.
@@ -3060,6 +3113,7 @@ export class SymbioteGateway {
       tools: this.toolRegistry.list().length,
       // v2.0 additions
       providerHealth: this.providerHealth.getAllHealth(),
+      healthTelemetry: this.healthTelemetry.getSnapshot(),
       metrics: this.metrics.snapshot(),
       memory: {
         rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
@@ -3067,6 +3121,14 @@ export class SymbioteGateway {
       },
       pid: process.pid,
     };
+  }
+
+  private recordGatewayIssue(subsystem: string, message: string): void {
+    try {
+      this.healthTelemetry.record({ type: 'gateway.issue', subsystem, message });
+    } catch (error) {
+      console.error(`[health] Could not persist gateway issue from ${subsystem}:`, error);
+    }
   }
 
   private formatUptime(ms: number): string {

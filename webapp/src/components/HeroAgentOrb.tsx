@@ -16,6 +16,8 @@ export default function HeroAgentOrb({ x, y, activity }: HeroAgentOrbProps) {
   const orbContainerRef = useRef<HTMLDivElement>(null);
   const [orbViewboxSize, setOrbViewboxSize] = useState(INITIAL_ORB_VIEWBOX_SIZE);
   const idle = activity === 'listening';
+  const activityState = getActivityOrbState(activity);
+  const state = idle ? 'working' : activityState === 'working' ? 'searching' : activityState;
 
   useEffect(() => {
     const svg = orbContainerRef.current?.closest('svg');
@@ -46,7 +48,7 @@ export default function HeroAgentOrb({ x, y, activity }: HeroAgentOrbProps) {
     >
       <div ref={orbContainerRef} className="hero-agent-orb">
         <ThinkingOrb
-          state={idle ? 'working' : getActivityOrbState(activity)}
+          state={state}
           size={ORB_SIZE}
           aria-label={`Symbiote ${idle ? 'idle' : getActivityLabel(activity)}`}
           style={{ width: orbViewboxSize, height: orbViewboxSize }}

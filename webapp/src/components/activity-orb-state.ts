@@ -26,7 +26,7 @@ const ACTIVITY_STATES: Record<AgentActivity, OrbState> = {
   reading: 'searching',
   writing: 'composing',
   editing: 'shaping',
-  executing: 'searching',
+  executing: 'working',
   searching: 'searching',
   browsing: 'connecting',
   analyzing: 'solving',

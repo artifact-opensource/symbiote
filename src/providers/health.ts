@@ -44,6 +44,13 @@ export interface HealthMonitorConfig {
   degradedLatencyMs?: number;
 }
 
+export interface ProviderCallHealthEvent {
+  provider: string;
+  succeeded: boolean;
+  latencyMs?: number;
+  error?: string;
+}
+
 const DEFAULT_CONFIG: Required<HealthMonitorConfig> = {
   circuitBreakerThreshold: 3,
   circuitCooldownMs: 60_000,
@@ -57,7 +64,10 @@ export class ProviderHealthMonitor {
   private latencyBuffers = new Map<string, number[]>(); // Last N latencies
   private static readonly LATENCY_WINDOW = 20;
 
-  constructor(config?: HealthMonitorConfig) {
+  constructor(
+    config?: HealthMonitorConfig,
+    private readonly onCall?: (event: ProviderCallHealthEvent) => void,
+  ) {
     this.config = { ...DEFAULT_CONFIG, ...config };
   }
 
@@ -70,6 +80,7 @@ export class ProviderHealthMonitor {
     h.consecutiveSuccesses++;
     h.lastSuccessAt = Date.now();
     h.totalCalls++;
+    this.reportCall({ provider: name, succeeded: true, latencyMs });
 
     // Update latency
     this.pushLatency(name, latencyMs);
@@ -95,6 +106,7 @@ export class ProviderHealthMonitor {
     h.lastFailureAt = Date.now();
     h.lastError = error;
     h.totalCalls++;
+    this.reportCall({ provider: name, succeeded: false, error });
 
     // Circuit breaker: open circuit after threshold
     if (h.consecutiveFailures >= this.config.circuitBreakerThreshold && h.state !== 'circuit-open') {
@@ -198,5 +210,13 @@ export class ProviderHealthMonitor {
     const buf = this.latencyBuffers.get(name);
     if (!buf || buf.length === 0) return 0;
     return Math.round(buf.reduce((a, b) => a + b, 0) / buf.length);
+  }
+
+  private reportCall(event: ProviderCallHealthEvent): void {
+    try {
+      this.onCall?.(event);
+    } catch (error) {
+      console.error('[health] Could not persist provider call telemetry:', error);
+    }
   }
 }

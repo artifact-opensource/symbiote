@@ -243,6 +243,34 @@ export interface GatewayStatus {
   sessions?: number;
   tools?: number;
   providerHealth?: Record<string, unknown> | unknown[];
+  healthTelemetry?: {
+    generatedAt: number;
+    windowMs: number;
+    gateway: {
+      score: number;
+      trackedMs: number;
+      uptimeMs: number;
+      downtimeMs: number;
+      issueCount: number;
+      lastIncidentAt?: number;
+    };
+    providers: {
+      score: number | null;
+      calls: number;
+      failures: number;
+      byProvider: Record<string, { calls: number; failures: number }>;
+    };
+    recentEvents: Array<{
+      timestamp: number;
+      type: string;
+      subsystem?: string;
+      provider?: string;
+      succeeded?: boolean;
+      latencyMs?: number;
+      message?: string;
+      outageStartedAt?: number;
+    }>;
+  };
   metrics?: {
     turnCount?: number;
     totalTurns?: number;

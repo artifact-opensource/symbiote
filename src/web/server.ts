@@ -69,6 +69,8 @@ interface SubAgent {
 
 export interface WebControlPlane {
   getStatus: () => Record<string, unknown>;
+  getTelemetry?: () => Record<string, unknown>;
+  recordGatewayIssue?: (subsystem: string, message: string) => void;
   getUpdateDownload?: () => ReleaseDownloadStatus;
   prepareUpdateDownload?: () => Promise<ReleaseDownloadStatus>;
   getUpdateInstallerPath?: () => string | undefined;
@@ -618,6 +620,10 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
 
     if (method === 'GET' && pathname === '/api/status') {
       return json(res, control.getStatus());
+    }
+    if (method === 'GET' && pathname === '/api/telemetry') {
+      if (!control.getTelemetry) return json(res, { error: 'Live telemetry is unavailable in this runtime.' }, 501);
+      return json(res, control.getTelemetry());
     }
     if (pathname === '/api/update/download' && method === 'POST') {
       if (!isSameOriginRequest(req)) return json(res, { error: 'Update downloads must be requested from the Symbiote Control Room.' }, 403);
@@ -1744,6 +1750,7 @@ function formatUptime(ms: number): string {
 export function startWebServer(port = 3006, host = '127.0.0.1', control?: WebControlPlane): http.Server {
   const server = http.createServer((req, res) => {
     handleRequest(req, res, control).catch(err => {
+      control?.recordGatewayIssue?.('web-api', err instanceof Error ? err.message : String(err));
       console.error(`${palette.dim}  [symbiote-web]${palette.reset}`, err);
       if (!res.headersSent) {
         json(res, { error: 'Internal server error' }, 500);
@@ -1765,6 +1772,10 @@ export function startWebServer(port = 3006, host = '127.0.0.1', control?: WebCon
 
   server.listen(port, host, () => {
     console.log(ok(`Web UI → ${palette.cyan}http://${host}:${port}${palette.reset}`));
+  });
+  server.on('error', error => {
+    control?.recordGatewayIssue?.('web-server', error.message);
+    console.error('[symbiote-web] Server error:', error);
   });
 
   return server;

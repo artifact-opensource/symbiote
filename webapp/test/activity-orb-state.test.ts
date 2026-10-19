@@ -41,3 +41,18 @@ test('Discord tool activity categories have matching chat orb states and labels'
   assert.equal(isAgentActivity('browsing'), true);
   assert.equal(isAgentActivity('unknown'), false);
 });
+
+test('every agent activity and loading state resolves to a shipped orb animation', () => {
+  const activities = [
+    'thinking', 'reasoning', 'responding', 'reading', 'writing', 'editing',
+    'executing', 'searching', 'browsing', 'analyzing', 'generating',
+    'recalling', 'staging', 'spawning', 'speaking', 'listening', 'reacting',
+  ] as const;
+
+  for (const activity of activities) {
+    const state = getActivityOrbState(activity);
+    assert.ok(STATE_TO_MODE[state], `${activity} should map to a shipped animation`);
+  }
+
+  assert.ok(STATE_TO_MODE[getLoadingOrbState()], 'loading should map to a shipped animation');
+});

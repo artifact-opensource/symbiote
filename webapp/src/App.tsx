@@ -42,6 +42,21 @@ const NAVIGATION: { id: ViewId; label: string; icon: typeof LayoutDashboard; gro
   { id: 'operations', label: 'Health', icon: Activity, group: 'Runtime' },
 ];
 
+const REFRESH_INTERVAL_KEY = 'symbiote-telemetry-refresh-ms';
+const MIN_REFRESH_INTERVAL_MS = 400;
+const MAX_REFRESH_INTERVAL_MS = 5000;
+
+function readRefreshInterval(): number {
+  try {
+    const value = Number(window.localStorage.getItem(REFRESH_INTERVAL_KEY));
+    return Number.isFinite(value) && value >= MIN_REFRESH_INTERVAL_MS && value <= MAX_REFRESH_INTERVAL_MS
+      ? value
+      : MIN_REFRESH_INTERVAL_MS;
+  } catch {
+    return MIN_REFRESH_INTERVAL_MS;
+  }
+}
+
 type Theme = 'light' | 'dark';
 type AppearanceSettings = { brightness: number; primaryHue: number; secondaryHue: number };
 
@@ -918,6 +933,7 @@ export default function App() {
   const isMinimalMode = new URLSearchParams(window.location.search).get('minimal') === '1';
   const isDesktopApp = new URLSearchParams(window.location.search).get('desktop') === '1' && Boolean(window.symbioteDesktop);
   const [view, setView] = useState<ViewId>('workspace');
+  const [refreshIntervalMs, setRefreshIntervalMs] = useState(readRefreshInterval);
   const [threadToOpen, setThreadToOpen] = useState('');
   const [googleWorkspaceGrant, setGoogleWorkspaceGrant] = useState<GoogleWorkspaceGrant | null>(null);
   const [cloudProviderStatus, setCloudProviderStatus] = useState<CloudProviderStatus>({
@@ -1221,6 +1237,19 @@ export default function App() {
     }
   }, []);
 
+  const refreshTelemetry = useCallback(async () => {
+    const fresh = await api<Pick<GatewayStatus, 'healthTelemetry' | 'metrics'>>('/api/telemetry');
+    setStatus(previous => previous ? { ...previous, ...fresh } : previous);
+    setGatewayConnected(true);
+    const hostSample = fresh.metrics?.system?.host;
+    if (hostSample?.sampledAt) {
+      setHostHistory(previous => previous[previous.length - 1]?.sampledAt === hostSample.sampledAt
+        ? previous
+        : [...previous.slice(-59), hostSample]);
+    }
+    setLastUpdated(Date.now());
+  }, []);
+
   const installUpdate = async () => {
     if (!window.symbioteDesktop || preparingUpdate) return;
     setPreparingUpdate(true);
@@ -1249,6 +1278,7 @@ export default function App() {
     setError('');
     const results = await Promise.allSettled([
       refreshStatus(),
+      refreshTelemetry(),
       api<GatewayConfig>('/api/config').then(setConfig),
       api<{ providers: CloudProviderStatus }>('/api/integrations').then(result => setCloudProviderStatus(result.providers)),
       api<WorkspaceProject[]>('/api/projects').then(data => {
@@ -1267,7 +1297,7 @@ export default function App() {
     if (firstError?.status === 'rejected') setError(firstError.reason instanceof Error ? firstError.reason.message : 'Could not load gateway data.');
     setLoading(false);
     if (showSpinner) setRefreshing(false);
-  }, [refreshStatus, refreshWork]);
+  }, [refreshStatus, refreshTelemetry, refreshWork]);
 
   const unlockLanAccess = async (token: string) => {
     setAccessError('');
@@ -1323,6 +1353,14 @@ export default function App() {
     const statusTimer = window.setInterval(() => {
       void refreshStatus().catch(() => setError('Gateway connection was interrupted. Retrying…'));
     }, view === 'workspace' ? 3000 : 5000);
+    const telemetryTimer = view === 'workspace' || view === 'operations'
+      ? window.setInterval(() => {
+        void refreshTelemetry().catch(() => {
+          setGatewayConnected(false);
+          setError('Gateway telemetry connection was interrupted. Retrying…');
+        });
+      }, refreshIntervalMs)
+      : undefined;
     const activityTimer = window.setInterval(() => {
       if (view === 'workspace' || view === 'runs' || view === 'agents' || view === 'projects') {
         void refreshWork().catch(failure => setError(failure instanceof Error ? failure.message : 'Could not refresh workspace activity.'));
@@ -1335,9 +1373,18 @@ export default function App() {
     }, 5000);
     return () => {
       window.clearInterval(statusTimer);
+      if (telemetryTimer !== undefined) window.clearInterval(telemetryTimer);
       window.clearInterval(activityTimer);
     };
-  }, [accessGranted, refreshStatus, refreshWork, view]);
+  }, [accessGranted, refreshIntervalMs, refreshStatus, refreshTelemetry, refreshWork, view]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(REFRESH_INTERVAL_KEY, String(refreshIntervalMs));
+    } catch {
+      setError('The telemetry refresh interval could not be saved in this browser.');
+    }
+  }, [refreshIntervalMs]);
 
   useEffect(() => {
     if (!accessGranted) {
@@ -2198,6 +2245,7 @@ export default function App() {
                   channels={channelList}
                   memoryHistory={memoryHistory}
                   hostHistory={hostHistory}
+                  refreshIntervalMs={refreshIntervalMs}
                   lastUpdated={lastUpdated}
                   onNavigate={navigate}
                   onStartRun={launchRun}
@@ -2293,6 +2341,7 @@ export default function App() {
               {view === 'operations' && (
                 <OperationsView
                   status={status}
+                  connected={gatewayConnected}
                   channels={channelList}
                   logLines={logLines}
                   query={logQuery}
@@ -2305,7 +2354,7 @@ export default function App() {
               {view === 'tools' && (
                 <ToolsView tools={filteredTools} total={tools.length} query={toolQuery} onQuery={setToolQuery} />
               )}
-              {view === 'settings' && <SettingsView config={config} status={status} />}
+              {view === 'settings' && <SettingsView config={config} status={status} refreshIntervalMs={refreshIntervalMs} onRefreshIntervalChange={setRefreshIntervalMs} />}
               {view === 'games' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading games" loading /><span>Loading games…</span></div>}><GamesView request={api} /></Suspense>}
             </>
           )}
@@ -2474,6 +2523,7 @@ function OverviewView(props: {
   channels: GatewayStatus['channels'];
   memoryHistory: number[];
   hostHistory: HostResourceSnapshot[];
+  refreshIntervalMs: number;
   lastUpdated: number | null;
   onNavigate: (view: ViewId) => void;
   onStartRun: (prompt: string, sessionId: string) => Promise<boolean>;
@@ -2485,7 +2535,7 @@ function OverviewView(props: {
   creatingSession: boolean;
   cloudIntegrations: Array<{ id: string; label: string; online: boolean; view: ViewId; icon: ReactNode }>;
 }) {
-  const { status, config, sessions, projects, profiles, activeSessionId, agentActivity, agents, channels, memoryHistory, hostHistory, lastUpdated, onNavigate, onStartRun, startingRun, onNewSession, onOpenSession, onOpenProject, onOpenProfile, creatingSession, cloudIntegrations } = props;
+  const { status, config, sessions, projects, profiles, activeSessionId, agentActivity, agents, channels, memoryHistory, hostHistory, refreshIntervalMs, lastUpdated, onNavigate, onStartRun, startingRun, onNewSession, onOpenSession, onOpenProject, onOpenProfile, creatingSession, cloudIntegrations } = props;
   const memory = status?.memory;
   const metrics = status?.metrics;
   const host = metrics?.system?.host;
@@ -2620,7 +2670,7 @@ function OverviewView(props: {
           <div className="runtime-stat">
             <div className="runtime-stat-heading"><span>Process memory</span><strong>{formatBytes(memory?.rss)}</strong></div>
             <Sparkline values={memoryHistory} />
-            <div className="runtime-footnote"><span>Resident set size</span><span>Live · 3 second interval</span></div>
+            <div className="runtime-footnote"><span>Resident set size</span><span>Live · {refreshIntervalMs} ms refresh</span></div>
           </div>
           <div className="runtime-divider" />
           <div className="runtime-mini-grid">
@@ -4252,6 +4302,7 @@ function configLabel(name?: string, subagent = false): string {
 
 function OperationsView(props: {
   status: GatewayStatus | null;
+  connected: boolean;
   channels: GatewayStatus['channels'];
   logLines: string;
   query: string;
@@ -4260,25 +4311,64 @@ function OperationsView(props: {
   lastUpdated: number | null;
   onRefresh: () => void;
 }) {
-  const { status, channels, logLines, query, onQuery, searchRef, lastUpdated, onRefresh } = props;
+  const { status, connected, channels, logLines, query, onQuery, searchRef, lastUpdated, onRefresh } = props;
   const [copyStatus, setCopyStatus] = useState('');
   const filteredLogLines = query.trim()
     ? logLines.split(/\r?\n/).filter(line => line.toLowerCase().includes(query.trim().toLowerCase())).join('\n')
     : logLines;
   const host = status?.metrics?.system?.host;
   const warmestSensor = host?.temperature.sensors.reduce((warmest, sensor) => !warmest || sensor.celsius > warmest.celsius ? sensor : warmest, undefined as HostResourceSnapshot['temperature']['sensors'][number] | undefined);
+  const healthTelemetry = status?.healthTelemetry;
+  const hardwareMeasures = [
+    host?.cpuPercent == null ? null : 100 - host.cpuPercent,
+    host?.memory.usedPercent == null ? null : 100 - host.memory.usedPercent,
+    host?.gpu.loadPercent == null ? null : 100 - host.gpu.loadPercent,
+    warmestSensor ? Math.max(0, Math.min(100, ((95 - warmestSensor.celsius) / 50) * 100)) : null,
+  ].filter((value): value is number => value !== null && Number.isFinite(value));
+  const hardwareScore = hardwareMeasures.length
+    ? Math.round(hardwareMeasures.reduce((total, value) => total + value, 0) / hardwareMeasures.length)
+    : null;
+  const telemetryDuration = (ms: number) => {
+    const hours = Math.floor(ms / 3_600_000);
+    const minutes = Math.floor((ms % 3_600_000) / 60_000);
+    return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+  };
   const telemetry = [
-    { label: 'Host CPU', icon: Cpu, value: host?.cpuPercent == null ? '—' : `${host.cpuPercent.toFixed(1)}%`, detail: host ? `${host.cpuLogicalCores} logical cores` : 'Awaiting host sample', percent: host?.cpuPercent ?? null },
-    { label: 'System memory', icon: HardDrive, value: host ? `${host.memory.usedPercent.toFixed(1)}%` : '—', detail: host ? `${formatBytes(host.memory.freeBytes)} free of ${formatBytes(host.memory.totalBytes)}` : 'Awaiting host sample', percent: host?.memory.usedPercent ?? null },
-    { label: 'GPU load', icon: Gauge, value: host?.gpu.loadPercent == null ? host?.gpu.state === 'unavailable' ? 'N/A' : '—' : `${host.gpu.loadPercent.toFixed(1)}%`, detail: host?.gpu.devices.map(device => device.name).join(', ') || host?.gpu.unavailableReason || 'No GPU telemetry', percent: host?.gpu.loadPercent ?? null },
-    { label: 'Temperature', icon: Thermometer, value: warmestSensor ? `${warmestSensor.celsius.toFixed(1)}°C` : 'N/A', detail: warmestSensor?.name ?? host?.temperature.unavailableReason ?? 'No readable sensor', percent: warmestSensor ? Math.min(100, warmestSensor.celsius) : null },
-    { label: 'Gateway uptime', icon: Clock3, value: status?.uptimeHuman ?? '—', detail: `Process ${status?.pid ? `PID ${status.pid}` : 'not reported'}`, percent: null },
-    { label: 'Runtime memory', icon: Database, value: formatBytes(status?.memory?.rss), detail: `Heap ${formatBytes(status?.memory?.heap)}`, percent: null },
-    { label: 'Active turns', icon: Activity, value: String(status?.activeTurns ?? '—'), detail: `${status?.sessions ?? '—'} saved sessions`, percent: null },
-    { label: 'Registered tools', icon: Wrench, value: String(status?.tools ?? '—'), detail: 'Available to this runtime', percent: null },
-    { label: 'Network throughput', icon: Network, value: `${formatRate(host?.network.receiveBytesPerSecond)} ↓`, detail: `${formatRate(host?.network.transmitBytesPerSecond)} transmitted`, percent: null },
-    { label: 'Disk throughput', icon: HardDrive, value: `${formatRate(host?.disk.readBytesPerSecond)} read`, detail: `${formatRate(host?.disk.writeBytesPerSecond)} written`, percent: null },
+    {
+      label: 'Gateway health',
+      icon: Server,
+      value: !connected ? 'OFF' : healthTelemetry ? `${healthTelemetry.gateway.score}%` : '—',
+      detail: !connected
+        ? 'Gateway not reachable; last received values are shown'
+        : healthTelemetry
+        ? `${telemetryDuration(healthTelemetry.gateway.uptimeMs)} online · ${healthTelemetry.gateway.issueCount} incidents in 24h`
+        : 'Collecting gateway uptime and incident history',
+      percent: healthTelemetry?.gateway.score ?? null,
+    },
+    {
+      label: 'Provider health',
+      icon: Workflow,
+      value: healthTelemetry?.providers.score == null ? '—' : `${healthTelemetry.providers.score}%`,
+      detail: healthTelemetry
+        ? `${healthTelemetry.providers.calls} calls · ${healthTelemetry.providers.failures} failed in 24h`
+        : 'Collecting provider call results',
+      percent: healthTelemetry?.providers.score ?? null,
+    },
+    {
+      label: 'Hardware headroom',
+      icon: Cpu,
+      value: hardwareScore === null ? '—' : `${hardwareScore}%`,
+      detail: hardwareScore === null
+        ? 'Awaiting host resource sample'
+        : `${hardwareMeasures.length} live signals · CPU, memory, GPU and temperature`,
+      percent: hardwareScore,
+    },
   ];
+  const recentEvents = (healthTelemetry?.recentEvents ?? []).filter(event =>
+    event.type === 'gateway.issue'
+      || event.type === 'gateway.outage'
+      || event.type === 'provider.call' && !event.succeeded,
+  ).slice(0, 8);
   const health = status?.providerHealth;
   const providers = health && !Array.isArray(health) && typeof health === 'object' ? Object.entries(health) : [];
   const downloadLog = () => {
@@ -4301,11 +4391,11 @@ function OperationsView(props: {
   };
   return (
     <div className="page">
-      <PageHeading eyebrow="LIVE SYSTEM TELEMETRY" title="Health" detail="Runtime, host resources, channel connectivity, provider resilience, and service diagnostics." action={<button className="button button-secondary" onClick={onRefresh}><RefreshCw size={15} />Refresh now</button>} />
+      <PageHeading eyebrow="LIVE SYSTEM TELEMETRY" title="Health" detail="24-hour gateway availability, provider call reliability, and live hardware resource headroom." action={<button className="button button-secondary" onClick={onRefresh}><RefreshCw size={15} />Refresh now</button>} />
       <div className="operation-summary">
         <div className="operation-summary-mark"><Gauge size={19} /></div>
-        <div className="operation-summary-copy"><strong>{status ? 'Gateway is responding' : 'Gateway is unreachable'}</strong><span>{status ? `Process ${status.pid ?? '—'} · Running for ${status.uptimeHuman ?? '—'} · ${status.activeTurns ?? 0} active turns` : 'Check that the Symbiote gateway process is running.'}</span></div>
-        <span className={`status-tag${status ? ' status-tag-live' : ' status-tag-idle'}`}><span />{status ? 'Operational' : 'Offline'}</span>
+        <div className="operation-summary-copy"><strong>{connected ? 'Gateway is responding' : 'Gateway is unreachable'}</strong><span>{connected && status ? `Process ${status.pid ?? '—'} · Running for ${status.uptimeHuman ?? '—'} · ${status.activeTurns ?? 0} active turns` : 'Check that the Symbiote gateway process is running.'}</span></div>
+        <span className={`status-tag${connected ? ' status-tag-live' : ' status-tag-idle'}`}><span />{connected ? 'Operational' : 'Offline'}</span>
       </div>
       <section className="health-telemetry" aria-label="Live system telemetry">
         {telemetry.map(({ label, icon: Icon, value, detail, percent }) => {
@@ -4324,6 +4414,7 @@ function OperationsView(props: {
           </article>;
         })}
       </section>
+      <div className="health-score-note">Gateway score combines measured availability with incident rate; provider score is successful calls divided by calls; hardware score is average resource headroom across available host sensors.</div>
       <div className="operation-columns">
         <section className="surface-card operation-panel">
           <div className="section-heading"><div><div className="eyebrow">CHANNEL ADAPTERS</div><h2>Connections</h2></div><span className="subtle-label">{channels.length} TOTAL</span></div>
@@ -4338,8 +4429,27 @@ function OperationsView(props: {
           })}</div> : <div className="inline-empty"><span className="empty-icon"><Activity size={17} /></span><div><strong>Provider health will appear as calls are made</strong><p>No provider health records have been reported yet.</p></div></div>}
         </section>
       </div>
+      <section className="surface-card health-events-panel">
+        <div className="section-heading"><div><div className="eyebrow">PERSISTED · LAST 24 HOURS</div><h2>Incidents & failures</h2></div><span className="subtle-label">{healthTelemetry?.gateway.issueCount ?? 0} GATEWAY INCIDENTS</span></div>
+        {recentEvents.length
+          ? <div className="health-event-list">{recentEvents.map((event, index) => {
+            const isProvider = event.type === 'provider.call';
+            const title = event.type === 'gateway.outage'
+              ? 'Gateway recovered after an unclean stop'
+              : event.type === 'gateway.issue'
+                ? `Gateway issue · ${event.subsystem ?? 'runtime'}`
+                : `Provider call failed · ${event.provider ?? 'unknown provider'}`;
+            const detail = event.message || (isProvider ? 'Provider request failed.' : 'Gateway incident recorded.');
+            return <article className="health-event-row" key={`${event.timestamp}-${event.type}-${index}`}>
+              <span className={`health-event-mark${isProvider ? ' health-event-provider' : ''}`}><CircleAlert size={14} /></span>
+              <span className="health-event-copy"><strong>{title}</strong><small>{detail}</small></span>
+              <time dateTime={new Date(event.timestamp).toISOString()}>{new Date(event.timestamp).toLocaleString()}</time>
+            </article>;
+          })}</div>
+          : <div className="inline-empty"><span className="empty-icon"><CircleCheck size={17} /></span><div><strong>No tracked gateway incidents or provider failures</strong><p>Gateway startup, outage, shutdown, channel disconnect, runtime errors, and provider call outcomes are retained locally.</p></div></div>}
+      </section>
       <section className="surface-card log-panel">
-        <div className="section-heading log-heading"><div><div className="eyebrow">SERVICE OUTPUT · LOCAL MACHINE</div><h2>Recent log</h2></div><div className="log-actions"><span className="subtle-label">{lastUpdated ? `POLLING EVERY 5S` : 'AWAITING LOG'}</span><button className="button button-secondary log-action-button" onClick={() => void copyLog()} disabled={!filteredLogLines}>{copyStatus === 'Copied' ? <Check size={14} /> : <Copy size={14} />}{copyStatus || 'Copy'}</button><button className="button button-secondary log-action-button" onClick={downloadLog} disabled={!logLines}><Download size={14} />Save</button></div></div>
+        <div className="section-heading log-heading"><div><div className="eyebrow">SERVICE OUTPUT · LOCAL MACHINE</div><h2>Recent log</h2></div><div className="log-actions"><span className="subtle-label">{lastUpdated ? 'POLLING EVERY 5S' : 'AWAITING LOG'}</span><button className="button button-secondary log-action-button" onClick={() => void copyLog()} disabled={!filteredLogLines}>{copyStatus === 'Copied' ? <Check size={14} /> : <Copy size={14} />}{copyStatus || 'Copy'}</button><button className="button button-secondary log-action-button" onClick={downloadLog} disabled={!logLines}><Download size={14} />Save</button></div></div>
         <label className="search-field log-search"><Search size={15} /><input ref={searchRef} value={query} onChange={event => onQuery(event.target.value)} placeholder="Filter log lines…" aria-label="Filter log lines" /><kbd>/</kbd>{query && <button className="icon-button small" onClick={() => onQuery('')} aria-label="Clear log filter"><X size={13} /></button>}</label>
         <pre className="log-view" aria-label="Recent service log">{filteredLogLines || (query ? 'No log lines match this filter.' : 'No service log found yet. Start the gateway with log capture enabled to see runtime output here.')}</pre>
         <div className="log-caption"><span><span className="connection-orb connection-orb-live" />Tail of symbiote.log</span><span>{filteredLogLines ? `${filteredLogLines.split(/\r?\n/).length} visible lines` : 'Most recent 120 lines'} · Loopback only</span></div>
@@ -4366,7 +4476,12 @@ function ToolsView(props: { tools: ToolSummary[]; total: number; query: string; 
   );
 }
 
-function SettingsView({ config, status }: { config: GatewayConfig | null; status: GatewayStatus | null }) {
+function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChange }: {
+  config: GatewayConfig | null;
+  status: GatewayStatus | null;
+  refreshIntervalMs: number;
+  onRefreshIntervalChange: (value: number) => void;
+}) {
   const [lanToken, setLanToken] = useState('');
   const [tokenError, setTokenError] = useState('');
   const [tokenLoading, setTokenLoading] = useState(false);
@@ -4440,6 +4555,24 @@ function SettingsView({ config, status }: { config: GatewayConfig | null; status
           <Setting label="Authenticated API" value={config?.gateway ? (config.gateway.apiEnabled ? 'Enabled' : 'Disabled') : undefined} />
           <Setting label="Process ID" value={status?.pid?.toString()} />
         </div>
+      </section>
+      <section className="surface-card settings-card">
+        <div className="section-heading"><div><div className="eyebrow">LIVE TELEMETRY</div><h2>Refresh cadence</h2></div><span className="settings-source"><Activity size={14} />BROWSER SETTING</span></div>
+        <p className="settings-access-copy">Controls how often Health gauges and Workspace analytics request fresh gateway metrics. Host sensor readings update on the gateway’s own sampling schedule.</p>
+        <label className="telemetry-refresh-control">
+          <span><strong>Health & dashboard refresh</strong><output>{refreshIntervalMs} ms</output></span>
+          <input
+            className="appearance-range appearance-range-brightness"
+            type="range"
+            min={MIN_REFRESH_INTERVAL_MS}
+            max={MAX_REFRESH_INTERVAL_MS}
+            step={200}
+            value={refreshIntervalMs}
+            aria-label="Health and dashboard refresh interval in milliseconds"
+            onChange={event => onRefreshIntervalChange(Number(event.target.value))}
+          />
+          <small>400 ms–5 s · saved in this browser</small>
+        </label>
       </section>
       <section className="surface-card settings-card">
         <div className="section-heading"><div><div className="eyebrow">NETWORK ACCESS</div><h2>Connect another device</h2></div><span className="settings-source"><ShieldCheck size={14} />LOCAL ONLY</span></div>
