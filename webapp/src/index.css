@@ -390,6 +390,121 @@ button:disabled { cursor: not-allowed; opacity: .58; }
 .graph-node-agent:hover circle, .graph-node-agent:focus-visible circle { r: 6.5; }
 .graph-node:hover rect, .graph-node:focus-visible rect { transform: scale(1.18); filter: drop-shadow(0 0 5px var(--appearance-icon)); }
 .graph-node-active circle, .graph-node-active rect { animation: node-pulse 2s ease-in-out infinite; }
+
+/* Hero map node lighting states — steady glow, no pulse */
+.graph-node-lit circle, .graph-node-lit rect {
+  filter: drop-shadow(0 0 8px var(--appearance-primary)) drop-shadow(0 0 16px var(--appearance-primary));
+  stroke: var(--appearance-primary);
+  stroke-width: 1.5;
+  transition: filter .18s, stroke .18s, stroke-width .18s;
+}
+
+.graph-node-agent-active circle {
+  fill: var(--appearance-primary);
+  filter: drop-shadow(0 0 6px var(--appearance-primary)) drop-shadow(0 0 12px var(--appearance-primary));
+  transition: filter .18s;
+}
+
+.graph-node-project-pending rect {
+  fill: #e8ba4b;
+  filter: drop-shadow(0 0 6px #e8ba4b) drop-shadow(0 0 12px #e8ba4b);
+  transition: filter .18s;
+}
+
+.graph-node-agent-response circle {
+  fill: var(--appearance-secondary);
+  filter: drop-shadow(0 0 6px var(--appearance-secondary)) drop-shadow(0 0 12px var(--appearance-secondary));
+  transition: filter .18s;
+}
+
+/* Hero map controls */
+/* Hero map wrapper — positions the overlay controls around the graph */
+.hero-map-wrapper { position: absolute; top: 50%; right: 1.5%; width: 320px; height: 270px; transform: translateY(-50%); }
+.hero-map-wrapper .workspace-graph { position: absolute; inset: 0; width: 320px; height: 270px; }
+
+.hero-map-controls {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  gap: 8px;
+}
+
+.hero-map-resolve-button {
+  padding: 6px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--appearance-primary);
+  color: var(--appearance-primary-ink);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s, transform .15s, box-shadow .15s;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--appearance-primary) 40%, transparent);
+}
+
+.hero-map-resolve-button:hover {
+  background: color-mix(in srgb, var(--appearance-primary) 85%, var(--ink));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--appearance-primary) 50%, transparent);
+}
+
+.hero-map-send-field {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  width: 85%;
+  max-width: 360px;
+}
+
+.hero-map-send-container {
+  display: flex;
+  gap: 8px;
+  background: var(--paper-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 8px 10px;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--ink) 15%, transparent);
+}
+
+.hero-map-send-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  outline: none;
+  min-width: 0;
+}
+
+.hero-map-send-input::placeholder {
+  color: var(--ink-muted);
+}
+
+.hero-map-send-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: var(--appearance-secondary);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background .15s, transform .15s;
+}
+
+.hero-map-send-button:hover {
+  background: color-mix(in srgb, var(--appearance-secondary) 85%, var(--ink));
+  transform: scale(1.05);
+}
+
 @keyframes core-breathe { 50% { opacity: .55; transform: scale(1.09); } }
 @keyframes core-pulse { 50% { opacity: .72; } }
 @keyframes halo-breathe { 50% { opacity: .42; transform: scale(1.08); } }
