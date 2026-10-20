@@ -53,6 +53,9 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   let defaultAgentPrompt = 'test prompt';
   let appearanceSettings: AppearanceSettings = { brightness: 64, primaryHue: 145, secondaryHue: 13 };
   let updatePrepareCalls = 0;
+  let restartRequests = 0;
+  let updatedProviderModel: { provider: string; model: string } | undefined;
+  let clonedRepository = '';
   const updateDownload = {
     state: 'ready' as const,
     version: '5.6.0',
@@ -64,6 +67,12 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   fs.writeFileSync(updateInstallerPath, 'verified MSI');
   const control: WebControlPlane = {
     getStatus: () => ({}),
+    restartGateway: () => { restartRequests++; },
+    updateProviderModel: (provider, model) => updatedProviderModel = { provider, model },
+    cloneProjectRepository: async repositoryUrl => {
+      clonedRepository = repositoryUrl;
+      return { id: 'project-clone', name: 'example' };
+    },
     getUpdateDownload: () => updateDownload,
     prepareUpdateDownload: async () => {
       updatePrepareCalls++;
@@ -228,6 +237,48 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
   try {
+    const rejectedRestart = await fetch(`${baseUrl}/api/gateway/restart`, {
+      method: 'POST',
+      headers: { origin: 'https://untrusted.example' },
+    });
+    assert.equal(rejectedRestart.status, 403);
+    const restartResponse = await fetch(`${baseUrl}/api/gateway/restart`, {
+      method: 'POST',
+      headers: { origin: baseUrl },
+    });
+    assert.equal(restartResponse.status, 202);
+    assert.deepEqual(await restartResponse.json(), { restarting: true });
+    assert.equal(restartRequests, 1);
+
+    const updatedRoute = await fetch(`${baseUrl}/api/config/provider-model`, {
+      method: 'POST',
+      headers: { origin: baseUrl, 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'openrouter', model: 'openrouter/free' }),
+    });
+    assert.deepEqual(await updatedRoute.json(), { provider: 'openrouter', model: 'openrouter/free' });
+    assert.deepEqual(updatedProviderModel, { provider: 'openrouter', model: 'openrouter/free' });
+    const invalidRoute = await fetch(`${baseUrl}/api/config/provider-model`, {
+      method: 'POST',
+      headers: { origin: baseUrl, 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'openrouter', model: 'invalid\nmodel' }),
+    });
+    assert.equal(invalidRoute.status, 400);
+
+    const clonedProject = await fetch(`${baseUrl}/api/projects/clone`, {
+      method: 'POST',
+      headers: { origin: baseUrl, 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://github.com/example/example.git' }),
+    });
+    assert.equal(clonedProject.status, 201);
+    assert.deepEqual(await clonedProject.json(), { id: 'project-clone', name: 'example' });
+    assert.equal(clonedRepository, 'https://github.com/example/example.git');
+    const rejectedClone = await fetch(`${baseUrl}/api/projects/clone`, {
+      method: 'POST',
+      headers: { origin: baseUrl, 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'file:///etc/passwd' }),
+    });
+    assert.equal(rejectedClone.status, 400);
+
     const preparedUpdate = await fetch(`${baseUrl}/api/update/download`, {
       method: 'POST',
       headers: { origin: baseUrl },
@@ -592,9 +643,9 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
     assert.deepEqual(await restoreRunResponse.json(), { restored: true });
     assert.equal(restoredRun, 'run-2');
 
-    const restartResponse = await fetch(`${baseUrl}/api/runs/run-1/restart`, { method: 'POST' });
-    assert.equal(restartResponse.status, 201);
-    assert.deepEqual(await restartResponse.json(), { id: 'run-3', status: 'running' });
+    const runRestartResponse = await fetch(`${baseUrl}/api/runs/run-1/restart`, { method: 'POST' });
+    assert.equal(runRestartResponse.status, 201);
+    assert.deepEqual(await runRestartResponse.json(), { id: 'run-3', status: 'running' });
 
     const guideResponse = await fetch(`${baseUrl}/api/runs/run-1/guide`, {
       method: 'POST',

@@ -11,9 +11,11 @@ import 'dotenv/config';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { execFile } from 'node:child_process';
 import { parse } from 'dotenv';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 // @ts-ignore — no types for qrcode-terminal
 import qrcode from 'qrcode-terminal';
 
@@ -89,7 +91,7 @@ import { registerBuiltinTools } from '../tools/builtin/register.js';
 import { SubAgentManager } from '../sessions/sub-agent.js';
 import { createMessageTool, createTypingTool, createPresenceTool, createDeleteMessageTool, createMarkReadTool } from '../tools/builtin/message.js';
 import { createWorkspaceSessionManager, SessionManager } from '../sessions/manager.js';
-import { WorkspaceRegistry } from '../agent/workspace-registry.js';
+import { WorkspaceRegistry, type WorkspaceProject } from '../agent/workspace-registry.js';
 import { ProjectTerminalManager } from '../web/project-terminal.js';
 import { buildSystemPrompt } from '../agent/system-prompt.js';
 import { readAgentAvatarDataUrl, readWorkspaceIdentity, updateWorkspaceIdentity } from '../agent/workspace-identity.js';
@@ -1257,6 +1259,12 @@ export class SymbioteGateway {
           };
         },
         recordGatewayIssue: (subsystem, message) => this.recordGatewayIssue(subsystem, message),
+        restartGateway: () => {
+          console.log(`${palette.dim}  [gateway]${palette.reset} Restart requested from the Control Room.`);
+          setTimeout(() => process.kill(process.pid, 'SIGTERM'), 200).unref();
+        },
+        updateProviderModel: (provider, model) => this.updateProviderModel(provider, model),
+        cloneProjectRepository: repositoryUrl => this.cloneProjectRepository(repositoryUrl),
         getUpdateDownload: () => this.releaseUpdater.getStatus(),
         prepareUpdateDownload: () => this.releaseUpdater.prepareWindowsInstaller(),
         getUpdateInstallerPath: () => this.releaseUpdater.getInstallerPath(),
@@ -3146,6 +3154,105 @@ export class SymbioteGateway {
       this.healthTelemetry.record({ type: 'gateway.issue', subsystem, message });
     } catch (error) {
       console.error(`[health] Could not persist gateway issue from ${subsystem}:`, error);
+    }
+  }
+
+  private updateProviderModel(providerName: string, modelName: string): { provider: string; model: string } {
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/i.test(providerName)) throw new Error('Provider ID is invalid.');
+    if (!modelName || modelName.length > 200 || /[\u0000-\u001f\u007f]/.test(modelName)) {
+      throw new Error('Model name must contain 1–200 printable characters.');
+    }
+    if (!PROVIDERS.has(providerName)) throw new Error(`Unknown provider: ${providerName}.`);
+
+    const configPath = configSearchPaths(this.gatewayConfig.configPath).find(candidate => fs.existsSync(candidate));
+    if (!configPath) throw new Error('The active Symbiote configuration file could not be found.');
+    const original = fs.readFileSync(configPath, 'utf8');
+    const updated = JSON.parse(original) as Record<string, unknown>;
+    const configuredProviders = updated.providers && typeof updated.providers === 'object' && !Array.isArray(updated.providers)
+      ? updated.providers as Record<string, unknown>
+      : {};
+    const existingProvider = configuredProviders[providerName];
+    configuredProviders[providerName] = existingProvider && typeof existingProvider === 'object' && !Array.isArray(existingProvider)
+      ? { ...existingProvider as Record<string, unknown>, model: modelName }
+      : { model: modelName };
+    updated.providers = configuredProviders;
+    updated.defaultProvider = providerName;
+    updated.defaultModel = modelName;
+
+    const temporary = `${configPath}.${process.pid}.${randomUUID()}.tmp`;
+    const writeConfig = (contents: string) => {
+      fs.writeFileSync(temporary, contents, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+      fs.renameSync(temporary, configPath);
+    };
+    try {
+      writeConfig(`${JSON.stringify(updated, null, 2)}\n`);
+    } catch (error) {
+      try { fs.rmSync(temporary, { force: true }); } catch { /* Preserve the original write failure. */ }
+      throw error;
+    }
+
+    this.reloadConfig('Control Room provider/model update');
+    if (this.providerName !== providerName || this.model !== modelName) {
+      try {
+        writeConfig(original);
+        this.reloadConfig('provider/model update rollback');
+      } catch (rollbackError) {
+        throw new Error(`Provider/model update failed and the previous configuration could not be restored: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`);
+      }
+      throw new Error('Provider/model update could not be applied; the previous configuration was restored.');
+    }
+    return { provider: this.providerName, model: this.model };
+  }
+
+  private async cloneProjectRepository(repositoryUrl: string): Promise<unknown> {
+    let remote: URL;
+    try {
+      remote = new URL(repositoryUrl.trim());
+    } catch {
+      throw new Error('Repository URL is invalid.');
+    }
+    if (remote.protocol !== 'https:' || !remote.hostname || remote.username || remote.password || remote.search || remote.hash) {
+      throw new Error('Only credential-free HTTPS repository URLs are allowed. Use Git Credential Manager for private repositories.');
+    }
+    const repositoryName = decodeURIComponent(path.posix.basename(remote.pathname.replace(/\/+$/, ''))).replace(/\.git$/i, '');
+    if (!repositoryName) throw new Error('Repository URL must include a repository name.');
+
+    const staging = path.join(this.config.workspace, '.agents', '.git-clones', randomUUID());
+    fs.mkdirSync(path.dirname(staging), { recursive: true });
+    try {
+      await promisify(execFile)('git', ['clone', '--depth', '1', remote.toString(), staging], {
+        cwd: this.config.workspace,
+        timeout: 300_000,
+        maxBuffer: 1_048_576,
+        windowsHide: true,
+      });
+    } catch (error) {
+      try { fs.rmSync(staging, { recursive: true, force: true }); } catch (cleanupError) {
+        throw new Error(`Git clone failed (${error instanceof Error ? error.message : String(error)}); temporary checkout cleanup also failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+      }
+      throw new Error(`Git clone failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    let project: WorkspaceProject;
+    try {
+      project = this.workspaceRegistry.createProject(repositoryName);
+    } catch (error) {
+      fs.rmSync(staging, { recursive: true, force: true });
+      throw error;
+    }
+    try {
+      fs.rmSync(project.workspace, { recursive: true, force: true });
+      fs.renameSync(staging, project.workspace);
+      return project;
+    } catch (error) {
+      try {
+        this.workspaceRegistry.archiveProject(project.id);
+        this.workspaceRegistry.deleteArchivedProject(project.id);
+        fs.rmSync(staging, { recursive: true, force: true });
+      } catch (cleanupError) {
+        throw new Error(`Repository checkout could not be registered (${error instanceof Error ? error.message : String(error)}); project cleanup also failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+      }
+      throw new Error(`Repository checkout could not be registered: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

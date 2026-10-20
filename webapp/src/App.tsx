@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import {
   Activity, ArrowRight, ArrowUpRight, Bell, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Command, Copy, Cpu,
   Archive, Bookmark, Brain, Cloud, Database, Download, Gauge, Globe, HardDrive, History, Info, LayoutDashboard, Leaf, Maximize2, Menu, MessageSquare, Minimize2, Moon, Network,
-  Biohazard, ChevronUp, FolderOpen, MessagesSquare, Plus, RefreshCw, Search, Send, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
+  Biohazard, ChevronUp, FolderOpen, MessagesSquare, Plus, Power, RefreshCw, Search, Send, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
 } from 'lucide-react';
 import type { AgentProfile, ChatMessage, GatewayConfig, GatewayStatus, HostResourceSnapshot, MemoryNodeContext, SessionSummary, ThreadUserHelpRequest, ToolSummary, ViewId, WorkspaceAgent, WorkspaceProject, WorkspaceRun } from './types';
 import type { CloudProviderStatus, GoogleWorkspaceGrant } from './components/IntegrationsView';
@@ -112,6 +112,7 @@ function createClientId(): string {
 declare global {
   interface Window {
     symbioteDesktop?: {
+      supportsReboot: boolean;
       openMini(): Promise<void>;
       expand(): Promise<void>;
       closeMini(): Promise<void>;
@@ -120,6 +121,7 @@ declare global {
       setTheme(theme: Theme): Promise<Theme>;
       requestLanAccess(): Promise<{ status: string }>;
       installUpdate(): Promise<boolean>;
+      requestReboot(): Promise<void>;
     };
   }
 }
@@ -882,16 +884,25 @@ function AccessGate({ onUnlock, error }: { onUnlock: (token: string) => Promise<
   );
 }
 
-function CommandPalette({ query, onQuery, onClose, onNavigate, onNewSession }: {
+function CommandPalette({ query, onQuery, onClose, onNavigate, onNewSession, onRestartGateway, onChangeProviderModel, onCloneRepository, onReboot, isDesktopApp }: {
   query: string;
   onQuery: (value: string) => void;
   onClose: () => void;
   onNavigate: (view: ViewId) => void;
   onNewSession: () => void;
+  onRestartGateway: () => void;
+  onChangeProviderModel: () => void;
+  onCloneRepository: () => void;
+  onReboot: () => void;
+  isDesktopApp: boolean;
 }) {
   const commands = [
     ...NAVIGATION.map(item => ({ label: item.label, detail: `Open ${item.group.toLowerCase()}`, icon: item.icon, run: () => onNavigate(item.id) })),
     { label: 'New conversation', detail: 'Start a fresh session', icon: Plus, run: onNewSession },
+    { label: 'Restart gateway', detail: 'Restart the supervised runtime', icon: RefreshCw, run: onRestartGateway },
+    { label: 'Update provider & model', detail: 'Change the active model route', icon: Cpu, run: onChangeProviderModel },
+    { label: 'Clone repository', detail: 'Clone an HTTPS repository into Projects', icon: FolderOpen, run: onCloneRepository },
+    ...(isDesktopApp ? [{ label: 'Restart computer', detail: 'Requires confirmation and Windows approval', icon: Power, run: onReboot }] : []),
   ].filter(command => `${command.label} ${command.detail}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
@@ -910,6 +921,73 @@ function CommandPalette({ query, onQuery, onClose, onNavigate, onNewSession }: {
           }) : <p className="palette-empty">No matching actions.</p>}
         </div>
         <div className="palette-footer"><span><kbd>↵</kbd> Select an action</span><span><kbd>⌘ K</kbd> Open command menu</span></div>
+      </section>
+    </div>
+  );
+}
+
+function CommandActionDialog({ action, config, onClose, onSubmit }: {
+  action: 'provider-model' | 'clone-repository';
+  config: GatewayConfig | null;
+  onClose: () => void;
+  onSubmit: (values: { provider: string; model: string } | { url: string }) => Promise<void>;
+}) {
+  const [provider, setProvider] = useState(config?.provider ?? '');
+  const [model, setModel] = useState(config?.model ?? '');
+  const [repositoryUrl, setRepositoryUrl] = useState('');
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState('');
+  const providers = [...new Set([...(config?.configuredProviders ?? []), ...(config?.provider ? [config.provider] : [])])];
+  const title = action === 'provider-model' ? 'Update provider & model' : 'Clone repository';
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setWorking(true);
+    setError('');
+    try {
+      if (action === 'provider-model') await onSubmit({ provider, model });
+      else await onSubmit({ url: repositoryUrl });
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'The command could not be completed.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="identity-backdrop" onMouseDown={onClose}>
+      <section className="identity-dialog" role="dialog" aria-modal="true" aria-label={title} onMouseDown={event => event.stopPropagation()}>
+        <header className="identity-dialog-header">
+          <span className="identity-dialog-icon">{action === 'provider-model' ? <Cpu size={18} /> : <FolderOpen size={18} />}</span>
+          <div><div className="eyebrow">COMMAND MENU</div><h2>{title}</h2></div>
+          <button className="icon-button small" type="button" onClick={onClose} aria-label="Close"><X size={15} /></button>
+        </header>
+        <form onSubmit={event => void submit(event)}>
+          {action === 'provider-model' ? <>
+            <label className="identity-field">Provider
+              <select value={provider} onChange={event => setProvider(event.target.value)} required>
+                {providers.map(item => <option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
+            <label className="identity-field">Model
+              <input value={model} onChange={event => setModel(event.target.value)} maxLength={200} required />
+              <small>The active provider and model are written to symbiote.json and applied by the gateway.</small>
+            </label>
+          </> : <>
+            <label className="identity-field">HTTPS repository URL
+              <input type="url" value={repositoryUrl} onChange={event => setRepositoryUrl(event.target.value)} placeholder="https://github.com/owner/repository.git" maxLength={2048} required />
+              <small>Clones into a new registered project. Private repositories use your installed Git Credential Manager; credentials in URLs are rejected.</small>
+            </label>
+          </>}
+          {error && <div className="notice notice-error" role="alert">{error}</div>}
+          <div className="identity-dialog-actions">
+            <button className="button button-secondary" type="button" onClick={onClose} disabled={working}>Cancel</button>
+            <button className="button button-primary" type="submit" disabled={working || (action === 'provider-model' && providers.length === 0)}>
+              {working ? <ActivityOrb label="Working" compact loading /> : action === 'provider-model' ? <Check size={14} /> : <FolderOpen size={14} />}
+              {working ? 'Working…' : action === 'provider-model' ? 'Apply route' : 'Clone repository'}
+            </button>
+          </div>
+        </form>
       </section>
     </div>
   );
@@ -975,6 +1053,8 @@ export default function App() {
   const [logQuery, setLogQuery] = useState('');
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
+  const [commandAction, setCommandAction] = useState<'provider-model' | 'clone-repository' | null>(null);
+  const [commandNotice, setCommandNotice] = useState('');
   const [identityOpen, setIdentityOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [relativeTimeNow, setRelativeTimeNow] = useState(Date.now());
@@ -1317,6 +1397,43 @@ export default function App() {
     setLoading(false);
     if (showSpinner) setRefreshing(false);
   }, [refreshStatus, refreshTelemetry, refreshWork]);
+
+  const runCommandAction = async (values: { provider: string; model: string } | { url: string }) => {
+    if ('provider' in values) {
+      await api('/api/config/provider-model', { method: 'POST', body: JSON.stringify(values) });
+      setCommandNotice(`Active provider and model updated to ${values.provider}/${values.model}.`);
+    } else {
+      const project = await api<WorkspaceProject>('/api/projects/clone', { method: 'POST', body: JSON.stringify(values) });
+      setCommandNotice(`Repository cloned into project “${project.name}”.`);
+    }
+    setCommandAction(null);
+    setError('');
+    void refreshAll(true);
+    window.setTimeout(() => setCommandNotice(''), 7000);
+  };
+
+  const restartGateway = async () => {
+    if (!window.confirm('Restart the Symbiote Gateway? Active sessions may be interrupted briefly.')) return;
+    try {
+      await api('/api/gateway/restart', { method: 'POST', body: '{}' });
+      setError('');
+      setCommandNotice('Gateway restart requested. Electron will supervise the restart.');
+      window.setTimeout(() => setCommandNotice(''), 7000);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Gateway restart could not be requested.');
+    }
+  };
+
+  const rebootComputer = async () => {
+    if (!window.symbioteDesktop || !window.confirm('Restart this computer? Windows will ask for approval, then restart in 15 seconds.')) return;
+    try {
+      await window.symbioteDesktop.requestReboot();
+      setCommandNotice('Windows accepted the restart request. You can cancel it with “shutdown /a” before the countdown ends.');
+      window.setTimeout(() => setCommandNotice(''), 7000);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Computer restart was not started.');
+    }
+  };
 
   const unlockLanAccess = async (token: string) => {
     setAccessError('');
@@ -2231,6 +2348,7 @@ export default function App() {
         </header>
 
         <main id="main-content" className={`main-content${view === 'chat' ? ' main-content-chat' : ''}`}>
+          {commandNotice && <div className="notice notice-info" role="status"><span>{commandNotice}</span><button className="icon-button small" onClick={() => setCommandNotice('')} aria-label="Dismiss command status"><X size={14} /></button></div>}
           {error && (
             <div className="notice notice-error" role="alert">
               <span>{error}</span>
@@ -2413,7 +2531,19 @@ export default function App() {
       </div>
       {notificationsOpen && <button className="notification-dismiss" aria-label="Close notifications" onClick={() => setNotificationsOpen(false)} />}
       {identityOpen && config && <AgentSettingsDialog config={config} onSave={updateIdentity} onClose={() => setIdentityOpen(false)} />}
-      {commandOpen && <CommandPalette query={commandQuery} onQuery={setCommandQuery} onClose={() => setCommandOpen(false)} onNavigate={destination => { setCommandOpen(false); navigate(destination); }} onNewSession={() => { setCommandOpen(false); void createSession(); }} />}
+      {commandOpen && <CommandPalette
+        query={commandQuery}
+        onQuery={setCommandQuery}
+        onClose={() => setCommandOpen(false)}
+        onNavigate={destination => { setCommandOpen(false); navigate(destination); }}
+        onNewSession={() => { setCommandOpen(false); void createSession(); }}
+        onRestartGateway={() => { setCommandOpen(false); void restartGateway(); }}
+        onChangeProviderModel={() => { setCommandOpen(false); setCommandAction('provider-model'); }}
+        onCloneRepository={() => { setCommandOpen(false); setCommandAction('clone-repository'); }}
+        onReboot={() => { setCommandOpen(false); void rebootComputer(); }}
+        isDesktopApp={isDesktopApp && window.symbioteDesktop?.supportsReboot === true}
+      />}
+      {commandAction && <CommandActionDialog action={commandAction} config={config} onClose={() => setCommandAction(null)} onSubmit={runCommandAction} />}
     </div>
   );
 }

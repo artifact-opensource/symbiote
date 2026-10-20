@@ -1,5 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, nativeTheme } = require('electron');
 const { execFile, execFileSync, spawn } = require('node:child_process');
+const { once } = require('node:events');
 const crypto = require('node:crypto');
 const http = require('node:http');
 const net = require('node:net');
@@ -17,6 +18,14 @@ let desktopTheme;
 const preferencesPath = path.join(app.getPath('userData'), 'desktop-preferences.json');
 const gatewayProcessPath = path.join(app.getPath('userData'), 'gateway-process.json');
 let gatewayStartup;
+let gatewayChild;
+let gatewayRestartTimer;
+let gatewayRestartAttempts = 0;
+let electronQuitting = false;
+let gatewayStopping = false;
+let desktopControlServer;
+let desktopControlPath;
+let desktopControlToken;
 let updateInstallArmed = false;
 let updateInstallTimer;
 let resolveUpdateInstall;
@@ -100,6 +109,7 @@ function readGatewayConfig() {
     return {
       configPath,
       configDirectory: path.dirname(configPath),
+      workspace: path.resolve(config.workspace || path.dirname(configPath)),
       daemonPath: path.join(__dirname, '..', 'dist', 'gateway', 'daemon.js'),
       bindHost: configuredHost,
       port,
@@ -107,6 +117,60 @@ function readGatewayConfig() {
     };
   }
   throw new Error(`Could not find symbiote.json. Checked: ${candidates.map(file => path.resolve(file)).join(', ')}`);
+}
+
+function startDesktopControl(gateway) {
+  desktopControlPath = path.join(gateway.configDirectory, '.session', 'desktop-control.json');
+  desktopControlToken = crypto.randomBytes(32).toString('base64url');
+  const server = http.createServer((request, response) => {
+    const action = request.url;
+    const suppliedToken = request.headers['x-symbiote-control-token'];
+    const suppliedBytes = typeof suppliedToken === 'string' ? Buffer.from(suppliedToken) : undefined;
+    const expectedBytes = Buffer.from(desktopControlToken);
+    if (request.method !== 'POST' || !['/quit', '/focus', '/status'].includes(action)
+      || !suppliedBytes || suppliedBytes.length !== expectedBytes.length
+      || !crypto.timingSafeEqual(suppliedBytes, expectedBytes)) {
+      response.writeHead(404).end();
+      return;
+    }
+    if (action === '/status') {
+      response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
+        pid: process.pid,
+        gatewayPid: gatewayChild?.pid ?? null,
+      }));
+      return;
+    }
+    response.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ accepted: true }));
+    setImmediate(() => {
+      if (action === '/quit') app.quit();
+      else {
+        const window = mainWindow || miniWindow;
+        if (!window) return;
+        if (window.isMinimized()) window.restore();
+        window.show();
+        window.focus();
+      }
+    });
+  });
+  desktopControlServer = server;
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      try {
+        const address = server.address();
+        if (!address || typeof address === 'string') throw new Error('Could not determine the desktop control port.');
+        fs.mkdirSync(path.dirname(desktopControlPath), { recursive: true });
+        fs.writeFileSync(desktopControlPath, JSON.stringify({
+          pid: process.pid,
+          port: address.port,
+          token: desktopControlToken,
+        }), { encoding: 'utf8', mode: 0o600 });
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
 }
 
 function gatewayHealthCheck(gateway) {
@@ -120,6 +184,29 @@ function gatewayHealthCheck(gateway) {
       resolve(false);
     });
     request.once('error', () => resolve(false));
+  });
+}
+
+function readGatewayJson(gateway, pathname) {
+  return new Promise(resolve => {
+    const request = http.get(`${gateway.url}${pathname}`, { timeout: 2000 }, response => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { body += chunk; });
+      response.on('end', () => {
+        if (response.statusCode !== 200) return resolve(undefined);
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          resolve(undefined);
+        }
+      });
+    });
+    request.once('timeout', () => {
+      request.destroy();
+      resolve(undefined);
+    });
+    request.once('error', () => resolve(undefined));
   });
 }
 
@@ -152,19 +239,6 @@ function serviceState() {
   }
 }
 
-function runServiceCommand(action) {
-  execFileSync('sc.exe', [action, 'SymbioteGateway'], { encoding: 'utf8', windowsHide: true, stdio: 'pipe' });
-}
-
-async function waitForServiceState(expected, timeoutMs = 15000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (serviceState() === expected) return true;
-    await new Promise(resolve => setTimeout(resolve, 400));
-  }
-  return serviceState() === expected;
-}
-
 async function waitForGateway(gateway, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -177,7 +251,7 @@ async function waitForGateway(gateway, timeoutMs = 30000) {
 function managedGatewayProcess(pid, gateway) {
   if (!Number.isInteger(pid) || pid < 1) return false;
   if (process.platform === 'win32') {
-    const script = '$p=Get-CimInstance Win32_Process -Filter "ProcessId = $env:SYMBIOTE_GATEWAY_PID"; if ($p -and $p.CommandLine -and $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_SCRIPT,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_CONFIG,[StringComparison]::OrdinalIgnoreCase) -ge 0) { exit 0 }; exit 1';
+    const script = '$p=Get-CimInstance Win32_Process -Filter "ProcessId = $env:SYMBIOTE_GATEWAY_PID"; $scriptMatch=$p.CommandLine -and ($p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_SCRIPT,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_SCRIPT_NAME,[StringComparison]::OrdinalIgnoreCase) -ge 0); $configMatch=$p.CommandLine -and ($p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_CONFIG,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_CONFIG_NAME,[StringComparison]::OrdinalIgnoreCase) -ge 0); if ($p -and $scriptMatch -and $configMatch) { exit 0 }; exit 1';
     try {
       execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
         encoding: 'utf8',
@@ -187,6 +261,8 @@ function managedGatewayProcess(pid, gateway) {
           SYMBIOTE_GATEWAY_PID: String(pid),
           SYMBIOTE_GATEWAY_SCRIPT: gateway.daemonPath,
           SYMBIOTE_GATEWAY_CONFIG: gateway.configPath,
+          SYMBIOTE_GATEWAY_SCRIPT_NAME: path.basename(gateway.daemonPath),
+          SYMBIOTE_GATEWAY_CONFIG_NAME: path.basename(gateway.configPath),
         },
       });
       return true;
@@ -236,6 +312,26 @@ async function stopStaleManagedGateway(gateway) {
   fs.rmSync(gatewayProcessPath, { force: true });
 }
 
+async function stopGatewayProcess(pid, gateway) {
+  if (!managedGatewayProcess(pid, gateway)) return;
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch (error) {
+    if (error.code !== 'ESRCH') throw error;
+  }
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline && managedGatewayProcess(pid, gateway)) {
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  if (managedGatewayProcess(pid, gateway)) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch (error) {
+      if (error.code !== 'ESRCH') throw error;
+    }
+  }
+}
+
 function resolveNodeExecutable() {
   if (process.env.SYMBIOTE_NODE) return process.env.SYMBIOTE_NODE;
   const bundledNode = path.join(__dirname, '..', 'node.exe');
@@ -269,7 +365,7 @@ function launchGateway(gateway) {
   const logHandle = fs.openSync(path.join(logDirectory, 'gateway.log'), 'a');
   const child = spawn(executable, [gateway.daemonPath, `--config=${gateway.configPath}`], {
     cwd: gateway.configDirectory,
-    detached: true,
+    detached: false,
     windowsHide: true,
     stdio: ['ignore', logHandle, logHandle],
     env: {
@@ -278,6 +374,10 @@ function launchGateway(gateway) {
     },
   });
   fs.closeSync(logHandle);
+  const stableTimer = setTimeout(() => {
+    if (gatewayChild === child) gatewayRestartAttempts = 0;
+  }, 30_000);
+  stableTimer.unref();
   child.once('error', error => console.error('Could not start the Symbiote Gateway:', error));
   child.once('spawn', () => {
     fs.writeFileSync(gatewayProcessPath, JSON.stringify({
@@ -285,42 +385,62 @@ function launchGateway(gateway) {
       daemonPath: gateway.daemonPath,
       configPath: gateway.configPath,
     }), 'utf8');
-    child.unref();
   });
-  child.once('exit', () => {
+  child.once('exit', (code, signal) => {
+    clearTimeout(stableTimer);
     try {
       const recorded = JSON.parse(fs.readFileSync(gatewayProcessPath, 'utf8'));
       if (recorded.pid === child.pid) fs.rmSync(gatewayProcessPath, { force: true });
     } catch (error) {
       if (error.code !== 'ENOENT') console.error('Could not clear the exited Gateway process record:', error);
     }
+    if (gatewayChild === child) gatewayChild = undefined;
+    if (electronQuitting || gatewayStopping) return;
+    gatewayRestartAttempts++;
+    console.error(`Symbiote Gateway exited (code ${code ?? 'none'}, signal ${signal ?? 'none'}); restart attempt ${gatewayRestartAttempts}/5.`);
+    if (gatewayRestartAttempts > 5) {
+      dialog.showErrorBox('Symbiote Gateway stopped', `Gateway exited repeatedly. Review ${path.join(app.getPath('userData'), 'logs', 'gateway.log')} before retrying.`);
+      return;
+    }
+    const delay = Math.min(1000 * (2 ** (gatewayRestartAttempts - 1)), 15000);
+    gatewayRestartTimer = setTimeout(() => {
+      gatewayRestartTimer = undefined;
+      void ensureGateway().catch(error => {
+        console.error('Could not restart the Symbiote Gateway:', error);
+      });
+    }, delay);
   });
+  gatewayChild = child;
   return child;
 }
 
 async function ensureGateway() {
   if (gatewayStartup) return gatewayStartup;
   gatewayStartup = (async () => {
+    if (electronQuitting) throw new Error('Electron is closing and will not start another Gateway process.');
     const gateway = readGatewayConfig();
-    if (await gatewayHealthCheck(gateway)) return gateway;
-
     const installedServiceState = serviceState();
     if (installedServiceState) {
-      try {
-        if (installedServiceState !== 'STOPPED') {
-          runServiceCommand('stop');
-          if (!await waitForServiceState('STOPPED')) {
-            throw new Error('The SymbioteGateway service did not stop cleanly.');
-          }
-        }
-        runServiceCommand('start');
-      } catch (error) {
-        throw new Error(`The SymbioteGateway service is not healthy and could not be restarted: ${error.message}`);
+      throw new Error(`The SymbioteGateway Windows service (${installedServiceState}) is separate from Electron. Remove that service before starting the Electron-managed Gateway.`);
+    }
+
+    const liveStatus = await readGatewayJson(gateway, '/api/status');
+    if (liveStatus && Number.isInteger(liveStatus.pid)) {
+      if (gatewayChild?.pid === liveStatus.pid) return gateway;
+      const liveConfig = await readGatewayJson(gateway, '/api/config');
+      const sameWorkspace = typeof liveConfig?.workspace === 'string'
+        && path.resolve(liveConfig.workspace) === gateway.workspace;
+      if (!sameWorkspace || !managedGatewayProcess(liveStatus.pid, gateway)) {
+        throw new Error(`Port ${gateway.port} is serving a Gateway Electron cannot safely identify. It was left untouched.`);
       }
-      if (!await waitForGateway(gateway)) {
-        throw new Error(`The SymbioteGateway service started but did not become healthy at ${gateway.url}/api/status.`);
+      await stopGatewayProcess(liveStatus.pid, gateway);
+      const stopDeadline = Date.now() + 10_000;
+      while (Date.now() < stopDeadline && await gatewayHealthCheck(gateway)) {
+        await new Promise(resolve => setTimeout(resolve, 250));
       }
-      return gateway;
+      if (await gatewayHealthCheck(gateway)) {
+        throw new Error(`The old Gateway process ${liveStatus.pid} did not release port ${gateway.port}.`);
+      }
     }
 
     await stopStaleManagedGateway(gateway);
@@ -332,6 +452,10 @@ async function ensureGateway() {
       if (child.pid && child.exitCode === null) child.kill();
       throw new Error(`The Gateway process did not become healthy at ${gateway.url}/api/status. See ${path.join(app.getPath('userData'), 'logs', 'gateway.log')}.`);
     }
+    const startedStatus = await readGatewayJson(gateway, '/api/status');
+    if (startedStatus?.pid !== child.pid) {
+      throw new Error(`Port ${gateway.port} became healthy, but it is not served by the Gateway child Electron started.`);
+    }
     return gateway;
   })();
   try {
@@ -339,6 +463,25 @@ async function ensureGateway() {
   } finally {
     gatewayStartup = undefined;
   }
+}
+
+async function stopManagedGateway() {
+  if (gatewayRestartTimer) clearTimeout(gatewayRestartTimer);
+  gatewayRestartTimer = undefined;
+  const child = gatewayChild;
+  if (!child || child.exitCode !== null) return;
+  gatewayStopping = true;
+  child.kill('SIGTERM');
+  await Promise.race([
+    once(child, 'exit'),
+    new Promise(resolve => setTimeout(resolve, 8000)),
+  ]);
+  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  if (child.exitCode === null && child.signalCode === null) {
+    await Promise.race([once(child, 'exit'), new Promise(resolve => setTimeout(resolve, 3000))]);
+  }
+  gatewayChild = undefined;
+  gatewayStopping = false;
 }
 
 function hasFirewallRule(port) {
@@ -651,6 +794,18 @@ ipcMain.handle('desktop:set-theme', (_event, theme) => {
   return desktopTheme;
 });
 ipcMain.handle('desktop:request-lan-access', () => configureLanAccess(true));
+ipcMain.handle('desktop:request-reboot', async () => {
+  if (process.platform !== 'win32') throw new Error('A confirmed system restart is currently available only in the Windows desktop app.');
+  const script = 'Start-Process -FilePath "$env:SystemRoot\\System32\\shutdown.exe" -ArgumentList \'/r /t 15 /c "Restart requested from Symbiote"\' -Verb RunAs -ErrorAction Stop';
+  try {
+    await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      windowsHide: true,
+      timeout: 15_000,
+    });
+  } catch (error) {
+    throw new Error(`Windows did not accept the restart request: ${error.message}`);
+  }
+});
 ipcMain.handle('desktop:install-update', () => {
   if (process.platform !== 'win32') throw new Error('In-app installation is currently supported only by the Windows desktop app.');
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error('The Symbiote Control Room is not open.');
@@ -676,9 +831,30 @@ ipcMain.on('desktop:hover', (event, hovering) => {
 app.whenReady().then(() => {
   if (!ownsSingleInstanceLock) return;
   nativeTheme.themeSource = desktopTheme || 'system';
-  void ensureGateway().then(createMainWindow).catch(error => {
+  void startDesktopControl(readGatewayConfig()).then(() => ensureGateway()).then(createMainWindow).catch(error => {
     console.error('Electron cannot start without a healthy Symbiote Gateway:', error);
     dialog.showErrorBox('Symbiote Gateway unavailable', error.message);
+    app.quit();
+  });
+});
+app.on('before-quit', event => {
+  if (electronQuitting) return;
+  electronQuitting = true;
+  desktopControlServer?.close();
+  desktopControlServer = undefined;
+  if (desktopControlPath) {
+    try {
+      const record = JSON.parse(fs.readFileSync(desktopControlPath, 'utf8'));
+      if (record.pid === process.pid) fs.rmSync(desktopControlPath, { force: true });
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.error('Could not clear the desktop control record:', error);
+    }
+  }
+  if (!gatewayChild || gatewayChild.exitCode !== null) return;
+  event.preventDefault();
+  void stopManagedGateway().then(() => app.quit()).catch(error => {
+    console.error('Could not stop the Electron-managed Gateway cleanly:', error);
+    dialog.showErrorBox('Gateway shutdown failed', error.message);
     app.quit();
   });
 });

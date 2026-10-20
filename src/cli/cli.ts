@@ -6,9 +6,11 @@
  */
 
 import * as fs from 'node:fs';
+import * as http from 'node:http';
 import * as path from 'node:path';
 import { execSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import {
   palette, multiGradient, BRAND_STOPS, versionBanner, heading, hint, cmd,
   kv, ok, warn, fail, info, box,
@@ -21,6 +23,7 @@ import { needsUpgrade, readConfigFile, readEnv, upgradeConfigFile, writeEnvValue
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_ROOT = path.resolve(__dirname, '..');
 const PROJECT_ROOT = path.resolve(DIST_ROOT, '..');
+const require = createRequire(import.meta.url);
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -50,6 +53,61 @@ function isRunning(): { running: boolean; pid?: number } {
 
 const removePid = () => { try { fs.unlinkSync(pidFile()); } catch { /* already gone */ } };
 
+interface DesktopControlRecord {
+  pid: number;
+  port: number;
+  token: string;
+}
+
+function readDesktopControl(configPath: string): DesktopControlRecord | undefined {
+  try {
+    const record = JSON.parse(fs.readFileSync(path.join(path.dirname(path.resolve(configPath)), '.session', 'desktop-control.json'), 'utf8')) as Partial<DesktopControlRecord>;
+    if (!Number.isInteger(record.pid) || (record.pid ?? 0) < 1 || !Number.isInteger(record.port) || (record.port ?? 0) < 1
+      || (record.port ?? 0) > 65_535 || typeof record.token !== 'string' || record.token.length < 32) return undefined;
+    return record as DesktopControlRecord;
+  } catch (error) {
+    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
+    if (code !== 'ENOENT' && !(error instanceof SyntaxError)) console.error('Could not read the desktop control record:', error);
+    return undefined;
+  }
+}
+
+function requestDesktopControl(record: DesktopControlRecord, action: 'quit' | 'focus' | 'status'): Promise<string | undefined> {
+  return new Promise(resolve => {
+    const request = http.request({
+      host: '127.0.0.1',
+      port: record.port,
+      path: `/${action}`,
+      method: 'POST',
+      headers: { 'x-symbiote-control-token': record.token },
+      timeout: 2000,
+    }, response => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { body += chunk; });
+      response.on('end', () => {
+        const expectedStatus = action === 'status' ? 200 : 202;
+        resolve(response.statusCode === expectedStatus ? body : undefined);
+      });
+    });
+    request.once('timeout', () => {
+      request.destroy();
+      resolve(undefined);
+    });
+    request.once('error', () => resolve(undefined));
+    request.end();
+  });
+}
+
+function processIsRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Run a build step quietly; surface its output only when it fails. */
 function runQuiet(label: string, command: string): boolean {
   process.stdout.write(`  ${palette.violet}›${palette.reset} ${label}${palette.dim}…${palette.reset}`);
@@ -74,7 +132,7 @@ async function cmdHelp() {
     ['Run', [
       ['symbiote', 'interactive agent (REPL)'],
       ['symbiote agent "…"', 'one-shot prompt'],
-      ['start | stop | restart', 'manage the background daemon'],
+      ['start | stop | restart', 'open or close the Control Room and its Gateway'],
       ['status', 'daemon, model and channels at a glance'],
       ['logs [-f] [-n=50]', 'show or follow the daemon log'],
     ]],
@@ -140,52 +198,75 @@ async function cmdInstall() {
 
   if (args.includes('--no-start')) return;
 
-  if (loadConfig(configPath).whatsapp?.enabled) {
-    console.log(info('Starting in the foreground so you can scan the WhatsApp QR code.'));
-    const { startGateway } = await import('../gateway/daemon.js');
-    await startGateway(configPath);
-    return;
-  }
   await cmdStart();
 }
 
 async function cmdStart() {
-  const { running, pid } = isRunning();
-  if (running) {
-    console.log(warn(`Already running (pid ${pid}). Use ${cmd('symbiote restart')}.`));
-    return;
-  }
-
   const configPath = getConfigPath();
   if (!configPath) {
     console.log(fail(`No symbiote.json found. Run ${cmd('symbiote init')}.`));
     return;
   }
+  const existingControl = readDesktopControl(configPath);
+  if (existingControl && processIsRunning(existingControl.pid) && await requestDesktopControl(existingControl, 'focus')) {
+    console.log(ok(`Symbiote Control Room is already running ${palette.dim}(pid ${existingControl.pid})${palette.reset}.`));
+    return;
+  }
+  const desktopMain = path.join(PROJECT_ROOT, 'desktop', 'main.cjs');
+  if (!fs.existsSync(desktopMain)) {
+    console.log(fail(`Electron entry point is missing: ${desktopMain}`));
+    return;
+  }
+  let electronExecutable: string;
+  try {
+    electronExecutable = require('electron') as string;
+    if (typeof electronExecutable !== 'string' || !fs.existsSync(electronExecutable)) {
+      throw new Error('The installed Electron runtime was not found.');
+    }
+  } catch (error) {
+    console.log(fail(`Could not launch Electron: ${error instanceof Error ? error.message : String(error)}. Install desktop dependencies or launch the installed Symbiote app.`));
+    return;
+  }
 
-  const logFd = fs.openSync(logFile(), 'a');
-  const child = spawn('node', [path.join(DIST_ROOT, 'gateway', 'daemon.js'), `--config=${configPath}`], {
-    cwd: process.cwd(),
-    detached: true,
-    stdio: ['ignore', logFd, logFd],
-    env: { ...process.env },
-    windowsHide: true,
-  });
-  fs.writeFileSync(pidFile(), String(child.pid));
-  child.unref();
-  fs.closeSync(logFd);
-
-  await new Promise(r => setTimeout(r, 2000));
-  const check = isRunning();
-  if (check.running) {
-    console.log(ok(`Started ${palette.dim}pid ${check.pid} · ${cmd('symbiote logs -f')}${palette.dim} to follow${palette.reset}`));
+  const absoluteConfigPath = path.resolve(configPath);
+  try {
+    const child = await new Promise<ReturnType<typeof spawn>>((resolve, reject) => {
+      const process = spawn(electronExecutable, [desktopMain], {
+        cwd: path.dirname(absoluteConfigPath),
+        detached: true,
+        stdio: 'ignore',
+        env: { ...globalThis.process.env, SYMBIOTE_CONFIG: absoluteConfigPath },
+        windowsHide: false,
+      });
+      process.once('error', reject);
+      process.once('spawn', () => resolve(process));
+    });
+    child.unref();
+    console.log(ok(`Opened the Symbiote Control Room ${palette.dim}(Electron PID ${child.pid ?? 'starting'})${palette.reset}; Electron supervises the Gateway.`));
     if (needsUpgrade(configPath)) console.log(hint(`Config is an older format. Run ${cmd('symbiote upgrade')} to modernise it.`));
-  } else {
-    console.log(fail(`Daemon exited during startup. See ${cmd('symbiote logs')}.`));
-    removePid();
+  } catch (error) {
+    console.log(fail(`Could not start Electron: ${error instanceof Error ? error.message : String(error)}`));
   }
 }
 
 async function cmdStop() {
+  const configPath = getConfigPath();
+  const control = configPath ? readDesktopControl(configPath) : undefined;
+  if (control && processIsRunning(control.pid)) {
+    if (!await requestDesktopControl(control, 'quit')) {
+      console.log(warn(`Could not contact the running Control Room (pid ${control.pid}); it was left untouched.`));
+      return;
+    }
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline && processIsRunning(control.pid)) await new Promise(resolve => setTimeout(resolve, 250));
+    if (processIsRunning(control.pid)) {
+      console.log(warn(`Electron accepted shutdown but process ${control.pid} is still running. Check the desktop app before retrying.`));
+      return;
+    }
+    console.log(ok(`Closed the Symbiote Control Room and its supervised Gateway ${palette.dim}(pid ${control.pid})${palette.reset}.`));
+    return;
+  }
+
   const { running, pid } = isRunning();
   if (!running) {
     console.log(info('Not running.'));
@@ -208,15 +289,32 @@ async function cmdStop() {
 }
 
 async function cmdRestart() {
+  const configPath = getConfigPath();
+  const desktop = configPath ? readDesktopControl(configPath) : undefined;
   await cmdStop();
+  if (desktop && processIsRunning(desktop.pid)) return;
   await cmdStart();
 }
 
 async function cmdStatus() {
-  const { running, pid } = isRunning();
   const configPath = getConfigPath();
+  const legacyDaemon = isRunning();
+  const desktopControl = configPath ? readDesktopControl(configPath) : undefined;
+  const desktopRunning = desktopControl ? processIsRunning(desktopControl.pid) : false;
+  let desktopStatus: { pid?: number; gatewayPid?: number | null } | undefined;
+  if (desktopControl && desktopRunning) {
+    try {
+      const result = await requestDesktopControl(desktopControl, 'status');
+      if (result) desktopStatus = JSON.parse(result) as { pid?: number; gatewayPid?: number | null };
+    } catch {
+      desktopStatus = undefined;
+    }
+  }
+  const gatewayPid = desktopStatus?.gatewayPid ?? legacyDaemon.pid;
+  const running = Number.isInteger(gatewayPid) && (desktopStatus?.gatewayPid ? true : legacyDaemon.running);
   const rows: string[] = [
-    kv('Daemon', running ? `${palette.green}● running${palette.reset} ${palette.dim}pid ${pid}${palette.reset}` : `${palette.red}○ stopped${palette.reset}`, 11),
+    kv('Gateway', running ? `${palette.green}● running${palette.reset} ${palette.dim}pid ${gatewayPid}${palette.reset}` : `${palette.red}○ stopped${palette.reset}`, 11),
+    ...(desktopRunning ? [kv('Control Room', `${palette.green}● running${palette.reset} ${palette.dim}pid ${desktopControl?.pid}${palette.reset}`, 11)] : []),
   ];
 
   if (configPath) {

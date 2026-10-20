@@ -71,6 +71,9 @@ export interface WebControlPlane {
   getStatus: () => Record<string, unknown>;
   getTelemetry?: () => Record<string, unknown>;
   recordGatewayIssue?: (subsystem: string, message: string) => void;
+  restartGateway?: () => void;
+  updateProviderModel?: (provider: string, model: string) => { provider: string; model: string };
+  cloneProjectRepository?: (repositoryUrl: string) => Promise<unknown>;
   getUpdateDownload?: () => ReleaseDownloadStatus;
   prepareUpdateDownload?: () => Promise<ReleaseDownloadStatus>;
   getUpdateInstallerPath?: () => string | undefined;
@@ -625,6 +628,37 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       if (!control.getTelemetry) return json(res, { error: 'Live telemetry is unavailable in this runtime.' }, 501);
       res.setHeader('Cache-Control', 'no-store');
       return json(res, control.getTelemetry());
+    }
+    if (method === 'POST' && pathname === '/api/gateway/restart') {
+      if (!isSameOriginRequest(req)) return json(res, { error: 'Gateway restarts must be requested from the Symbiote Control Room.' }, 403);
+      if (!control.restartGateway) return json(res, { error: 'Gateway restart is unavailable in this runtime.' }, 501);
+      try {
+        control.restartGateway();
+        return json(res, { restarting: true }, 202);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Gateway restart could not be requested.' }, 500);
+      }
+    }
+    if (method === 'POST' && pathname === '/api/config/provider-model') {
+      if (!isSameOriginRequest(req)) return json(res, { error: 'Provider changes must be requested from the Symbiote Control Room.' }, 403);
+      if (!control.updateProviderModel) return json(res, { error: 'Provider changes are unavailable in this runtime.' }, 501);
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 4_096) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Provider settings must be valid JSON.' }, 400);
+      }
+      const value = body as { provider?: unknown; model?: unknown } | null;
+      if (!value || typeof value.provider !== 'string' || typeof value.model !== 'string'
+        || value.provider.length > 64 || value.model.length > 200
+        || /[\u0000-\u001f\u007f]/.test(value.provider) || /[\u0000-\u001f\u007f]/.test(value.model)) {
+        return json(res, { error: 'A provider ID and model name (up to 200 characters) are required.' }, 400);
+      }
+      try {
+        return json(res, control.updateProviderModel(value.provider.trim(), value.model.trim()));
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Provider settings could not be saved.' }, 400);
+      }
     }
     if (pathname === '/api/update/download' && method === 'POST') {
       if (!isSameOriginRequest(req)) return json(res, { error: 'Update downloads must be requested from the Symbiote Control Room.' }, 403);
@@ -1494,6 +1528,25 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     }
     if (method === 'GET' && pathname === '/api/projects') {
       return json(res, control.getProjects(url.searchParams.get('includeArchived') === 'true'));
+    }
+    if (method === 'POST' && pathname === '/api/projects/clone') {
+      if (!isSameOriginRequest(req)) return json(res, { error: 'Repository cloning must be requested from the Symbiote Control Room.' }, 403);
+      if (!control.cloneProjectRepository) return json(res, { error: 'Repository cloning is unavailable in this runtime.' }, 501);
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 4_096) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Repository details must be valid JSON.' }, 400);
+      }
+      const value = body as { url?: unknown } | null;
+      if (!value || typeof value.url !== 'string' || value.url.length > 2_048) {
+        return json(res, { error: 'An HTTPS repository URL is required.' }, 400);
+      }
+      try {
+        return json(res, await control.cloneProjectRepository(value.url), 201);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Repository clone failed.' }, 400);
+      }
     }
     if (method === 'POST' && pathname === '/api/projects') {
       const body = JSON.parse(await readBody(req, 16_384) || '{}') as { name?: unknown; scope?: unknown };

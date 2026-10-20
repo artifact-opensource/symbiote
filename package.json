@@ -35,7 +35,7 @@
     "dev:webapp": "npm --prefix webapp run dev",
     "build:webapp": "npm --prefix webapp run build",
     "index:codebase": "node scripts/generate-codebase-index.mjs",
-    "start": "node dist/gateway/daemon.js --config=symbiote.json",
+    "start": "npm run desktop",
     "dev": "tsc && node dist/index.js",
     "init": "tsc && node dist/cli/wizard.js"
   },
