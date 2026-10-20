@@ -12,6 +12,8 @@ On Windows, Electron checks for an existing firewall rule and, if none is presen
 
 The Electron app is a desktop shell for the gateway-served Control Room and connects to the configured web port over loopback. It does not start a separate runtime or bypass the LAN token. Other devices still connect to the gateway's LAN address and need the access token; Windows firewall access is optional and can be enabled later from the desktop **Configuration** page.
 
+The desktop shell is single-instance. Closing its window hides Symbiote in the system tray; use the tray icon to reopen the Control Room, restart the Gateway, or quit. In a source checkout, `npm start` opens the existing app if already running; otherwise it builds clean output before launching. Electron supervises one Gateway child when no Windows service is installed; with the MSI, it attaches to the existing `SymbioteGateway` service instead and never starts a competing process. Quitting the desktop stops its supervised child, while an installed service remains under Windows Service Control Manager.
+
 ## Workspace tasks
 
 From **Workspace**, submit a task name and prompt to send it through the selected conversation's existing session and the normal agent pipeline and tool policy. The task form opens **Runs** after a successful start. Each new conversation gets its own session file. **Runs** shows live phase and tool activity, task briefs, lifecycle status, subagent counts, tools used, errors, and transcript links. Active runs can be stopped, restarted, or guided. Completed runs can be collapsed, archived, and restored. Chat suppresses token-by-token answer deltas; the completed answer is displayed when the turn finishes.

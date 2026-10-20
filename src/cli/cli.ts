@@ -8,7 +8,7 @@
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
-import { execSync, spawn } from 'node:child_process';
+import { execFileSync, execSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import {
@@ -103,6 +103,34 @@ function processIsRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+function isManagedGatewayProcess(pid: number, configPath: string): boolean {
+  const daemonPath = path.join(DIST_ROOT, 'gateway', 'daemon.js');
+  if (process.platform === 'win32') {
+    const script = '$p=Get-CimInstance Win32_Process -Filter "ProcessId = $env:SYMBIOTE_GATEWAY_PID"; if ($p.CommandLine -and $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_SCRIPT,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_CONFIG,[StringComparison]::OrdinalIgnoreCase) -ge 0) { exit 0 }; exit 1';
+    try {
+      execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+        stdio: 'ignore',
+        windowsHide: true,
+        env: {
+          ...globalThis.process.env,
+          SYMBIOTE_GATEWAY_PID: String(pid),
+          SYMBIOTE_GATEWAY_SCRIPT: daemonPath,
+          SYMBIOTE_GATEWAY_CONFIG: path.resolve(configPath),
+        },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    const commandLine = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+    return commandLine.includes(daemonPath) && commandLine.includes(path.resolve(configPath));
   } catch {
     return false;
   }
@@ -217,6 +245,16 @@ async function cmdStart() {
     console.log(fail(`Electron entry point is missing: ${desktopMain}`));
     return;
   }
+  if (process.env.SYMBIOTE_BUILD_READY !== '1'
+    && fs.existsSync(path.join(PROJECT_ROOT, 'src', 'gateway', 'daemon.ts'))
+    && fs.existsSync(path.join(PROJECT_ROOT, 'tsconfig.json'))) {
+    try {
+      execSync('npm run build', { cwd: PROJECT_ROOT, stdio: 'inherit' });
+    } catch (error) {
+      console.log(fail(`Could not build a fresh Gateway before launch: ${error instanceof Error ? error.message : String(error)}`));
+      return;
+    }
+  }
   let electronExecutable: string;
   try {
     electronExecutable = require('electron') as string;
@@ -273,9 +311,14 @@ async function cmdStop() {
     removePid();
     return;
   }
+  if (!configPath || !isManagedGatewayProcess(pid!, configPath)) {
+    console.log(warn(`PID ${pid} does not identify the configured Symbiote Gateway; leaving it untouched and clearing the stale PID file.`));
+    removePid();
+    return;
+  }
   try {
     if (process.platform === 'win32') {
-      execSync(`taskkill /pid ${pid} /t /f`, { stdio: 'pipe' });
+      execFileSync('taskkill.exe', ['/pid', String(pid), '/t', '/f'], { stdio: 'pipe', windowsHide: true });
     } else {
       process.kill(pid!, 'SIGTERM');
       await new Promise(r => setTimeout(r, 3000));
@@ -301,7 +344,7 @@ async function cmdStatus() {
   const legacyDaemon = isRunning();
   const desktopControl = configPath ? readDesktopControl(configPath) : undefined;
   const desktopRunning = desktopControl ? processIsRunning(desktopControl.pid) : false;
-  let desktopStatus: { pid?: number; gatewayPid?: number | null } | undefined;
+  let desktopStatus: { pid?: number; gatewayPid?: number | null; gatewayMode?: 'electron' | 'service' } | undefined;
   if (desktopControl && desktopRunning) {
     try {
       const result = await requestDesktopControl(desktopControl, 'status');
@@ -311,9 +354,12 @@ async function cmdStatus() {
     }
   }
   const gatewayPid = desktopStatus?.gatewayPid ?? legacyDaemon.pid;
-  const running = Number.isInteger(gatewayPid) && (desktopStatus?.gatewayPid ? true : legacyDaemon.running);
+  const serviceGatewayRunning = desktopRunning && desktopStatus?.gatewayMode === 'service';
+  const running = serviceGatewayRunning || (Number.isInteger(gatewayPid) && (desktopStatus?.gatewayPid ? true : legacyDaemon.running));
   const rows: string[] = [
-    kv('Gateway', running ? `${palette.green}● running${palette.reset} ${palette.dim}pid ${gatewayPid}${palette.reset}` : `${palette.red}○ stopped${palette.reset}`, 11),
+    kv('Gateway', running
+      ? `${palette.green}● running${palette.reset} ${palette.dim}${serviceGatewayRunning ? 'Windows service' : `pid ${gatewayPid}`}${palette.reset}`
+      : `${palette.red}○ stopped${palette.reset}`, 11),
     ...(desktopRunning ? [kv('Control Room', `${palette.green}● running${palette.reset} ${palette.dim}pid ${desktopControl?.pid}${palette.reset}`, 11)] : []),
   ];
 

@@ -11,6 +11,7 @@
     "dist",
     "web",
     "webapp/dist",
+    "scripts/start-desktop.mjs",
     "skills/cron-autonomy",
     "README.md",
     "CHANGELOG.md",
@@ -29,13 +30,13 @@
     "install.cmd"
   ],
   "scripts": {
-    "build": "tsc && npm --prefix webapp run build && node scripts/copy-runtime-assets.mjs",
+    "build": "node scripts/clean-build.mjs && tsc && npm --prefix webapp run build && node scripts/copy-runtime-assets.mjs",
     "build:msi": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/build-msi.ps1",
-    "desktop": "electron desktop/main.cjs",
+    "desktop": "node scripts/start-desktop.mjs",
     "dev:webapp": "npm --prefix webapp run dev",
     "build:webapp": "npm --prefix webapp run build",
     "index:codebase": "node scripts/generate-codebase-index.mjs",
-    "start": "npm run desktop",
+    "start": "node scripts/start-desktop.mjs",
     "dev": "tsc && node dist/index.js",
     "init": "tsc && node dist/cli/wizard.js"
   },

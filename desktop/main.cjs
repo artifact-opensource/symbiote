@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, nativeTheme } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, Tray } = require('electron');
 const { execFile, execFileSync, spawn } = require('node:child_process');
 const { once } = require('node:events');
 const crypto = require('node:crypto');
@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 const isDesktopDev = process.env.SYMBIOTE_DESKTOP_URL;
 let mainWindow;
 let miniWindow;
+let tray;
 let overlayOpacity = 0.88;
 let declinedFirewallPort;
 let desktopTheme;
@@ -21,8 +22,12 @@ let gatewayStartup;
 let gatewayChild;
 let gatewayRestartTimer;
 let gatewayRestartAttempts = 0;
+let gatewayMonitorTimer;
+let gatewayMonitorRunning = false;
+let gatewayRestarting = false;
 let electronQuitting = false;
 let gatewayStopping = false;
+let serviceManagedGateway = false;
 let desktopControlServer;
 let desktopControlPath;
 let desktopControlToken;
@@ -137,6 +142,7 @@ function startDesktopControl(gateway) {
       response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({
         pid: process.pid,
         gatewayPid: gatewayChild?.pid ?? null,
+        gatewayMode: serviceManagedGateway ? 'service' : 'electron',
       }));
       return;
     }
@@ -251,7 +257,7 @@ async function waitForGateway(gateway, timeoutMs = 30000) {
 function managedGatewayProcess(pid, gateway) {
   if (!Number.isInteger(pid) || pid < 1) return false;
   if (process.platform === 'win32') {
-    const script = '$p=Get-CimInstance Win32_Process -Filter "ProcessId = $env:SYMBIOTE_GATEWAY_PID"; $scriptMatch=$p.CommandLine -and ($p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_SCRIPT,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_SCRIPT_NAME,[StringComparison]::OrdinalIgnoreCase) -ge 0); $configMatch=$p.CommandLine -and ($p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_CONFIG,[StringComparison]::OrdinalIgnoreCase) -ge 0 -or $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_CONFIG_NAME,[StringComparison]::OrdinalIgnoreCase) -ge 0); if ($p -and $scriptMatch -and $configMatch) { exit 0 }; exit 1';
+    const script = '$p=Get-CimInstance Win32_Process -Filter "ProcessId = $env:SYMBIOTE_GATEWAY_PID"; $scriptMatch=$p.CommandLine -and $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_SCRIPT,[StringComparison]::OrdinalIgnoreCase) -ge 0; $configMatch=$p.CommandLine -and $p.CommandLine.IndexOf($env:SYMBIOTE_GATEWAY_CONFIG,[StringComparison]::OrdinalIgnoreCase) -ge 0; if ($p -and $scriptMatch -and $configMatch) { exit 0 }; exit 1';
     try {
       execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
         encoding: 'utf8',
@@ -261,8 +267,6 @@ function managedGatewayProcess(pid, gateway) {
           SYMBIOTE_GATEWAY_PID: String(pid),
           SYMBIOTE_GATEWAY_SCRIPT: gateway.daemonPath,
           SYMBIOTE_GATEWAY_CONFIG: gateway.configPath,
-          SYMBIOTE_GATEWAY_SCRIPT_NAME: path.basename(gateway.daemonPath),
-          SYMBIOTE_GATEWAY_CONFIG_NAME: path.basename(gateway.configPath),
         },
       });
       return true;
@@ -289,7 +293,15 @@ async function stopStaleManagedGateway(gateway) {
     }
   }
   if (!previous) return;
-  if (!managedGatewayProcess(previous.pid, gateway)) {
+  if (!Number.isInteger(previous.pid) || typeof previous.daemonPath !== 'string' || typeof previous.configPath !== 'string') {
+    fs.rmSync(gatewayProcessPath, { force: true });
+    return;
+  }
+  const previousGateway = {
+    daemonPath: path.resolve(previous.daemonPath),
+    configPath: path.resolve(previous.configPath),
+  };
+  if (!managedGatewayProcess(previous.pid, previousGateway)) {
     fs.rmSync(gatewayProcessPath, { force: true });
     return;
   }
@@ -299,15 +311,26 @@ async function stopStaleManagedGateway(gateway) {
     if (error.code !== 'ESRCH') throw error;
   }
   const deadline = Date.now() + 8000;
-  while (Date.now() < deadline && managedGatewayProcess(previous.pid, gateway)) {
+  while (Date.now() < deadline && managedGatewayProcess(previous.pid, previousGateway)) {
     await new Promise(resolve => setTimeout(resolve, 250));
   }
-  if (managedGatewayProcess(previous.pid, gateway)) {
-    process.kill(previous.pid, 'SIGKILL');
+  if (managedGatewayProcess(previous.pid, previousGateway)) {
+    try {
+      if (process.platform === 'win32') {
+        await execFileAsync('taskkill.exe', ['/PID', String(previous.pid), '/T', '/F'], { windowsHide: true });
+      } else {
+        process.kill(previous.pid, 'SIGKILL');
+      }
+    } catch (error) {
+      if (managedGatewayProcess(previous.pid, previousGateway) && error.code !== 'ESRCH' && error.code !== 'ENOENT') throw error;
+    }
     const killDeadline = Date.now() + 3000;
-    while (Date.now() < killDeadline && managedGatewayProcess(previous.pid, gateway)) {
+    while (Date.now() < killDeadline && managedGatewayProcess(previous.pid, previousGateway)) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
+  }
+  if (managedGatewayProcess(previous.pid, previousGateway)) {
+    throw new Error(`The previous Gateway process ${previous.pid} is still running; refusing to start a duplicate.`);
   }
   fs.rmSync(gatewayProcessPath, { force: true });
 }
@@ -325,10 +348,21 @@ async function stopGatewayProcess(pid, gateway) {
   }
   if (managedGatewayProcess(pid, gateway)) {
     try {
-      process.kill(pid, 'SIGKILL');
+      if (process.platform === 'win32') {
+        await execFileAsync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
+      } else {
+        process.kill(pid, 'SIGKILL');
+      }
     } catch (error) {
-      if (error.code !== 'ESRCH') throw error;
+      if (managedGatewayProcess(pid, gateway) && error.code !== 'ESRCH' && error.code !== 'ENOENT') throw error;
     }
+  }
+  const killDeadline = Date.now() + 3000;
+  while (Date.now() < killDeadline && managedGatewayProcess(pid, gateway)) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  if (managedGatewayProcess(pid, gateway)) {
+    throw new Error(`The previous Gateway process ${pid} could not be stopped safely.`);
   }
 }
 
@@ -353,6 +387,17 @@ function resolveNodeExecutable() {
     }
   }
   return process.execPath;
+}
+
+function writeGatewayProcessRecord(record) {
+  const temporaryPath = `${gatewayProcessPath}.${process.pid}.tmp`;
+  try {
+    fs.writeFileSync(temporaryPath, JSON.stringify(record), { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(temporaryPath, gatewayProcessPath);
+  } catch (error) {
+    fs.rmSync(temporaryPath, { force: true });
+    throw error;
+  }
 }
 
 function launchGateway(gateway) {
@@ -380,11 +425,16 @@ function launchGateway(gateway) {
   stableTimer.unref();
   child.once('error', error => console.error('Could not start the Symbiote Gateway:', error));
   child.once('spawn', () => {
-    fs.writeFileSync(gatewayProcessPath, JSON.stringify({
-      pid: child.pid,
-      daemonPath: gateway.daemonPath,
-      configPath: gateway.configPath,
-    }), 'utf8');
+    try {
+      writeGatewayProcessRecord({
+        pid: child.pid,
+        daemonPath: gateway.daemonPath,
+        configPath: gateway.configPath,
+      });
+    } catch (error) {
+      console.error('Could not persist the Gateway process record; stopping the untracked child:', error);
+      child.kill('SIGTERM');
+    }
   });
   child.once('exit', (code, signal) => {
     clearTimeout(stableTimer);
@@ -397,12 +447,8 @@ function launchGateway(gateway) {
     if (gatewayChild === child) gatewayChild = undefined;
     if (electronQuitting || gatewayStopping) return;
     gatewayRestartAttempts++;
-    console.error(`Symbiote Gateway exited (code ${code ?? 'none'}, signal ${signal ?? 'none'}); restart attempt ${gatewayRestartAttempts}/5.`);
-    if (gatewayRestartAttempts > 5) {
-      dialog.showErrorBox('Symbiote Gateway stopped', `Gateway exited repeatedly. Review ${path.join(app.getPath('userData'), 'logs', 'gateway.log')} before retrying.`);
-      return;
-    }
-    const delay = Math.min(1000 * (2 ** (gatewayRestartAttempts - 1)), 15000);
+    const delay = Math.min(1000 * (2 ** Math.min(gatewayRestartAttempts - 1, 6)), 60_000);
+    console.error(`Symbiote Gateway exited (code ${code ?? 'none'}, signal ${signal ?? 'none'}); retrying in ${Math.ceil(delay / 1000)}s (attempt ${gatewayRestartAttempts}).`);
     gatewayRestartTimer = setTimeout(() => {
       gatewayRestartTimer = undefined;
       void ensureGateway().catch(error => {
@@ -416,12 +462,30 @@ function launchGateway(gateway) {
 
 async function ensureGateway() {
   if (gatewayStartup) return gatewayStartup;
+  if (gatewayRestartTimer) clearTimeout(gatewayRestartTimer);
+  gatewayRestartTimer = undefined;
   gatewayStartup = (async () => {
     if (electronQuitting) throw new Error('Electron is closing and will not start another Gateway process.');
     const gateway = readGatewayConfig();
     const installedServiceState = serviceState();
-    if (installedServiceState) {
-      throw new Error(`The SymbioteGateway Windows service (${installedServiceState}) is separate from Electron. Remove that service before starting the Electron-managed Gateway.`);
+    serviceManagedGateway = installedServiceState !== undefined;
+    if (serviceManagedGateway) {
+      if (installedServiceState === 'STOPPED') {
+        try {
+          await execFileAsync('sc.exe', ['start', 'SymbioteGateway'], { windowsHide: true, timeout: 15_000 });
+        } catch (error) {
+          const currentState = serviceState();
+          if (currentState !== 'RUNNING') {
+            throw new Error(`The installed SymbioteGateway service is ${currentState ?? 'unavailable'} and could not be started: ${error.message}`);
+          }
+        }
+      } else if (installedServiceState !== 'RUNNING' && installedServiceState !== 'START_PENDING') {
+        throw new Error(`The installed SymbioteGateway service is in state ${installedServiceState}; refusing to launch a second Gateway.`);
+      }
+      if (!await waitForGateway(gateway, 60_000)) {
+        throw new Error(`The installed SymbioteGateway service did not become healthy at ${gateway.url}/api/status. Review its Windows service logs.`);
+      }
+      return gateway;
     }
 
     const liveStatus = await readGatewayJson(gateway, '/api/status');
@@ -473,15 +537,92 @@ async function stopManagedGateway() {
   gatewayStopping = true;
   child.kill('SIGTERM');
   await Promise.race([
-    once(child, 'exit'),
+    once(child, 'exit').catch(() => {}),
     new Promise(resolve => setTimeout(resolve, 8000)),
   ]);
-  if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
   if (child.exitCode === null && child.signalCode === null) {
-    await Promise.race([once(child, 'exit'), new Promise(resolve => setTimeout(resolve, 3000))]);
+    if (process.platform === 'win32' && child.pid) {
+      try {
+        await execFileAsync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
+      } catch (error) {
+        if (child.exitCode === null && child.signalCode === null && error.code !== 'ESRCH' && error.code !== 'ENOENT') throw error;
+      }
+    } else {
+      child.kill('SIGKILL');
+    }
+  }
+  if (child.exitCode === null && child.signalCode === null) {
+    await Promise.race([
+      once(child, 'exit').catch(() => {}),
+      new Promise(resolve => setTimeout(resolve, 3000)),
+    ]);
+  }
+  if (child.exitCode === null && child.signalCode === null) {
+    gatewayStopping = false;
+    throw new Error(`The Symbiote Gateway process ${child.pid ?? '(unknown PID)'} did not exit.`);
   }
   gatewayChild = undefined;
   gatewayStopping = false;
+}
+
+async function restartManagedGateway() {
+  if (gatewayRestarting) return;
+  gatewayRestarting = true;
+  try {
+    while (gatewayMonitorRunning) await new Promise(resolve => setTimeout(resolve, 100));
+    if (serviceManagedGateway) {
+      try {
+        await execFileAsync('sc.exe', ['stop', 'SymbioteGateway'], { windowsHide: true, timeout: 15_000 });
+      } catch (error) {
+        const currentState = serviceState();
+        if (currentState !== 'STOPPED' && currentState !== 'STOP_PENDING') {
+          throw new Error(`Could not stop the installed SymbioteGateway service: ${error.message}`);
+        }
+      }
+      const stopDeadline = Date.now() + 30_000;
+      while (Date.now() < stopDeadline && serviceState() !== 'STOPPED') {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      if (serviceState() !== 'STOPPED') throw new Error('The installed SymbioteGateway service did not stop; no replacement process was started.');
+      serviceManagedGateway = false;
+      await ensureGateway();
+      return;
+    }
+    if (gatewayChild && gatewayChild.exitCode === null) await stopManagedGateway();
+    gatewayRestartAttempts = 0;
+    await ensureGateway();
+  } finally {
+    gatewayRestarting = false;
+  }
+}
+
+function startGatewayMonitor() {
+  if (gatewayMonitorTimer) clearInterval(gatewayMonitorTimer);
+  gatewayMonitorTimer = setInterval(async () => {
+    if (electronQuitting || gatewayStartup || gatewayRestarting || gatewayStopping || gatewayMonitorRunning) return;
+    gatewayMonitorRunning = true;
+    try {
+      const gateway = readGatewayConfig();
+      if (await gatewayHealthCheck(gateway)) return;
+      if (serviceManagedGateway) {
+        const currentState = serviceState();
+        if (currentState === 'STOPPED') {
+          void ensureGateway().catch(error => console.error('Could not recover the Gateway service:', error));
+        } else if (currentState === 'RUNNING') {
+          console.error(`The SymbioteGateway service is running but its status endpoint is unavailable at ${gateway.url}/api/status.`);
+        }
+        return;
+      }
+      if (gatewayChild && gatewayChild.exitCode === null) await stopManagedGateway();
+      gatewayRestartAttempts = 0;
+      await ensureGateway();
+    } catch (error) {
+      console.error('The Gateway health monitor could not restore a healthy Gateway:', error);
+    } finally {
+      gatewayMonitorRunning = false;
+    }
+  }, 15_000);
+  gatewayMonitorTimer.unref();
 }
 
 function hasFirewallRule(port) {
@@ -613,6 +754,7 @@ function loadGatewayWithRetry(target, minimal) {
 }
 
 function createMainWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
@@ -631,6 +773,11 @@ function createMainWindow() {
     mainWindow.show();
     if (process.platform === 'win32') void configureLanAccess();
   });
+  mainWindow.on('close', event => {
+    if (electronQuitting) return;
+    event.preventDefault();
+    mainWindow.hide();
+  });
   mainWindow.webContents.session.on('will-download', (event, item) => {
     if (!updateInstallArmed) return;
     const downloadUrl = new URL(item.getURL());
@@ -645,6 +792,7 @@ function createMainWindow() {
       console.error('Rejected an unexpected download while an update install was armed.');
       return;
     }
+
     const installerPath = path.join(app.getPath('temp'), `symbiote-update-${Date.now()}-${filename}`);
     item.setSavePath(installerPath);
     item.once('done', async (_downloadEvent, state) => {
@@ -724,9 +872,54 @@ function createMainWindow() {
   });
   mainWindow.on('closed', () => {
     mainWindow = null;
-    if (!miniWindow) app.quit();
   });
   loadGatewayWithRetry(mainWindow, false);
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    void ensureGateway().then(createMainWindow).catch(error => {
+      console.error('Electron cannot show the Control Room:', error);
+      dialog.showErrorBox('Symbiote Gateway unavailable', error.message);
+    });
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  if (tray) return;
+  const icon = nativeImage.createFromPath(path.join(__dirname, 'tray-icon.png'));
+  if (icon.isEmpty()) throw new Error('The Symbiote system-tray icon could not be loaded.');
+  tray = new Tray(icon);
+  tray.setToolTip('Symbiote');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open Symbiote', click: showMainWindow },
+    { label: 'Restart Gateway', click: () => {
+      void restartManagedGateway().catch(error => {
+        console.error('Could not restart the Symbiote Gateway:', error);
+        dialog.showErrorBox('Gateway restart failed', error.message);
+      });
+    } },
+    { type: 'separator' },
+    { label: 'Quit Symbiote', click: () => app.quit() },
+  ]));
+  tray.on('click', showMainWindow);
+  tray.on('double-click', showMainWindow);
+}
+
+function closeDesktopControl() {
+  desktopControlServer?.close();
+  desktopControlServer = undefined;
+  if (!desktopControlPath) return;
+  try {
+    const record = JSON.parse(fs.readFileSync(desktopControlPath, 'utf8'));
+    if (record.pid === process.pid) fs.rmSync(desktopControlPath, { force: true });
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.error('Could not clear the desktop control record:', error);
+  }
 }
 
 function createMiniWindow() {
@@ -760,7 +953,6 @@ function createMiniWindow() {
   miniWindow.on('closed', () => {
     miniWindow = null;
     if (mainWindow) mainWindow.show();
-    else app.quit();
   });
   loadGatewayWithRetry(miniWindow, true);
 }
@@ -831,7 +1023,18 @@ ipcMain.on('desktop:hover', (event, hovering) => {
 app.whenReady().then(() => {
   if (!ownsSingleInstanceLock) return;
   nativeTheme.themeSource = desktopTheme || 'system';
-  void startDesktopControl(readGatewayConfig()).then(() => ensureGateway()).then(createMainWindow).catch(error => {
+  try {
+    createTray();
+  } catch (error) {
+    console.error('Could not initialize the Symbiote system tray:', error);
+    dialog.showErrorBox('Symbiote could not start', error.message);
+    app.quit();
+    return;
+  }
+  void startDesktopControl(readGatewayConfig()).then(() => ensureGateway()).then(() => {
+    startGatewayMonitor();
+    createMainWindow();
+  }).catch(error => {
     console.error('Electron cannot start without a healthy Symbiote Gateway:', error);
     dialog.showErrorBox('Symbiote Gateway unavailable', error.message);
     app.quit();
@@ -840,48 +1043,44 @@ app.whenReady().then(() => {
 app.on('before-quit', event => {
   if (electronQuitting) return;
   electronQuitting = true;
-  desktopControlServer?.close();
-  desktopControlServer = undefined;
-  if (desktopControlPath) {
-    try {
-      const record = JSON.parse(fs.readFileSync(desktopControlPath, 'utf8'));
-      if (record.pid === process.pid) fs.rmSync(desktopControlPath, { force: true });
-    } catch (error) {
-      if (error.code !== 'ENOENT') console.error('Could not clear the desktop control record:', error);
-    }
+  const finishQuit = () => {
+    tray?.destroy();
+    tray = undefined;
+    if (gatewayMonitorTimer) clearInterval(gatewayMonitorTimer);
+    gatewayMonitorTimer = undefined;
+    closeDesktopControl();
+  };
+  if (!gatewayChild || gatewayChild.exitCode !== null) {
+    finishQuit();
+    return;
   }
-  if (!gatewayChild || gatewayChild.exitCode !== null) return;
   event.preventDefault();
-  void stopManagedGateway().then(() => app.quit()).catch(error => {
-    console.error('Could not stop the Electron-managed Gateway cleanly:', error);
-    dialog.showErrorBox('Gateway shutdown failed', error.message);
+  void stopManagedGateway().then(() => {
+    finishQuit();
     app.quit();
+  }).catch(error => {
+    electronQuitting = false;
+    console.error('Could not stop the Electron-managed Gateway cleanly:', error);
+    try {
+      createTray();
+      startGatewayMonitor();
+      void startDesktopControl(readGatewayConfig()).catch(controlError => {
+        console.error('Could not restore the desktop control endpoint after shutdown failed:', controlError);
+      });
+    } catch (recoveryError) {
+      console.error('Could not restore Symbiote to the system tray after shutdown failed:', recoveryError);
+    }
+    dialog.showErrorBox('Gateway shutdown failed', error.message);
   });
 });
 app.on('activate', () => {
-  if (!ownsSingleInstanceLock || mainWindow || miniWindow) return;
-  void ensureGateway().then(createMainWindow).catch(error => {
-    console.error('Electron cannot start without a healthy Symbiote Gateway:', error);
-    dialog.showErrorBox('Symbiote Gateway unavailable', error.message);
-  });
+  if (!ownsSingleInstanceLock) return;
+  showMainWindow();
 });
 if (ownsSingleInstanceLock) {
   app.on('second-instance', () => {
-    const window = mainWindow || miniWindow;
-    if (window) {
-      if (window.isMinimized()) window.restore();
-      window.show();
-      window.focus();
-      return;
-    }
-    void ensureGateway().then(createMainWindow).catch(error => {
-      console.error('Electron cannot start without a healthy Symbiote Gateway:', error);
-      dialog.showErrorBox('Symbiote Gateway unavailable', error.message);
-    });
+    showMainWindow();
   });
 } else {
   app.quit();
 }
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
