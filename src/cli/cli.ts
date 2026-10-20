@@ -301,7 +301,7 @@ async function cmdStop() {
       console.log(warn(`Electron accepted shutdown but process ${control.pid} is still running. Check the desktop app before retrying.`));
       return;
     }
-    console.log(ok(`Closed the Symbiote Control Room and its supervised Gateway ${palette.dim}(pid ${control.pid})${palette.reset}.`));
+    console.log(ok(`Closed the Symbiote Control Room and requested Gateway shutdown from its configured manager ${palette.dim}(Electron pid ${control.pid})${palette.reset}.`));
     return;
   }
 

@@ -46,6 +46,12 @@ const REFRESH_INTERVAL_KEY = 'symbiote-telemetry-refresh-ms';
 const MIN_REFRESH_INTERVAL_MS = 400;
 const MAX_REFRESH_INTERVAL_MS = 5000;
 
+interface AgentLightingState {
+  agentActiveNodes: Set<string>;
+  projectPendingNodes: Map<string, string>;
+  agentResponseNodes: Map<string, string>;
+}
+
 function readRefreshInterval(): number {
   try {
     const value = Number(window.localStorage.getItem(REFRESH_INTERVAL_KEY));
@@ -499,6 +505,8 @@ function MinimalMode({ theme, agentName, agentEmoji, agentAvatarDataUrl, onTheme
     const timer = window.setInterval(() => void refresh(), tab === 'tasks' ? 1000 : 5000);
     return () => window.clearInterval(timer);
   }, [refresh, tab]);
+
+
 
   useEffect(() => {
     void window.symbioteDesktop?.getOpacity().then(setOpacity).catch(failure => {
@@ -996,6 +1004,21 @@ function CommandActionDialog({ action, config, onClose, onSubmit }: {
 export default function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [appearance, setAppearance] = useState<AppearanceSettings>(initialAppearance);
+
+  const [resolvedProjectIds, setResolvedProjectIds] = useState<Set<string>>(() => new Set());
+
+  const handleSendAgentResponse = useCallback(async (agentId: string, response: string) => {
+    if (!response.trim()) return;
+    try {
+      await api(`/api/agents/${encodeURIComponent(agentId)}/action`, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'steer', message: response.trim() }),
+      });
+    } catch (error) {
+      console.error('Failed to send agent response:', error);
+      throw error;
+    }
+  }, []);
   const appearanceReadyRef = useRef(false);
   const appearanceDirtyRef = useRef(false);
   const appearanceRevisionRef = useRef(0);
@@ -1369,6 +1392,37 @@ export default function App() {
     setRuns(freshRuns);
     setAgents(freshAgents);
   }, []);
+
+  const lighting = useMemo<AgentLightingState>(() => {
+    const agentActiveNodes = new Set<string>();
+    const agentResponseNodes = new Map<string, string>();
+    const agentsByProject = new Map<string, WorkspaceAgent[]>();
+    for (const agent of agents) {
+      const isWorking = Boolean(agent.activeTool) || agent.operations?.some(operation => operation.status === 'running') === true;
+      if (isWorking) agentActiveNodes.add(agent.sessionId);
+      else if (agent.status === 'running') agentResponseNodes.set(agent.sessionId, agent.sessionId);
+      if (agent.projectId) {
+        const projectAgents = agentsByProject.get(agent.projectId) ?? [];
+        projectAgents.push(agent);
+        agentsByProject.set(agent.projectId, projectAgents);
+      }
+    }
+    const projectPendingNodes = new Map<string, string>();
+    for (const project of projects) {
+      const projectAgents = agentsByProject.get(project.id) ?? [];
+      const completedAgents = projectAgents.filter(agent => agent.status === 'completed');
+      if (!completedAgents.length || projectAgents.some(agent => agent.status === 'running')) continue;
+      const completionKey = `${project.id}:${Math.max(...completedAgents.map(agent => agent.completedAt ?? agent.startedAt))}`;
+      if (!resolvedProjectIds.has(completionKey)) projectPendingNodes.set(`project:${project.id}`, completionKey);
+    }
+    return { agentActiveNodes, projectPendingNodes, agentResponseNodes };
+  }, [agents, projects, resolvedProjectIds]);
+
+  const resolveProject = useCallback((completionKey: string) => {
+    setResolvedProjectIds(previous => new Set(previous).add(completionKey));
+  }, []);
+
+
 
   const refreshAll = useCallback(async (showSpinner = false) => {
     if (showSpinner) setRefreshing(true);
@@ -2393,6 +2447,9 @@ export default function App() {
                   onOpenSession={openRunSession}
                   onOpenProject={openProjectDetails}
                   onOpenProfile={profile => void openProfileConversation(profile)}
+                  lighting={lighting}
+                  onResolveProject={resolveProject}
+                  onSendAgentResponse={handleSendAgentResponse}
                   creatingSession={creatingSession}
                   cloudIntegrations={cloudIntegrations}
                 />
@@ -2683,10 +2740,13 @@ function OverviewView(props: {
   onOpenSession: (id: string) => void;
   onOpenProject: (id: string) => void;
   onOpenProfile: (profile: AgentProfile) => void;
+  lighting: AgentLightingState;
+  onResolveProject: (completionKey: string) => void;
+  onSendAgentResponse: (agentId: string, response: string) => Promise<void>;
   creatingSession: boolean;
   cloudIntegrations: Array<{ id: string; label: string; online: boolean; view: ViewId; icon: ReactNode }>;
 }) {
-  const { status, config, sessions, projects, profiles, activeSessionId, agentActivity, agents, channels, memoryHistory, hostHistory, refreshIntervalMs, lastUpdated, onNavigate, onStartRun, startingRun, onNewSession, onOpenSession, onOpenProject, onOpenProfile, creatingSession, cloudIntegrations } = props;
+  const { status, config, sessions, projects, profiles, activeSessionId, agentActivity, agents, channels, memoryHistory, hostHistory, refreshIntervalMs, lastUpdated, onNavigate, onStartRun, startingRun, onNewSession, onOpenSession, onOpenProject, onOpenProfile, lighting, onResolveProject, onSendAgentResponse, creatingSession, cloudIntegrations } = props;
   const memory = status?.memory;
   const metrics = status?.metrics;
   const host = metrics?.system?.host;
@@ -2746,6 +2806,9 @@ function OverviewView(props: {
           onOpenSession={onOpenSession}
           onOpenProject={onOpenProject}
           onOpenProfile={onOpenProfile}
+          lighting={lighting}
+          onResolveProject={onResolveProject}
+          onSendAgentResponse={onSendAgentResponse}
         />
       </section>
 
@@ -2974,11 +3037,16 @@ interface GraphNode {
   projectId?: string;
   agentId?: string;
   status?: WorkspaceAgent['status'];
+  // Lighting state
+  agentActive?: boolean;  // Node is actively making calls
+  projectPending?: boolean;  // Project has agents awaiting user response
+  projectResolveId?: string;  // ID to resolve on click
+  agentResponseRequired?: boolean;  // Agent needs user response to proceed
 }
 
 interface GraphPoint { x: number; y: number; }
 
-function WorkspaceGraph({ sessions, projects, profiles, agents, activity, onOpenSession, onOpenProject, onOpenProfile }: {
+function WorkspaceGraph({ sessions, projects, profiles, agents, activity, onOpenSession, onOpenProject, onOpenProfile, lighting, onResolveProject, onSendAgentResponse }: {
   sessions: SessionSummary[];
   projects: WorkspaceProject[];
   profiles: AgentProfile[];
@@ -2987,7 +3055,17 @@ function WorkspaceGraph({ sessions, projects, profiles, agents, activity, onOpen
   onOpenSession: (id: string) => void;
   onOpenProject: (id: string) => void;
   onOpenProfile: (profile: AgentProfile) => void;
+  lighting?: {
+    agentActiveNodes: Set<string>;
+    projectPendingNodes: Map<string, string>;
+    agentResponseNodes: Map<string, string>;
+  };
+  onResolveProject?: (projectId: string) => void;
+  onSendAgentResponse: (agentId: string, response: string) => Promise<void>;
 }) {
+  const [sendInputValue, setSendInputValue] = useState('');
+  const [sendingAgentResponse, setSendingAgentResponse] = useState(false);
+  const [agentResponseError, setAgentResponseError] = useState('');
   const nodes = useMemo<GraphNode[]>(() => {
     const conversations = sessions
       .filter(session => session.sessionKind === 'conversation' || (session.id.startsWith('web-') && !session.id.startsWith('web-run-')))
@@ -3142,6 +3220,23 @@ function WorkspaceGraph({ sessions, projects, profiles, agents, activity, onOpen
   }, [nodes]);
 
   return (
+  <div className="hero-map-wrapper">
+    <div className="hero-map-controls">
+      {lighting && Array.from(lighting.projectPendingNodes.keys()).length > 0 && (
+        <button
+          type="button"
+          className="hero-map-resolve-button"
+          onClick={() => {
+            const completionKey = lighting.projectPendingNodes.values().next().value;
+            if (completionKey) onResolveProject?.(completionKey);
+          }}
+          aria-label="Resolve project notification"
+          title="Clear project notification"
+        >
+          Resolve
+        </button>
+      )}
+    </div>
     <svg className="banner-illustration workspace-graph" viewBox="0 0 560 440" role="group" aria-label="Circular workspace graph. Conversations orbit the main agent, with projects, agents, and subagents expanding outward.">
       <defs>
         <radialGradient id="agent-glow"><stop stopColor="var(--appearance-icon)" stopOpacity=".3" /><stop offset="1" stopColor="var(--appearance-icon)" stopOpacity="0" /></radialGradient>
@@ -3166,8 +3261,7 @@ function WorkspaceGraph({ sessions, projects, profiles, agents, activity, onOpen
           key={`link-${node.id}`}
           className={`graph-link graph-link-${node.kind}${node.parentId === 'main' ? ' graph-link-root' : ''}${node.status === 'running' ? ' graph-link-active' : ''}`}
           d={edgePath}
-        />;
-      })}
+        />;})}
       {nodes.map(node => {
         const point = node.kind === 'main' ? { x: 280, y: 220 } : points[node.id];
         if (!point) return null;
@@ -3186,13 +3280,17 @@ function WorkspaceGraph({ sessions, projects, profiles, agents, activity, onOpen
             if (profile) onOpenProfile(profile);
           }
         };
+        const isAgentActive = lighting?.agentActiveNodes.has(node.id) ?? false;
+        const isProjectPending = lighting?.projectPendingNodes.has(node.id) ?? false;
+        const isAgentResponseRequired = lighting?.agentResponseNodes.has(node.id) ?? false;
+        const isLit = isAgentActive || isProjectPending || isAgentResponseRequired;
         return (
           <g
             key={node.id}
-            className={`graph-node graph-node-${node.kind}${node.status === 'running' ? ' graph-node-active' : ''}`}
+            className={`graph-node graph-node-${node.kind}${node.status === 'running' ? ' graph-node-active' : ''}${isLit ? ' graph-node-lit' : ''}${isAgentActive ? ' graph-node-agent-active' : ''}${isProjectPending ? ' graph-node-project-pending' : ''}${isAgentResponseRequired ? ' graph-node-agent-response' : ''}`}
             role="button"
             tabIndex={0}
-            aria-label={`${description}: ${node.label}`}
+            aria-label={`${description}: ${node.label}${isLit ? ' (lit)' : ''}`}
             onClick={activate}
             onKeyDown={event => {
               if (event.key === 'Enter' || event.key === ' ') {
@@ -3201,17 +3299,57 @@ function WorkspaceGraph({ sessions, projects, profiles, agents, activity, onOpen
               }
             }}
           >
-            <title>{node.label}</title>
+            <title>{node.label}{isLit ? ' — lit' : ''}</title>
             {node.kind === 'project'
               ? <rect x={point.x - 6} y={point.y - 6} width="12" height="12" rx="2" />
               : node.kind === 'conversation'
                 ? <rect x={point.x - 4} y={point.y - 5} width="8" height="10" rx="1.5" />
                 : <circle cx={point.x} cy={point.y} r={node.kind === 'profile' ? 5 : 4} />}
           </g>
-        );
-      })}
+        );})}
     </svg>
-  );
+
+<div className="hero-map-send-field">
+      {lighting && Array.from(lighting.agentResponseNodes.keys()).length > 0 && (
+        <form className="hero-map-send-container" onSubmit={async event => {
+          event.preventDefault();
+          const agentId = lighting.agentResponseNodes.keys().next().value;
+          if (!agentId || !sendInputValue.trim() || sendingAgentResponse) return;
+          setSendingAgentResponse(true);
+          setAgentResponseError('');
+          try {
+            await onSendAgentResponse(agentId, sendInputValue.trim());
+            setSendInputValue('');
+          } catch (error) {
+            setAgentResponseError(error instanceof Error ? error.message : 'Could not send guidance to the agent.');
+          } finally {
+            setSendingAgentResponse(false);
+          }
+        }}>
+          <input
+            type="text"
+            className="hero-map-send-input"
+            placeholder="Send guidance to agent..."
+            aria-label="Send guidance to agent"
+            value={sendInputValue}
+            onChange={event => setSendInputValue(event.target.value)}
+            disabled={sendingAgentResponse}
+          />
+          <button
+            type="submit"
+            className="hero-map-send-button"
+            aria-label="Send guidance"
+            title="Send guidance"
+            disabled={sendingAgentResponse || !sendInputValue.trim()}
+          >
+            {sendingAgentResponse ? <ActivityOrb label="Sending guidance" compact loading /> : <Send size={15} />}
+          </button>
+          {agentResponseError && <span className="hero-map-send-error" role="alert">{agentResponseError}</span>}
+        </form>
+      )}
+    </div>
+  </div>
+)
 }
 
 function RunStatus({ status }: { status: WorkspaceRun['status'] }) {

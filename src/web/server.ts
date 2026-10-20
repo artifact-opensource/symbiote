@@ -1542,8 +1542,18 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       if (!value || typeof value.url !== 'string' || value.url.length > 2_048) {
         return json(res, { error: 'An HTTPS repository URL is required.' }, 400);
       }
+      let repositoryUrl: URL;
       try {
-        return json(res, await control.cloneProjectRepository(value.url), 201);
+        repositoryUrl = new URL(value.url.trim());
+      } catch {
+        return json(res, { error: 'Repository URL is invalid.' }, 400);
+      }
+      if (repositoryUrl.protocol !== 'https:' || !repositoryUrl.hostname
+        || repositoryUrl.username || repositoryUrl.password || repositoryUrl.search || repositoryUrl.hash) {
+        return json(res, { error: 'Only credential-free HTTPS repository URLs are allowed.' }, 400);
+      }
+      try {
+        return json(res, await control.cloneProjectRepository(repositoryUrl.toString()), 201);
       } catch (failure) {
         return json(res, { error: failure instanceof Error ? failure.message : 'Repository clone failed.' }, 400);
       }

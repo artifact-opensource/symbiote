@@ -44,6 +44,7 @@ function finishUpdateInstall(started) {
   resolve?.(started);
 }
 const ownsSingleInstanceLock = app.requestSingleInstanceLock();
+if (process.platform === 'win32') app.setAppUserModelId('com.artifactvirtual.symbiote');
 
 try {
   const preferences = JSON.parse(fs.readFileSync(preferencesPath, 'utf8'));
@@ -760,6 +761,7 @@ function createMainWindow() {
     height: 920,
     minWidth: 900,
     minHeight: 640,
+    icon: path.join(__dirname, process.platform === 'win32' ? 'app-icon.ico' : 'tray-icon.png'),
     show: false,
     backgroundColor: desktopTheme === 'dark' ? '#000000' : desktopTheme === 'light' ? '#ffffff' : nativeTheme.shouldUseDarkColors ? '#000000' : '#ffffff',
     webPreferences: {

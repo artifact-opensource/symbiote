@@ -16,6 +16,7 @@
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     <Property Id="SYMBIOTE_SEED_DIRECTORY" Secure="yes" />
     <UIRef Id="WixUI_InstallDir" />
+    <Icon Id="SymbioteApplicationIcon" SourceFile="$(var.AppSource)\desktop\app-icon.ico" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
@@ -70,6 +71,8 @@
                   Directory="ApplicationProgramsFolder"
                   Name="Symbiote"
                   Target="[INSTALLFOLDER]electron-runtime\electron.exe"
+                  Icon="SymbioteApplicationIcon"
+                  IconIndex="0"
                   Arguments="&quot;[INSTALLFOLDER]desktop\main.cjs&quot;"
                   WorkingDirectory="INSTALLFOLDER"
                   Advertise="no" />
@@ -77,6 +80,8 @@
                   Directory="CommonDesktopFolder"
                   Name="Symbiote"
                   Target="[INSTALLFOLDER]electron-runtime\electron.exe"
+                  Icon="SymbioteApplicationIcon"
+                  IconIndex="0"
                   Arguments="&quot;[INSTALLFOLDER]desktop\main.cjs&quot;"
                   WorkingDirectory="INSTALLFOLDER"
                   Advertise="no" />

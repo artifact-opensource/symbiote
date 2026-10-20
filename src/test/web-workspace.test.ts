@@ -56,6 +56,7 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   let restartRequests = 0;
   let updatedProviderModel: { provider: string; model: string } | undefined;
   let clonedRepository = '';
+  let cloneRepositoryCalls = 0;
   const updateDownload = {
     state: 'ready' as const,
     version: '5.6.0',
@@ -70,6 +71,7 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
     restartGateway: () => { restartRequests++; },
     updateProviderModel: (provider, model) => updatedProviderModel = { provider, model },
     cloneProjectRepository: async repositoryUrl => {
+      cloneRepositoryCalls++;
       clonedRepository = repositoryUrl;
       return { id: 'project-clone', name: 'example' };
     },
@@ -278,6 +280,14 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
       body: JSON.stringify({ url: 'file:///etc/passwd' }),
     });
     assert.equal(rejectedClone.status, 400);
+    assert.equal(cloneRepositoryCalls, 1);
+    const rejectedCredentialClone = await fetch(`${baseUrl}/api/projects/clone`, {
+      method: 'POST',
+      headers: { origin: baseUrl, 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://user:password@example.com/repository.git' }),
+    });
+    assert.equal(rejectedCredentialClone.status, 400);
+    assert.equal(cloneRepositoryCalls, 1);
 
     const preparedUpdate = await fetch(`${baseUrl}/api/update/download`, {
       method: 'POST',
