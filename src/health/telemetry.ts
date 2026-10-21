@@ -87,7 +87,7 @@ export class HealthTelemetryStore {
   }
 
   getSnapshot(now = Date.now(), windowMs = DEFAULT_WINDOW_MS): HealthTelemetrySnapshot {
-    if (this.cachedSnapshot && now - this.cachedAt < 1000 && this.cachedSnapshot.windowMs === windowMs) {
+    if (this.cachedSnapshot && now - this.cachedAt < 5000 && this.cachedSnapshot.windowMs === windowMs) {
       return this.cachedSnapshot;
     }
     const start = now - windowMs;
@@ -170,7 +170,7 @@ export class HealthTelemetryStore {
           || event.type === 'gateway.outage'
           || event.type === 'provider.call' && !event.succeeded,
         )
-        .slice(-100)
+        .slice(-20)
         .reverse(),
     };
     this.cachedAt = now;

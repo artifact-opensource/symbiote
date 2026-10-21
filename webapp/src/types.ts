@@ -219,6 +219,7 @@ export interface HostResourceSnapshot {
 
 export interface GatewayStatus {
   version?: string;
+  sampledAt?: number;
   update?: {
     state: 'unknown' | 'current' | 'available' | 'error';
     currentVersion: string;

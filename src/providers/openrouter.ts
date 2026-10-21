@@ -160,6 +160,9 @@ async function* streamOpenRouter(
     if (res.status === 401) {
       throw new Error(`OpenRouter authentication failed (401). This request included a Bearer authorization header; verify the key is active for OpenRouter and the running process uses the current configuration. Provider response: ${text}`);
     }
+    if (res.status === 402) {
+      throw new Error(`OpenRouter payment required (402). This may indicate the model requires a paid tier or your OpenRouter account has insufficient credits. Check your account at https://openrouter.ai/credits. Provider response: ${text}`);
+    }
     throw new Error(formatOpenRouterError(res.status, text));
   }
 

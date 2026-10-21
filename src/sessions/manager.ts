@@ -9,6 +9,27 @@ import type { Session, SessionSummary, SessionMetadata } from './types.js';
 import { stripBlinkControlMessages } from '../agent/blink.js';
 import { deriveConversationTitle } from './title.js';
 
+// Windows-safe atomic rename with retry for EPERM/ENOENT
+// (antivirus/indexer may lock the .tmp file during rename)
+function atomicRename(oldPath: string, newPath: string): void {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      fs.renameSync(oldPath, newPath);
+      return;
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (attempt >= 4) throw err;
+      if (err.code === 'EPERM' || err.code === 'ENOENT') {
+        // Brief pause before retry — file may be locked by antivirus/indexer
+        require('node:timers').setTimeout(() => {}, 25 * (attempt + 1));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+
 const DEFAULT_DIR = '.session';
 const DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -242,7 +263,7 @@ export class SessionManager {
     const destination = this.routesFilePath();
     const temporary = `${destination}.tmp`;
     fs.writeFileSync(temporary, JSON.stringify(routes, null, 2));
-    fs.renameSync(temporary, destination);
+    atomicRename(temporary, destination);
   }
 
   private defaultMetadata(): SessionMetadata {
@@ -302,7 +323,7 @@ export class SessionManager {
     const temporary = `${destination}.tmp`;
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     fs.writeFileSync(temporary, JSON.stringify(session, null, 2));
-    fs.renameSync(temporary, destination);
+    atomicRename(temporary, destination);
   }
 
   delete(id: string): boolean {

@@ -3144,11 +3144,12 @@ export class SymbioteGateway {
   // ── Status ─────────────────────────────────────────────────────────────
 
   status() {
+    const sampledAt = Date.now();
     return {
       version: APP_VERSION,
       update: { ...this.releaseChecker.getStatus(), download: this.releaseUpdater.getStatus() },
-      uptime: Date.now() - this.startTime,
-      uptimeHuman: this.formatUptime(Date.now() - this.startTime),
+      uptime: sampledAt - this.startTime,
+      uptimeHuman: this.formatUptime(sampledAt - this.startTime),
       provider: `${this.providerName}/${this.model}`,
       channels: this.channelRegistry.list(),
       ...(this.whatsappQr ? { whatsappQr: this.whatsappQr } : {}),
@@ -3164,6 +3165,7 @@ export class SymbioteGateway {
         heap: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
       },
       pid: process.pid,
+      sampledAt,
     };
   }
 

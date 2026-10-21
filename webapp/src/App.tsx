@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, memo, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import type { ReactNode, RefObject } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -43,7 +43,7 @@ const NAVIGATION: { id: ViewId; label: string; icon: typeof LayoutDashboard; gro
 ];
 
 const REFRESH_INTERVAL_KEY = 'symbiote-telemetry-refresh-ms';
-const MIN_REFRESH_INTERVAL_MS = 3000;
+const MIN_REFRESH_INTERVAL_MS = 5000;
 const MAX_REFRESH_INTERVAL_MS = 5000;
 
 interface AgentLightingState {
@@ -834,7 +834,7 @@ function MessageBody({ content }: { content: string }) {
   );
 }
 
-function Sparkline({ values }: { values: number[] }) {
+const Sparkline = memo(function Sparkline({ values }: { values: number[] }) {
   const points = values.length > 1
     ? values.map((value, index) => {
       const min = Math.min(...values);
@@ -848,7 +848,7 @@ function Sparkline({ values }: { values: number[] }) {
       <polyline points={points} className="sparkline-line" />
     </svg>
   );
-}
+});
 
 function EmptyState({ icon: Icon, title, detail, action }: {
   icon: typeof MessageSquare;
@@ -2844,7 +2844,7 @@ function OverviewView(props: {
           <span className="metric-detail">Saved</span>
         </MetricCard>
         <MetricCard icon={Server} label="Uptime" tone="neutral">
-          <div className="uptime-card-main"><strong className="metric-value">{status?.uptimeHuman || '—'}</strong><StopwatchDial seconds={(status?.uptime ?? 0) / 1000} /></div>
+          <div className="uptime-card-main"><strong className="metric-value">{status?.uptimeHuman || '—'}</strong><StopwatchDial seconds={(status?.uptime ?? 0) / 1000} sampledAt={status?.sampledAt} /></div>
         </MetricCard>
         <MemoryInUseCard host={host} processRssMb={memory?.rss} />
       </section>
@@ -4044,32 +4044,42 @@ function MetricCard({ icon: Icon, label, tone, children }: {
   );
 }
 
-function StopwatchDial({ seconds }: { seconds: number }) {
-  const [clock, setClock] = useState({ seconds, syncedAt: Date.now(), now: Date.now() });
+function StopwatchDial({ seconds, sampledAt }: { seconds: number; sampledAt?: number }) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const hourHandRef = useRef<SVGLineElement>(null);
+  const minuteHandRef = useRef<SVGLineElement>(null);
+  const secondHandRef = useRef<SVGLineElement>(null);
+  const rafIdRef = useRef<number>(0);
+  const anchorRef = useRef<{ baseSeconds: number; baseTime: number }>({ baseSeconds: seconds, baseTime: Date.now() });
+
   useEffect(() => {
-    const now = Date.now();
-    setClock(current => {
-      const estimatedSeconds = current.seconds + (now - current.syncedAt) / 1000;
-      return Math.abs(seconds - estimatedSeconds) < 2
-        ? current
-        : { seconds, syncedAt: now, now };
-    });
-  }, [seconds]);
+    anchorRef.current = { baseSeconds: seconds, baseTime: sampledAt ?? Date.now() };
+  }, [seconds, sampledAt]);
+
   useEffect(() => {
-    const timer = window.setInterval(() => setClock(current => ({ ...current, now: Date.now() })), 250);
-    return () => window.clearInterval(timer);
+    const tick = () => {
+      const { baseSeconds, baseTime } = anchorRef.current;
+      const elapsed = Math.max(0, baseSeconds + (Date.now() - baseTime) / 1000);
+      const secondAngle = (elapsed % 60) * 6;
+      const minuteAngle = (elapsed / 60 % 60) * 6;
+      const hourAngle = (elapsed / 3600 % 12) * 30;
+      if (secondHandRef.current) secondHandRef.current.setAttribute('transform', `rotate(${secondAngle} 42 44)`);
+      if (minuteHandRef.current) minuteHandRef.current.setAttribute('transform', `rotate(${minuteAngle} 42 44)`);
+      if (hourHandRef.current) hourHandRef.current.setAttribute('transform', `rotate(${hourAngle} 42 44)`);
+      if (svgRef.current) svgRef.current.setAttribute('aria-label', `Live uptime stopwatch, ${Math.floor(elapsed / 3600)} hours, ${Math.floor(elapsed / 60) % 60} minutes, ${Math.floor(elapsed) % 60} seconds`);
+      rafIdRef.current = requestAnimationFrame(tick);
+    };
+    rafIdRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafIdRef.current);
   }, []);
-  const elapsed = Math.max(0, clock.seconds + (clock.now - clock.syncedAt) / 1000);
-  const secondAngle = (elapsed % 60) * 6;
-  const minuteAngle = (elapsed / 60 % 60) * 6;
-  const hourAngle = (elapsed / 3600 % 12) * 30;
+
   return (
-    <svg className="uptime-stopwatch" viewBox="0 0 84 84" role="img" aria-label={`Live uptime stopwatch, ${Math.floor(elapsed / 3600)} hours, ${Math.floor(elapsed / 60) % 60} minutes, ${Math.floor(elapsed) % 60} seconds`}>
+    <svg ref={svgRef} className="uptime-stopwatch" viewBox="0 0 84 84" role="img" aria-label="Live uptime stopwatch">
       <circle cx="42" cy="44" r="31" className="stopwatch-face" />
       {Array.from({ length: 12 }, (_, index) => <line key={index} x1="42" y1="16" x2="42" y2="20" className="stopwatch-tick" transform={`rotate(${index * 30} 42 44)`} />)}
-      <line x1="42" y1="44" x2="42" y2="30" className="stopwatch-hour-hand" transform={`rotate(${hourAngle} 42 44)`} />
-      <line x1="42" y1="44" x2="42" y2="23" className="stopwatch-minute-hand" transform={`rotate(${minuteAngle} 42 44)`} />
-      <line x1="42" y1="44" x2="42" y2="19" className="stopwatch-second-hand" transform={`rotate(${secondAngle} 42 44)`} />
+      <line ref={hourHandRef} x1="42" y1="44" x2="42" y2="30" className="stopwatch-hour-hand" />
+      <line ref={minuteHandRef} x1="42" y1="44" x2="42" y2="23" className="stopwatch-minute-hand" />
+      <line ref={secondHandRef} x1="42" y1="44" x2="42" y2="19" className="stopwatch-second-hand" />
       <circle cx="42" cy="44" r="2.5" className="stopwatch-pin" />
       <path d="M35 9h14M42 9v4M58 18l4-4" className="stopwatch-crown" />
     </svg>
@@ -4176,7 +4186,7 @@ function GpuUsageCard({ host, hostHistory }: { host?: HostResourceSnapshot; host
   </MetricCard>;
 }
 
-function MetricPlot({ series, maxValue, area, label }: {
+const MetricPlot = memo(function MetricPlot({ series, maxValue, area, label }: {
   series: Array<{ name: string; color: string; values: number[] }>;
   maxValue?: number;
   area?: boolean;
@@ -4221,7 +4231,7 @@ function MetricPlot({ series, maxValue, area, label }: {
       {series.length > 1 && <div className="metric-plot-legend">{series.map((item, index) => <span key={item.name}><i style={{ background: colorForSeries(item.name, index) }} />{item.name}</span>)}</div>}
     </div>
   );
-}
+});
 
 function ChannelTile({ channel, onRestart, qr }: {
   channel: GatewayStatus['channels'][number];
