@@ -61,6 +61,7 @@ function redactMessage(message: string): string {
 
 export class HealthTelemetryStore {
   private readonly filePath: string;
+  private readonly archivePath: string;
   private events: HealthEvent[];
   private cachedSnapshot: HealthTelemetrySnapshot | null = null;
   private cachedAt = 0;
@@ -68,6 +69,7 @@ export class HealthTelemetryStore {
   constructor(directory: string) {
     fs.mkdirSync(directory, { recursive: true });
     this.filePath = path.join(directory, 'health-events.jsonl');
+    this.archivePath = path.join(directory, 'health-events-archive.jsonl');
     this.events = this.loadEvents();
   }
 
@@ -181,6 +183,42 @@ export class HealthTelemetryStore {
       if (['gateway.started', 'gateway.heartbeat', 'gateway.stopped', 'gateway.outage'].includes(event.type)) return event;
     }
     return undefined;
+  }
+
+  archiveIncidents(): number {
+    const incidents = this.events.filter(event =>
+      event.type === 'gateway.issue'
+      || event.type === 'gateway.outage'
+      || event.type === 'provider.call' && !event.succeeded,
+    );
+    if (!incidents.length) return 0;
+
+    const archivedLines = new Set<string>();
+    try {
+      for (const line of fs.readFileSync(this.archivePath, 'utf8').split(/\r?\n/)) {
+        if (line.trim()) archivedLines.add(line);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    const newLines = incidents
+      .map(event => JSON.stringify(event))
+      .filter(line => !archivedLines.has(line));
+    if (newLines.length) {
+      fs.appendFileSync(this.archivePath, `${newLines.join('\n')}\n`, { encoding: 'utf8', mode: 0o600 });
+    }
+
+    const previousEvents = this.events;
+    const incidentSet = new Set(incidents);
+    this.events = this.events.filter(event => !incidentSet.has(event));
+    try {
+      this.persistCurrentEvents();
+    } catch (error) {
+      this.events = previousEvents;
+      throw error;
+    }
+    this.cachedSnapshot = null;
+    return incidents.length;
   }
 
   private loadEvents(): HealthEvent[] {

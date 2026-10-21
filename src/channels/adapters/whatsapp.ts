@@ -147,6 +147,7 @@ export class WhatsAppAdapter extends BaseAdapter {
 
       if (connection === 'open') {
         this.selfJid = this.socket?.user?.id ?? '';
+        this.onQR?.('');
         console.log(`[${this.id}] Connected as ${this.selfJid}`);
         this.health.transition('connected');
 

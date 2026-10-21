@@ -18,10 +18,15 @@ let declinedFirewallPort;
 let desktopTheme;
 const preferencesPath = path.join(app.getPath('userData'), 'desktop-preferences.json');
 const gatewayProcessPath = path.join(app.getPath('userData'), 'gateway-process.json');
+const gatewaySupervisorLogPath = path.join(app.getPath('userData'), 'logs', 'gateway-supervisor.log');
+const gatewayRequestTimeoutMs = 10_000;
+const gatewayStartupTimeoutMs = 5 * 60_000;
+const gatewayHealthFailureThreshold = 5;
 let gatewayStartup;
 let gatewayChild;
 let gatewayRestartTimer;
 let gatewayRestartAttempts = 0;
+let gatewayHealthFailures = 0;
 let gatewayMonitorTimer;
 let gatewayMonitorRunning = false;
 let gatewayRestarting = false;
@@ -34,6 +39,16 @@ let desktopControlToken;
 let updateInstallArmed = false;
 let updateInstallTimer;
 let resolveUpdateInstall;
+
+function logGatewaySupervisor(message) {
+  const line = `${new Date().toISOString()} ${message}\n`;
+  try {
+    fs.mkdirSync(path.dirname(gatewaySupervisorLogPath), { recursive: true });
+    fs.appendFileSync(gatewaySupervisorLogPath, line, 'utf8');
+  } catch (error) {
+    console.error(`Could not persist Gateway supervisor diagnostics: ${error.message}`);
+  }
+}
 
 function finishUpdateInstall(started) {
   if (updateInstallTimer) clearTimeout(updateInstallTimer);
@@ -180,23 +195,31 @@ function startDesktopControl(gateway) {
   });
 }
 
-function gatewayHealthCheck(gateway) {
+function gatewayHealthCheck(gateway, onFailure) {
   return new Promise(resolve => {
-    const request = http.get(`${gateway.url}/api/status`, { timeout: 2000 }, response => {
+    const startedAt = Date.now();
+    let settled = false;
+    const finish = (healthy, reason) => {
+      if (settled) return;
+      settled = true;
+      if (!healthy) onFailure?.(`${reason}; elapsedMs=${Date.now() - startedAt}`);
+      resolve(healthy);
+    };
+    const request = http.get(`${gateway.url}/api/status`, { timeout: gatewayRequestTimeoutMs }, response => {
       response.resume();
-      resolve(response.statusCode === 200);
+      finish(response.statusCode === 200, `HTTP ${response.statusCode ?? 'unknown'}`);
     });
     request.once('timeout', () => {
       request.destroy();
-      resolve(false);
+      finish(false, `request timed out after ${gatewayRequestTimeoutMs}ms`);
     });
-    request.once('error', () => resolve(false));
+    request.once('error', error => finish(false, `${error.code ?? 'request-error'}: ${error.message}`));
   });
 }
 
 function readGatewayJson(gateway, pathname) {
   return new Promise(resolve => {
-    const request = http.get(`${gateway.url}${pathname}`, { timeout: 2000 }, response => {
+    const request = http.get(`${gateway.url}${pathname}`, { timeout: gatewayRequestTimeoutMs }, response => {
       let body = '';
       response.setEncoding('utf8');
       response.on('data', chunk => { body += chunk; });
@@ -246,7 +269,7 @@ function serviceState() {
   }
 }
 
-async function waitForGateway(gateway, timeoutMs = 30000) {
+async function waitForGateway(gateway, timeoutMs = gatewayStartupTimeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await gatewayHealthCheck(gateway)) return true;
@@ -420,11 +443,16 @@ function launchGateway(gateway) {
     },
   });
   fs.closeSync(logHandle);
+  const startedAt = Date.now();
+  logGatewaySupervisor(`Starting Gateway child pid=${child.pid ?? 'pending'} executable=${executable} config=${gateway.configPath}.`);
   const stableTimer = setTimeout(() => {
     if (gatewayChild === child) gatewayRestartAttempts = 0;
-  }, 30_000);
+  }, 5 * 60_000);
   stableTimer.unref();
-  child.once('error', error => console.error('Could not start the Symbiote Gateway:', error));
+  child.once('error', error => {
+    logGatewaySupervisor(`Gateway child error pid=${child.pid ?? 'unknown'} code=${error.code ?? 'unknown'} message=${error.message}.`);
+    console.error('Could not start the Symbiote Gateway:', error);
+  });
   child.once('spawn', () => {
     try {
       writeGatewayProcessRecord({
@@ -446,9 +474,14 @@ function launchGateway(gateway) {
       if (error.code !== 'ENOENT') console.error('Could not clear the exited Gateway process record:', error);
     }
     if (gatewayChild === child) gatewayChild = undefined;
-    if (electronQuitting || gatewayStopping) return;
+    const uptimeMs = Date.now() - startedAt;
+    if (electronQuitting || gatewayStopping) {
+      logGatewaySupervisor(`Gateway child stopped pid=${child.pid ?? 'unknown'} code=${code ?? 'none'} signal=${signal ?? 'none'} uptimeMs=${uptimeMs} expected=${gatewayStopping ? 'managed-shutdown' : 'electron-quit'}.`);
+      return;
+    }
     gatewayRestartAttempts++;
     const delay = Math.min(1000 * (2 ** Math.min(gatewayRestartAttempts - 1, 6)), 60_000);
+    logGatewaySupervisor(`Gateway child exited pid=${child.pid ?? 'unknown'} code=${code ?? 'none'} signal=${signal ?? 'none'} uptimeMs=${uptimeMs}; retry=${gatewayRestartAttempts} delayMs=${delay}.`);
     console.error(`Symbiote Gateway exited (code ${code ?? 'none'}, signal ${signal ?? 'none'}); retrying in ${Math.ceil(delay / 1000)}s (attempt ${gatewayRestartAttempts}).`);
     gatewayRestartTimer = setTimeout(() => {
       gatewayRestartTimer = undefined;
@@ -514,6 +547,7 @@ async function ensureGateway() {
     }
     const child = launchGateway(gateway);
     if (!await waitForGateway(gateway)) {
+      logGatewaySupervisor(`Gateway child pid=${child.pid ?? 'unknown'} did not become healthy within ${gatewayStartupTimeoutMs}ms; terminating the unready startup.`);
       if (child.pid && child.exitCode === null) child.kill();
       throw new Error(`The Gateway process did not become healthy at ${gateway.url}/api/status. See ${path.join(app.getPath('userData'), 'logs', 'gateway.log')}.`);
     }
@@ -604,7 +638,21 @@ function startGatewayMonitor() {
     gatewayMonitorRunning = true;
     try {
       const gateway = readGatewayConfig();
-      if (await gatewayHealthCheck(gateway)) return;
+      let failureDetails = 'no HTTP 200 response';
+      if (await gatewayHealthCheck(gateway, details => {
+        failureDetails = details;
+      })) {
+        if (gatewayHealthFailures > 0) {
+          logGatewaySupervisor(`Gateway health recovered after ${gatewayHealthFailures} failed checks.`);
+          gatewayHealthFailures = 0;
+        }
+        return;
+      }
+      gatewayHealthFailures++;
+      logGatewaySupervisor(`Gateway health check failed (${gatewayHealthFailures}/${gatewayHealthFailureThreshold}) at ${gateway.url}/api/status: ${failureDetails}.`);
+      if (gatewayHealthFailures < gatewayHealthFailureThreshold) return;
+      gatewayHealthFailures = 0;
+      logGatewaySupervisor(`Gateway remained unhealthy for ${gatewayHealthFailureThreshold} consecutive checks; attempting recovery.`);
       if (serviceManagedGateway) {
         const currentState = serviceState();
         if (currentState === 'STOPPED') {
@@ -614,10 +662,14 @@ function startGatewayMonitor() {
         }
         return;
       }
+      gatewayRestartAttempts++;
+      const delay = Math.min(1000 * (2 ** Math.min(gatewayRestartAttempts - 1, 6)), 60_000);
+      logGatewaySupervisor(`Gateway health recovery attempt ${gatewayRestartAttempts} will restart with ${delay}ms backoff.`);
       if (gatewayChild && gatewayChild.exitCode === null) await stopManagedGateway();
-      gatewayRestartAttempts = 0;
+      await new Promise(resolve => setTimeout(resolve, delay));
       await ensureGateway();
     } catch (error) {
+      logGatewaySupervisor(`Gateway health recovery attempt failed: ${error.message}`);
       console.error('The Gateway health monitor could not restore a healthy Gateway:', error);
     } finally {
       gatewayMonitorRunning = false;
@@ -1037,6 +1089,7 @@ app.whenReady().then(() => {
     startGatewayMonitor();
     createMainWindow();
   }).catch(error => {
+    logGatewaySupervisor(`Electron startup failed; stopping the desktop supervisor: ${error.message}`);
     console.error('Electron cannot start without a healthy Symbiote Gateway:', error);
     dialog.showErrorBox('Symbiote Gateway unavailable', error.message);
     app.quit();

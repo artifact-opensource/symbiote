@@ -239,6 +239,7 @@ export interface GatewayStatus {
   uptimeHuman?: string;
   provider?: string;
   channels: ChannelStatus[];
+  whatsappQr?: { value: string; updatedAt: number };
   activeTurns?: number;
   sessions?: number;
   tools?: number;

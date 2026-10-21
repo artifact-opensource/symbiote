@@ -27,7 +27,7 @@ const ProjectIDE = lazy(() => import('./components/ProjectIDE'));
 const ProjectsPanel = lazy(() => import('./components/ProjectsPanel'));
 
 const NAVIGATION: { id: ViewId; label: string; icon: typeof LayoutDashboard; group: string }[] = [
-  { id: 'workspace', label: 'Workspace', icon: LayoutDashboard, group: 'Work' },
+  { id: 'workspace', label: 'Overview', icon: LayoutDashboard, group: 'Work' },
   { id: 'projects', label: 'Projects', icon: FolderOpen, group: 'Work' },
   { id: 'agents', label: 'Agents', icon: Users, group: 'Work' },
   { id: 'runs', label: 'Tasks', icon: Activity, group: 'Work' },
@@ -43,7 +43,7 @@ const NAVIGATION: { id: ViewId; label: string; icon: typeof LayoutDashboard; gro
 ];
 
 const REFRESH_INTERVAL_KEY = 'symbiote-telemetry-refresh-ms';
-const MIN_REFRESH_INTERVAL_MS = 400;
+const MIN_REFRESH_INTERVAL_MS = 3000;
 const MAX_REFRESH_INTERVAL_MS = 5000;
 
 interface AgentLightingState {
@@ -1081,9 +1081,9 @@ export default function App() {
   const [identityOpen, setIdentityOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [relativeTimeNow, setRelativeTimeNow] = useState(Date.now());
-  const [readNotificationIds, setReadNotificationIds] = useState<string[]>(() => {
+  const [clearedNotificationIds, setClearedNotificationIds] = useState<string[]>(() => {
     try {
-      const stored = window.localStorage.getItem('symbiote-read-notifications');
+      const stored = window.localStorage.getItem('symbiote-cleared-notifications');
       const parsed: unknown = stored ? JSON.parse(stored) : [];
       return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [];
     } catch {
@@ -1103,7 +1103,7 @@ export default function App() {
   const [recentThreadsOpen, setRecentThreadsOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const telemetryRequestActive = useRef(false);
+  const statusRequest = useRef<Promise<void> | null>(null);
   const activeTurnSessionId = useRef<string | null>(null);
   const nativeNotifiedIds = useRef(new Set<string>());
   const toolSearchRef = useRef<HTMLInputElement>(null);
@@ -1273,11 +1273,11 @@ export default function App() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem('symbiote-read-notifications', JSON.stringify(readNotificationIds.slice(-200)));
+      window.localStorage.setItem('symbiote-cleared-notifications', JSON.stringify(clearedNotificationIds.slice(-200)));
     } catch {
       // The current notification state remains available for this page lifetime.
     }
-  }, [readNotificationIds]);
+  }, [clearedNotificationIds]);
 
   useEffect(() => {
     try {
@@ -1322,52 +1322,30 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [view]);
 
-  const refreshStatus = useCallback(async () => {
-    try {
-      const fresh = await api<GatewayStatus>('/api/status');
-      setStatus(fresh);
-      setGatewayConnected(true);
-      setMemoryHistory(previous => [...previous.slice(-59), fresh.memory?.rss ?? 0]);
-      const hostSample = fresh.metrics?.system?.host;
-      if (hostSample?.sampledAt) {
-        setHostHistory(previous => previous[previous.length - 1]?.sampledAt === hostSample.sampledAt
-          ? previous
-          : [...previous.slice(-59), hostSample]);
-      }
-      setLastUpdated(Date.now());
-    } catch (failure) {
-      setGatewayConnected(false);
-      throw failure;
-    }
-  }, []);
-
-  const refreshTelemetry = useCallback(async () => {
-    if (telemetryRequestActive.current) return;
-    telemetryRequestActive.current = true;
-    try {
-      const fresh = await api<Pick<GatewayStatus, 'healthTelemetry' | 'providerHealth' | 'uptime' | 'uptimeHuman' | 'activeTurns' | 'memory' | 'metrics'>>('/api/telemetry');
-      setStatus(previous => previous ? {
-        ...previous,
-        ...fresh,
-        metrics: {
-          ...previous.metrics,
-          ...fresh.metrics,
-          system: { ...previous.metrics?.system, ...fresh.metrics?.system },
-        },
-      } : previous);
-      setGatewayConnected(true);
-      const processRss = fresh.memory?.rss;
-      if (processRss !== undefined) setMemoryHistory(previous => [...previous.slice(-59), processRss]);
-      const hostSample = fresh.metrics?.system?.host;
-      if (hostSample?.sampledAt) {
-        setHostHistory(previous => previous[previous.length - 1]?.sampledAt === hostSample.sampledAt
-          ? previous
-          : [...previous.slice(-59), hostSample]);
-      }
-      setLastUpdated(Date.now());
-    } finally {
-      telemetryRequestActive.current = false;
-    }
+  const refreshStatus = useCallback((): Promise<void> => {
+    if (statusRequest.current) return statusRequest.current;
+    const request = api<GatewayStatus>('/api/status')
+      .then(fresh => {
+        setStatus(fresh);
+        setGatewayConnected(true);
+        setMemoryHistory(previous => [...previous.slice(-59), fresh.memory?.rss ?? 0]);
+        const hostSample = fresh.metrics?.system?.host;
+        if (hostSample?.sampledAt) {
+          setHostHistory(previous => previous[previous.length - 1]?.sampledAt === hostSample.sampledAt
+            ? previous
+            : [...previous.slice(-59), hostSample]);
+        }
+        setLastUpdated(Date.now());
+      })
+      .catch(failure => {
+        setGatewayConnected(false);
+        throw failure;
+      })
+      .finally(() => {
+        statusRequest.current = null;
+      });
+    statusRequest.current = request;
+    return request;
   }, []);
 
   const installUpdate = async () => {
@@ -1429,7 +1407,6 @@ export default function App() {
     setError('');
     const results = await Promise.allSettled([
       refreshStatus(),
-      refreshTelemetry(),
       api<GatewayConfig>('/api/config').then(setConfig),
       api<{ providers: CloudProviderStatus }>('/api/integrations').then(result => setCloudProviderStatus(result.providers)),
       api<WorkspaceProject[]>('/api/projects').then(data => {
@@ -1450,7 +1427,7 @@ export default function App() {
     if (firstError?.status === 'rejected') setError(firstError.reason instanceof Error ? firstError.reason.message : 'Could not load gateway data.');
     setLoading(false);
     if (showSpinner) setRefreshing(false);
-  }, [refreshStatus, refreshTelemetry, refreshWork]);
+  }, [refreshStatus, refreshWork]);
 
   const runCommandAction = async (values: { provider: string; model: string } | { url: string }) => {
     if ('provider' in values) {
@@ -1475,6 +1452,28 @@ export default function App() {
       window.setTimeout(() => setCommandNotice(''), 7000);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Gateway restart could not be requested.');
+    }
+  };
+
+  const restartChannel = async (channelType: string) => {
+    if (!window.confirm(`Restart the Gateway and ${channelType} adapter? Other connections will briefly reconnect too.`)) return;
+    try {
+      await api('/api/gateway/restart', { method: 'POST', body: '{}' });
+      setCommandNotice(`${channelType} restart requested.`);
+      window.setTimeout(() => setCommandNotice(''), 7000);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : `${channelType} could not be restarted.`);
+    }
+  };
+
+  const clearHealthIncidents = async () => {
+    try {
+      const result = await api<{ archived: number }>('/api/health/incidents/archive', { method: 'POST', body: '{}' });
+      await refreshStatus();
+      setCommandNotice(`${result.archived} incident${result.archived === 1 ? '' : 's'} archived.`);
+      window.setTimeout(() => setCommandNotice(''), 7000);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Incidents could not be archived.');
     }
   };
 
@@ -1540,35 +1539,37 @@ export default function App() {
 
   useEffect(() => {
     if (!accessGranted) return;
-    const statusTimer = window.setInterval(() => {
-      void refreshStatus().catch(() => undefined);
-    }, view === 'workspace' ? 3000 : 5000);
-    const refreshLiveTelemetry = () => {
-      void refreshTelemetry().catch(() => {
-        setGatewayConnected(false);
-      });
-    };
-    const liveTelemetryActive = view === 'workspace' || view === 'operations';
-    if (liveTelemetryActive) refreshLiveTelemetry();
-    const telemetryTimer = liveTelemetryActive
-      ? window.setInterval(refreshLiveTelemetry, refreshIntervalMs)
-      : undefined;
-    const activityTimer = window.setInterval(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        await refreshStatus();
+      } catch {
+        // refreshStatus updates the connection indicator and errors are retried on the next tick.
+      }
       if (view === 'workspace' || view === 'runs' || view === 'agents' || view === 'projects') {
-        void refreshWork().catch(failure => setError(failure instanceof Error ? failure.message : 'Could not refresh workspace activity.'));
+        try {
+          await refreshWork();
+        } catch (failure) {
+          setError(failure instanceof Error ? failure.message : 'Could not refresh workspace activity.');
+        }
       }
       if (view === 'operations') {
-        void api<{ lines: string }>('/api/logs?lines=120')
-          .then(result => setLogLines(result.lines))
-          .catch(() => undefined);
+        try {
+          const result = await api<{ lines: string }>('/api/logs?lines=120');
+          setLogLines(result.lines);
+        } catch {
+          // The next scheduled poll retries log retrieval.
+        }
       }
-    }, 5000);
-    return () => {
-      window.clearInterval(statusTimer);
-      if (telemetryTimer !== undefined) window.clearInterval(telemetryTimer);
-      window.clearInterval(activityTimer);
+      if (!cancelled) timer = window.setTimeout(poll, refreshIntervalMs);
     };
-  }, [accessGranted, refreshIntervalMs, refreshStatus, refreshTelemetry, refreshWork, view]);
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [accessGranted, refreshIntervalMs, refreshStatus, refreshWork, view]);
 
   useEffect(() => {
     try {
@@ -2181,16 +2182,20 @@ export default function App() {
     }
   };
 
-  const channelList = status?.channels ?? [];
+  const activeChannelList = status?.channels ?? [];
+  const channelList = activeChannelList.some(channel => channel.channelType === 'whatsapp')
+    ? activeChannelList
+    : [...activeChannelList, { id: 'whatsapp-main', channelType: 'whatsapp', status: 'not-configured' }];
   const isOnline = gatewayConnected;
   const attentionItems = [
-    ...runs.filter(run => run.status === 'failed').map(run => ({
+    ...runs.filter(run => !run.archivedAt && run.status === 'failed').map(run => ({
       id: `run-${run.id}-${run.completedAt ?? run.startedAt}`,
       title: run.name,
       detail: run.error || 'The task stopped unexpectedly.',
       timestamp: run.completedAt ?? run.startedAt,
       severity: 3,
       destination: 'runs' as ViewId,
+      targetId: `run-item-${run.id}`,
     })),
     ...agents.filter(agent => agent.status === 'failed').map(agent => ({
       id: `agent-${agent.sessionId}-${agent.completedAt ?? agent.startedAt}`,
@@ -2199,14 +2204,16 @@ export default function App() {
       timestamp: agent.completedAt ?? agent.startedAt,
       severity: 3,
       destination: 'agents' as ViewId,
+      targetId: `agent-item-${agent.sessionId}`,
     })),
-    ...runs.filter(run => run.status === 'cancelled').map(run => ({
+    ...runs.filter(run => !run.archivedAt && run.status === 'cancelled').map(run => ({
       id: `run-${run.id}-${run.completedAt ?? run.startedAt}`,
       title: run.name,
       detail: 'The task was stopped before completion.',
       timestamp: run.completedAt ?? run.startedAt,
       severity: 2,
       destination: 'runs' as ViewId,
+      targetId: `run-item-${run.id}`,
     })),
     ...(!isOnline ? [{
       id: 'gateway-offline',
@@ -2215,10 +2222,24 @@ export default function App() {
       timestamp: relativeTimeNow,
       severity: 4,
       destination: 'operations' as ViewId,
+      targetId: 'health-incidents',
     }] : []),
   ].sort((left, right) => right.severity - left.severity || right.timestamp - left.timestamp);
-  const unreadNotifications = attentionItems.filter(item => !readNotificationIds.includes(item.id));
-  const dismissNotification = (id: string) => setReadNotificationIds(previous => previous.includes(id) ? previous : [...previous, id]);
+  const visibleNotifications = attentionItems.filter(item => !clearedNotificationIds.includes(item.id));
+  const unreadNotifications = visibleNotifications;
+  const clearNotifications = () => setClearedNotificationIds(previous => [...new Set([...previous, ...visibleNotifications.map(item => item.id)])]);
+  const openNotification = (item: typeof attentionItems[number]) => {
+    if (!item.targetId) return;
+    setNotificationsOpen(false);
+    navigate(item.destination);
+    window.setTimeout(() => {
+      const target = document.getElementById(item.targetId);
+      if (!target) return;
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.add('notification-target-highlight');
+      window.setTimeout(() => target.classList.remove('notification-target-highlight'), 2200);
+    }, 80);
+  };
 
   useEffect(() => {
     if (deviceNotificationPermission !== 'granted' || typeof Notification === 'undefined') return;
@@ -2306,7 +2327,7 @@ export default function App() {
         </button>
 
         <nav className="sidebar-navigation" aria-label="Sections">
-          {['Work', 'Play', 'Tools', 'Runtime'].map(group => (
+          {['Work', 'Tools', 'Runtime', 'Play'].map(group => (
             <div className="nav-group" key={group}>
               <div className="nav-label">{group}</div>
               {NAVIGATION.filter(item => item.group === group).map(item => {
@@ -2352,9 +2373,11 @@ export default function App() {
           </div>
         </div>
           <div className="sidebar-footer">
-          <img className="sidebar-footer-logo" src="/av-mark-white.png" alt="Artifact Virtual" />
-          <span className="version-label">{__SYMBIOTE_VERSION__}</span>
-        </div>
+            <a className="sidebar-footer-link" href="https://www.artifactvirtual.com" target="_blank" rel="noreferrer" aria-label="Open Artifact Virtual website">
+              <img className="sidebar-footer-logo" src="/av-mark-white.png" alt="Artifact Virtual" />
+            </a>
+            <span className="version-label">{__SYMBIOTE_VERSION__}</span>
+          </div>
       </aside>
 
       {mobileNavOpen && <button className="mobile-scrim" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation overlay" />}
@@ -2387,13 +2410,12 @@ export default function App() {
                     {deviceNotificationPermission !== 'granted' && <button className="text-button" onClick={() => void enableDeviceNotifications()} disabled={deviceNotificationPermission === 'unsupported' || deviceNotificationPermission === 'denied'}>
                       {deviceNotificationPermission === 'unsupported' ? 'Device alerts unavailable' : deviceNotificationPermission === 'denied' ? 'Alerts blocked in browser' : 'Enable device alerts'}
                     </button>}
-                    {unreadNotifications.length > 0 && <button className="text-button" onClick={() => setReadNotificationIds(previous => [...new Set([...previous, ...unreadNotifications.map(item => item.id)])])}>Mark all read</button>}
+                    {visibleNotifications.length > 0 && <button className="text-button" onClick={clearNotifications}>Clear</button>}
                   </div>
                 </header>
-                {attentionItems.length ? <div className="notification-list">{attentionItems.map(item => <button key={item.id} className={`notification-item${readNotificationIds.includes(item.id) ? ' notification-item-read' : ''}`} onClick={() => { dismissNotification(item.id); navigate(item.destination); setNotificationsOpen(false); }}>
+                {visibleNotifications.length ? <div className="notification-list">{visibleNotifications.map(item => <button key={item.id} className="notification-item" onClick={() => openNotification(item)}>
                   <span className={`notification-mark notification-severity-${item.severity}`} />
                   <span className="notification-copy"><strong>{item.title}</strong><small>{item.detail}</small><time>{notificationTimestamp(item.timestamp)}</time></span>
-                  {!readNotificationIds.includes(item.id) && <span className="notification-unread" aria-label="Unread" />}
                 </button>)}</div> : <p className="notification-empty">Nothing needs your attention.</p>}
                   <ResourceStatusStrip host={status?.metrics?.system?.host} />
                 </section>}
@@ -2402,24 +2424,21 @@ export default function App() {
         </header>
 
         <main id="main-content" className={`main-content${view === 'chat' ? ' main-content-chat' : ''}`}>
-          {commandNotice && <div className="notice notice-info" role="status"><span>{commandNotice}</span><button className="icon-button small" onClick={() => setCommandNotice('')} aria-label="Dismiss command status"><X size={14} /></button></div>}
-          {error && (
-            <div className="notice notice-error" role="alert">
-              <span>{error}</span>
-              <button className="icon-button small" onClick={() => void refreshAll(true)} aria-label="Retry"><RefreshCw size={14} /></button>
-            </div>
-          )}
-          {status?.update?.state === 'available' && status.update.latestVersion !== dismissedUpdateVersion && (
-            <div className="notice notice-update" role="status">
-              <span>Symbiote {status.update.latestVersion} is available. You are running {status.update.currentVersion}.</span>
-              {isDesktopApp
-                ? <button className="button button-secondary" onClick={() => void installUpdate()} disabled={preparingUpdate || status.update.download?.state === 'downloading'}>
-                    {preparingUpdate || status.update.download?.state === 'downloading' ? 'Preparing verified installer…' : 'Download and install'}
-                  </button>
-                : <a className="button button-secondary" href={status.update.releaseUrl} target="_blank" rel="noreferrer">Review update</a>}
-              <button className="icon-button small" onClick={() => setDismissedUpdateVersion(status.update?.latestVersion ?? null)} aria-label="Dismiss update notice"><X size={14} /></button>
-            </div>
-          )}
+          <div className="floating-notices" aria-live="polite">
+            {commandNotice && <div className="notice notice-info" role="status"><span>{commandNotice}</span><button className="icon-button small" onClick={() => setCommandNotice('')} aria-label="Dismiss status"><X size={14} /></button></div>}
+            {error && <div className="notice notice-error" role="alert"><span>{error}</span><button className="icon-button small" onClick={() => void refreshAll(true)} aria-label="Retry"><RefreshCw size={14} /></button><button className="icon-button small" onClick={() => setError('')} aria-label="Dismiss error"><X size={14} /></button></div>}
+            {status?.update?.state === 'available' && status.update.latestVersion !== dismissedUpdateVersion && (
+              <div className="notice notice-update" role="status">
+                <span>Symbiote {status.update.latestVersion} is available.</span>
+                {isDesktopApp
+                  ? <button className="button button-secondary" onClick={() => void installUpdate()} disabled={preparingUpdate || status.update.download?.state === 'downloading'}>
+                      {preparingUpdate || status.update.download?.state === 'downloading' ? 'Preparing installer…' : 'Install update'}
+                    </button>
+                  : <a className="button button-secondary" href={status.update.releaseUrl} target="_blank" rel="noreferrer">View update</a>}
+                <button className="icon-button small" onClick={() => setDismissedUpdateVersion(status.update?.latestVersion ?? null)} aria-label="Dismiss update notice"><X size={14} /></button>
+              </div>
+            )}
+          </div>
 
           {loading && !status ? (
             <div className="loading-state"><ActivityOrb label="Connecting" loading /><span>Connecting to your local runtime…</span></div>
@@ -2544,7 +2563,10 @@ export default function App() {
                   onQuery={setLogQuery}
                   searchRef={logSearchRef}
                   lastUpdated={lastUpdated}
+                  refreshIntervalMs={refreshIntervalMs}
                   onRefresh={() => void refreshAll(true)}
+                  onRestartChannel={restartChannel}
+                  onClearIncidents={clearHealthIncidents}
                 />
               )}
               {view === 'tools' && (
@@ -2813,21 +2835,21 @@ function OverviewView(props: {
       </section>
 
       <section className="metric-grid" aria-label="Runtime summary">
-        <MetricCard icon={Server} label="Uptime" tone="neutral">
-          <div className="uptime-card-main"><strong className="metric-value">{status?.uptimeHuman || '—'}</strong><StopwatchDial seconds={(status?.uptime ?? 0) / 1000} /></div>
+        <MetricCard icon={Activity} label="Active turns" tone="orange">
+          <strong className="metric-value">{status?.activeTurns ?? '—'}</strong>
+          <span className="metric-detail">Running</span>
         </MetricCard>
         <MetricCard icon={MessageSquare} label="Conversations" tone="green">
           <strong className="metric-value">{status?.sessions ?? sessions.length}</strong>
-          <span className="metric-detail">Saved sessions</span>
+          <span className="metric-detail">Saved</span>
         </MetricCard>
-        <MetricCard icon={Activity} label="Active turns" tone="orange">
-          <strong className="metric-value">{status?.activeTurns ?? '—'}</strong>
-          <span className="metric-detail">Running now</span>
+        <MetricCard icon={Server} label="Uptime" tone="neutral">
+          <div className="uptime-card-main"><strong className="metric-value">{status?.uptimeHuman || '—'}</strong><StopwatchDial seconds={(status?.uptime ?? 0) / 1000} /></div>
         </MetricCard>
         <MemoryInUseCard host={host} processRssMb={memory?.rss} />
       </section>
       <section className="metric-grid system-metric-grid" aria-label="Computer resource usage">
-        <MetricCard icon={Cpu} label="Host CPU" tone="orange">
+        <MetricCard icon={Cpu} label="CPU" tone="orange">
           <div className="metric-reading"><strong className="metric-value">{host?.cpuPercent === null || host?.cpuPercent === undefined ? '—' : `${host.cpuPercent.toFixed(1)}%`}</strong><span>{host ? `${host.cpuLogicalCores} cores` : 'Waiting for sample'}</span></div>
           <MetricPlot
             label={`Host CPU utilization over time across ${host?.cpuLogicalCores ?? 0} logical cores`}
@@ -2857,25 +2879,6 @@ function OverviewView(props: {
       </section>
 
       <div className="overview-columns">
-        <section className="surface-card work-card">
-          <div className="section-heading">
-            <div><div className="eyebrow">KEEP THE THREAD</div><h2>Recent conversations</h2></div>
-          </div>
-          {latestSessions.length ? (
-            <div className="conversation-list">
-              {latestSessions.map((session, index) => (
-                <button className="conversation-row" key={session.id} onClick={() => onOpenSession(session.id)}>
-                  <span className={`conversation-avatar avatar-${index % 4}`}>{initials(session.label)}</span>
-                  <span className="conversation-copy"><strong>{session.label || 'Untitled conversation'}</strong><small>{session.messageCount} messages <span>·</span> {formatRelative(session.updatedAt)}</small></span>
-                  <ArrowRight size={15} className="row-arrow" />
-                </button>
-              ))}
-            </div>
-          ) : (
-            <EmptyState icon={MessageSquare} title="A clean slate." detail="Start a conversation with the agent; it will be saved to this runtime." action={<button className="button button-secondary" onClick={onNewSession}><Plus size={15} />Start a conversation</button>} />
-          )}
-        </section>
-
         <section className="surface-card runtime-card">
           <div className="section-heading">
             <div><div className="eyebrow">UNDER THE HOOD</div><h2>Runtime pulse</h2></div>
@@ -2909,6 +2912,25 @@ function OverviewView(props: {
             {host?.warnings.map((warning, index) => <small className="runtime-warning" key={`${index}-${warning}`}>{warning}</small>)}
           </div>
         </section>
+
+        <section className="surface-card work-card">
+          <div className="section-heading">
+            <div><div className="eyebrow">RECENT</div><h2>Conversations</h2></div>
+          </div>
+          {latestSessions.length ? (
+            <div className="conversation-list">
+              {latestSessions.map((session, index) => (
+                <button className="conversation-row" key={session.id} onClick={() => onOpenSession(session.id)}>
+                  <span className={`conversation-avatar avatar-${index % 4}`}>{initials(session.label)}</span>
+                  <span className="conversation-copy"><strong>{session.label || 'Untitled conversation'}</strong><small>{session.messageCount} messages <span>·</span> {formatRelative(session.updatedAt)}</small></span>
+                  <ArrowRight size={15} className="row-arrow" />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <EmptyState icon={MessageSquare} title="No conversations yet" detail="Start a conversation with the agent." action={<button className="button button-secondary" onClick={onNewSession}><Plus size={15} />Start a conversation</button>} />
+          )}
+        </section>
       </div>
 
       <section className="surface-card channel-card">
@@ -2918,7 +2940,7 @@ function OverviewView(props: {
         </div>
         {channels.length ? (
           <div className="channel-grid">
-            {channels.map(channel => <ChannelTile key={channel.id} channel={channel} />)}
+            {channels.map(channel => <ChannelTile key={channel.id} channel={channel} qr={status?.whatsappQr} />)}
           </div>
         ) : (
           <div className="inline-empty"><span className="empty-icon"><Network size={18} /></span><div><strong>No channel adapters registered</strong><p>Connect a channel in your Symbiote configuration to see its live health here.</p></div></div>
@@ -3447,7 +3469,7 @@ function TaskCard({ run, runAgents, onStop, onRestart, onGuide, onArchive, onRes
     }
   };
   return (
-    <article className="task-card">
+    <article className="task-card" id={`run-item-${run.id}`}>
       <div className="task-card-heading">
         {run.status === 'running'
           ? <div><h3>{run.name}</h3><span className="run-meta">{formatRelative(run.startedAt)} · {formatElapsed(run.startedAt, run.completedAt)}</span></div>
@@ -3985,7 +4007,7 @@ function AgentCard({ agent, onControl }: {
   const [steering, setSteering] = useState('');
   const isRunning = agent.status === 'running';
   return (
-    <article className="surface-card agent-card">
+    <article className="surface-card agent-card" id={`agent-item-${agent.sessionId}`}>
       <div className="run-card-heading"><div><h3>{agent.task}</h3><span className="run-meta">Agent {agent.sessionId} · {formatElapsed(agent.startedAt, agent.completedAt)}</span></div><span className={`run-status run-status-${agent.status === 'completed' ? 'completed' : agent.status === 'running' ? 'running' : 'failed'}`}>{agent.status}</span></div>
       {isRunning && <div className="run-operation agent-current-activity"><ActivityOrb state={getActivityOrbState(getActivityFromStatus(agent.activity, agent.activeTool))} label={agent.activity ?? 'Thinking'} compact /><span><strong>{agent.activeTool ? `Executing ${agent.activeTool}` : agent.activity ?? 'Thinking'}</strong><small>Live agent activity</small></span></div>}
       {agent.parentSessionId && <div className="agent-parent">Parent session <code>{agent.parentSessionId}</code></div>}
@@ -4025,11 +4047,16 @@ function MetricCard({ icon: Icon, label, tone, children }: {
 function StopwatchDial({ seconds }: { seconds: number }) {
   const [clock, setClock] = useState({ seconds, syncedAt: Date.now(), now: Date.now() });
   useEffect(() => {
-    const syncedAt = Date.now();
-    setClock(current => ({ ...current, seconds, syncedAt }));
+    const now = Date.now();
+    setClock(current => {
+      const estimatedSeconds = current.seconds + (now - current.syncedAt) / 1000;
+      return Math.abs(seconds - estimatedSeconds) < 2
+        ? current
+        : { seconds, syncedAt: now, now };
+    });
   }, [seconds]);
   useEffect(() => {
-    const timer = window.setInterval(() => setClock(current => ({ ...current, now: Date.now() })), 100);
+    const timer = window.setInterval(() => setClock(current => ({ ...current, now: Date.now() })), 250);
     return () => window.clearInterval(timer);
   }, []);
   const elapsed = Math.max(0, clock.seconds + (clock.now - clock.syncedAt) / 1000);
@@ -4052,8 +4079,14 @@ function StopwatchDial({ seconds }: { seconds: number }) {
 function WorkspaceClock() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 250);
-    return () => window.clearInterval(timer);
+    let timer: number;
+    const updateAtNextSecond = () => {
+      const current = new Date();
+      setNow(current);
+      timer = window.setTimeout(updateAtNextSecond, 1000 - current.getMilliseconds());
+    };
+    timer = window.setTimeout(updateAtNextSecond, 1000 - Date.now() % 1000);
+    return () => window.clearTimeout(timer);
   }, []);
   const time = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const date = now.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -4082,7 +4115,7 @@ function MemoryInUseCard({ host, processRssMb }: { host?: HostResourceSnapshot; 
   ];
   let offset = 0;
   return (
-    <MetricCard icon={HardDrive} label="Memory in use" tone="blue">
+    <MetricCard icon={HardDrive} label="RAM" tone="blue">
       <div className="memory-card-content">
         <svg className="memory-donut" viewBox="0 0 56 56" role="img" aria-label={`Memory allocation: ${formatSystemBytes(used)} used of ${formatSystemBytes(total)}`}>
           <circle cx="28" cy="28" r="22" className="memory-donut-track" />
@@ -4105,30 +4138,29 @@ function MemoryInUseCard({ host, processRssMb }: { host?: HostResourceSnapshot; 
 function GpuUsageCard({ host, hostHistory }: { host?: HostResourceSnapshot; hostHistory: HostResourceSnapshot[] }) {
   const gpu = host?.gpu;
   if (!gpu || gpu.state === 'detecting') {
-    return <MetricCard icon={Cpu} label="System GPU" tone="neutral">
-      <strong className="metric-value">Detecting GPU…</strong>
-      <span className="metric-detail">Reading hardware telemetry</span>
+    return <MetricCard icon={Cpu} label="GPU" tone="neutral">
+      <strong className="metric-value">Detecting</strong>
     </MetricCard>;
   }
   if (gpu.state === 'unavailable') {
-    return <MetricCard icon={Cpu} label="System GPU" tone="neutral">
-      <strong className="metric-value">GPU unavailable</strong>
+    return <MetricCard icon={Cpu} label="GPU" tone="neutral">
+      <strong className="metric-value">Unavailable</strong>
     </MetricCard>;
   }
   const names = gpu.devices.map(device => device.name).join(' · ');
   const gpuHistory = hostHistory.filter(sample => sample.gpu.state === 'available');
-  return <MetricCard icon={Cpu} label="System GPU" tone="blue">
+  return <MetricCard icon={Cpu} label="GPU" tone="blue">
     <div className="gpu-device-name" title={names}>{names || 'GPU detected'}</div>
     <div className="metric-memory-reading">
       <strong>{gpu.loadPercent === null ? '—' : `${gpu.loadPercent.toFixed(1)}%`}</strong>
-      <span>{gpu.loadPercent === null ? 'Load unavailable' : 'peak engine load'}</span>
+      <span>{gpu.loadPercent === null ? 'Load unavailable' : 'Load'}</span>
     </div>
     <div className="metric-reading-subtext">
       {gpu.dedicatedMemoryUsedBytes === null
         ? gpu.sharedMemoryUsedBytes === null
-          ? 'GPU memory telemetry unavailable'
-          : `${formatSystemBytes(gpu.sharedMemoryUsedBytes)} shared memory in use`
-        : `${formatSystemBytes(gpu.dedicatedMemoryUsedBytes)} / ${gpu.dedicatedMemoryTotalBytes === null ? '—' : formatSystemBytes(gpu.dedicatedMemoryTotalBytes)} dedicated`}
+          ? 'Memory unavailable'
+            : `${formatSystemBytes(gpu.sharedMemoryUsedBytes)} shared`
+          : `${formatSystemBytes(gpu.dedicatedMemoryUsedBytes)} / ${gpu.dedicatedMemoryTotalBytes === null ? '—' : formatSystemBytes(gpu.dedicatedMemoryTotalBytes)}`}
       {gpu.sharedMemoryUsedBytes !== null && gpu.dedicatedMemoryUsedBytes !== null
         ? ` · ${formatSystemBytes(gpu.sharedMemoryUsedBytes)} shared`
         : ''}
@@ -4191,15 +4223,45 @@ function MetricPlot({ series, maxValue, area, label }: {
   );
 }
 
-function ChannelTile({ channel }: { channel: GatewayStatus['channels'][number] }) {
+function ChannelTile({ channel, onRestart, qr }: {
+  channel: GatewayStatus['channels'][number];
+  onRestart?: (channelType: string) => void;
+  qr?: GatewayStatus['whatsappQr'];
+}) {
   const online = channel.status === 'running' || channel.health?.state === 'connected';
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrImage, setQrImage] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    if (!qr?.value || channel.channelType !== 'whatsapp') {
+      setQrImage('');
+      return;
+    }
+    void import('qrcode').then(module => module.toDataURL(qr.value, { width: 220, margin: 2 }))
+      .then(image => { if (!cancelled) setQrImage(image); })
+      .catch(error => console.error('Could not render the WhatsApp pairing QR:', error));
+    return () => { cancelled = true; };
+  }, [channel.channelType, qr?.updatedAt, qr?.value]);
+  const normalizedType = channel.channelType.toLowerCase();
   return (
     <div className="channel-tile">
-      <span className={`channel-symbol${online ? ' channel-symbol-live' : ''}`}>{channel.channelType.slice(0, 1).toUpperCase()}</span>
+      <span className={`channel-symbol channel-symbol-${normalizedType}${online ? ' channel-symbol-live' : ''}`}><ChannelBrandMark channelType={channel.channelType} /></span>
       <span className="channel-copy"><strong>{channel.id}</strong><small>{channel.channelType}</small></span>
-      <span className={`status-tag${online ? ' status-tag-live' : ' status-tag-idle'}`}><span />{online ? 'Connected' : channel.status || 'Offline'}</span>
+      <span className={`channel-health-light${online ? ' channel-health-light-online' : ''}`} title={online ? 'Connected' : channel.status || 'Offline'} aria-label={online ? 'Connected' : channel.status || 'Offline'} />
+      {onRestart && ['discord', 'whatsapp'].includes(normalizedType) && <button className="icon-button small channel-restart-button" type="button" onClick={() => onRestart(channel.channelType)} aria-label={`Restart ${channel.channelType} adapter`} title={`Restart ${channel.channelType}`}><RefreshCw size={13} /></button>}
+      {normalizedType === 'whatsapp' && <button className="icon-button small channel-qr-toggle" type="button" onClick={() => setQrOpen(open => !open)} aria-label={`${qrOpen ? 'Hide' : 'Show'} WhatsApp QR code`} aria-expanded={qrOpen}><ChevronDown size={14} /></button>}
+      {normalizedType === 'whatsapp' && qrOpen && <div className="channel-qr-panel">
+        {qrImage ? <img src={qrImage} alt={`WhatsApp pairing QR updated ${new Date(qr?.updatedAt ?? 0).toLocaleTimeString()}`} /> : <span>{channel.status === 'not-configured' ? 'WhatsApp is not configured.' : 'Waiting for a new WhatsApp QR code…'}</span>}
+      </div>}
     </div>
   );
+}
+
+function ChannelBrandMark({ channelType }: { channelType: string }) {
+  const type = channelType.toLowerCase();
+  if (type === 'discord') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.73 5.1a18.1 18.1 0 0 0-4.46-1.38l-.55 1.12a16.7 16.7 0 0 0-5.43 0l-.56-1.12A18.2 18.2 0 0 0 4.27 5.1C1.45 9.3.69 13.4 1.07 17.44a18.3 18.3 0 0 0 5.46 2.77l1.18-1.92c-.65-.24-1.27-.55-1.86-.9l.46-.36c3.59 1.66 7.49 1.66 11.04 0l.47.36c-.6.35-1.22.66-1.87.9l1.18 1.92a18.2 18.2 0 0 0 5.46-2.77c.45-4.68-.77-8.74-3.36-12.34ZM8.64 14.83c-1.08 0-1.97-.99-1.97-2.2s.87-2.2 1.97-2.2c1.1 0 1.99 1 1.97 2.2 0 1.21-.87 2.2-1.97 2.2Zm6.72 0c-1.08 0-1.97-.99-1.97-2.2s.87-2.2 1.97-2.2c1.1 0 1.99 1 1.97 2.2 0 1.21-.87 2.2-1.97 2.2Z" /></svg>;
+  if (type === 'whatsapp') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12.04 2a9.94 9.94 0 0 0-8.53 15.05L2 22l5.1-1.47A9.94 9.94 0 1 0 12.04 2Zm0 18.06a8.08 8.08 0 0 1-4.12-1.13l-.3-.18-3.03.87.88-2.95-.2-.31a8.1 8.1 0 1 1 6.77 3.7Zm4.44-6.07c-.24-.12-1.44-.71-1.66-.79-.22-.08-.38-.12-.54.12-.16.24-.62.79-.76.95-.14.16-.28.18-.52.06-.24-.12-1.02-.38-1.94-1.2-.72-.64-1.2-1.43-1.34-1.67-.14-.24-.02-.37.1-.49.11-.11.24-.28.36-.42.12-.14.16-.24.24-.4.08-.16.04-.3-.02-.42-.06-.12-.54-1.3-.74-1.78-.19-.46-.39-.4-.54-.41h-.46c-.16 0-.42.06-.64.3-.22.24-.84.82-.84 2s.86 2.32.98 2.48c.12.16 1.7 2.6 4.11 3.64.57.25 1.02.4 1.37.51.58.18 1.1.16 1.51.1.46-.07 1.44-.59 1.64-1.16.2-.57.2-1.06.14-1.16-.06-.1-.22-.16-.46-.28Z" /></svg>;
+  return <Network size={15} aria-hidden="true" />;
 }
 
 function ChatView(props: {
@@ -4598,10 +4660,14 @@ function OperationsView(props: {
   onQuery: (query: string) => void;
   searchRef: RefObject<HTMLInputElement | null>;
   lastUpdated: number | null;
+  refreshIntervalMs: number;
   onRefresh: () => void;
+  onRestartChannel: (channelType: string) => Promise<void>;
+  onClearIncidents: () => Promise<void>;
 }) {
-  const { status, connected, channels, logLines, query, onQuery, searchRef, lastUpdated, onRefresh } = props;
+  const { status, connected, channels, logLines, query, onQuery, searchRef, lastUpdated, refreshIntervalMs, onRefresh, onRestartChannel, onClearIncidents } = props;
   const [copyStatus, setCopyStatus] = useState('');
+  const [showIncidents, setShowIncidents] = useState(false);
   const filteredLogLines = query.trim()
     ? logLines.split(/\r?\n/).filter(line => line.toLowerCase().includes(query.trim().toLowerCase())).join('\n')
     : logLines;
@@ -4658,8 +4724,8 @@ function OperationsView(props: {
       || event.type === 'gateway.outage'
       || event.type === 'provider.call' && !event.succeeded,
   ).slice(0, 8);
-  const health = status?.providerHealth;
-  const providers = health && !Array.isArray(health) && typeof health === 'object' ? Object.entries(health) : [];
+  const incidentCount = (healthTelemetry?.gateway.issueCount ?? 0) + (healthTelemetry?.providers.failures ?? 0);
+  const logRefreshIntervalMs = Math.max(1000, refreshIntervalMs);
   const downloadLog = () => {
     const url = URL.createObjectURL(new Blob([logLines], { type: 'text/plain;charset=utf-8' }));
     const link = document.createElement('a');
@@ -4707,20 +4773,18 @@ function OperationsView(props: {
       <div className="operation-columns">
         <section className="surface-card operation-panel">
           <div className="section-heading"><div><div className="eyebrow">CHANNEL ADAPTERS</div><h2>Connections</h2></div><span className="subtle-label">{channels.length} TOTAL</span></div>
-          {channels.length ? <div className="connection-list">{channels.map(channel => <ChannelTile key={channel.id} channel={channel} />)}</div> : <EmptyState icon={Network} title="No active connections" detail="The gateway has not registered any channel adapters." />}
-        </section>
-        <section className="surface-card operation-panel">
-          <div className="section-heading"><div><div className="eyebrow">CIRCUIT BREAKERS</div><h2>Provider health</h2></div></div>
-          {providers.length ? <div className="provider-list">{providers.map(([name, record]) => {
-            const state = record && typeof record === 'object' && 'state' in record ? String(record.state) : 'unknown';
-            const healthy = state === 'closed' || state === 'healthy' || state === 'available';
-            return <div className="provider-row" key={name}><span className={`provider-health-dot${healthy ? ' provider-health-ok' : ''}`} /><span><strong>{name}</strong><small>{state}</small></span><span className="provider-latency">{record && typeof record === 'object' && 'avgLatencyMs' in record && typeof record.avgLatencyMs === 'number' ? `${record.avgLatencyMs} ms` : ''}</span></div>;
-          })}</div> : <div className="inline-empty"><span className="empty-icon"><Activity size={17} /></span><div><strong>Provider health will appear as calls are made</strong><p>No provider health records have been reported yet.</p></div></div>}
+          {channels.length ? <div className="connection-list">{channels.map(channel => <ChannelTile key={channel.id} channel={channel} qr={status?.whatsappQr} onRestart={type => void onRestartChannel(type)} />)}</div> : <EmptyState icon={Network} title="No active connections" detail="The gateway has not registered any channel adapters." />}
         </section>
       </div>
-      <section className="surface-card health-events-panel">
-        <div className="section-heading"><div><div className="eyebrow">PERSISTED · LAST 24 HOURS</div><h2>Incidents & failures</h2></div><span className="subtle-label">{healthTelemetry?.gateway.issueCount ?? 0} GATEWAY INCIDENTS</span></div>
-        {recentEvents.length
+      <section className="surface-card health-events-panel" id="health-incidents">
+        <header className="health-events-heading">
+          <button className="health-events-toggle" type="button" onClick={() => setShowIncidents(open => !open)} aria-expanded={showIncidents}>
+            <ChevronDown size={15} className={showIncidents ? 'health-events-chevron-open' : ''} />
+            <span><strong>Incidents & failures</strong><small>{incidentCount} in the last 24 hours</small></span>
+          </button>
+          {incidentCount > 0 && <button className="text-button" type="button" onClick={() => void onClearIncidents()}>Clear</button>}
+        </header>
+        {showIncidents && (recentEvents.length
           ? <div className="health-event-list">{recentEvents.map((event, index) => {
             const isProvider = event.type === 'provider.call';
             const title = event.type === 'gateway.outage'
@@ -4735,10 +4799,10 @@ function OperationsView(props: {
               <time dateTime={new Date(event.timestamp).toISOString()}>{new Date(event.timestamp).toLocaleString()}</time>
             </article>;
           })}</div>
-          : <div className="inline-empty"><span className="empty-icon"><CircleCheck size={17} /></span><div><strong>No tracked gateway incidents or provider failures</strong><p>Gateway startup, outage, shutdown, channel disconnect, runtime errors, and provider call outcomes are retained locally.</p></div></div>}
+          : <div className="inline-empty"><span className="empty-icon"><CircleCheck size={17} /></span><div><strong>No recent incidents or failures</strong></div></div>)}
       </section>
       <section className="surface-card log-panel">
-        <div className="section-heading log-heading"><div><div className="eyebrow">SERVICE OUTPUT · LOCAL MACHINE</div><h2>Recent log</h2></div><div className="log-actions"><span className="subtle-label">{lastUpdated ? 'POLLING EVERY 5S' : 'AWAITING LOG'}</span><button className="button button-secondary log-action-button" onClick={() => void copyLog()} disabled={!filteredLogLines}>{copyStatus === 'Copied' ? <Check size={14} /> : <Copy size={14} />}{copyStatus || 'Copy'}</button><button className="button button-secondary log-action-button" onClick={downloadLog} disabled={!logLines}><Download size={14} />Save</button></div></div>
+        <div className="section-heading log-heading"><div><div className="eyebrow">SERVICE OUTPUT · LOCAL MACHINE</div><h2>Recent log</h2></div><div className="log-actions"><span className="subtle-label">{lastUpdated ? `POLLING EVERY ${Math.round(logRefreshIntervalMs / 100) / 10}S` : 'AWAITING LOG'}</span><button className="button button-secondary log-action-button" onClick={() => void copyLog()} disabled={!filteredLogLines}>{copyStatus === 'Copied' ? <Check size={14} /> : <Copy size={14} />}{copyStatus || 'Copy'}</button><button className="button button-secondary log-action-button" onClick={downloadLog} disabled={!logLines}><Download size={14} />Save</button></div></div>
         <label className="search-field log-search"><Search size={15} /><input ref={searchRef} value={query} onChange={event => onQuery(event.target.value)} placeholder="Filter log lines…" aria-label="Filter log lines" /><kbd>/</kbd>{query && <button className="icon-button small" onClick={() => onQuery('')} aria-label="Clear log filter"><X size={13} /></button>}</label>
         <pre className="log-view" aria-label="Recent service log">{filteredLogLines || (query ? 'No log lines match this filter.' : 'No service log found yet. Start the gateway with log capture enabled to see runtime output here.')}</pre>
         <div className="log-caption"><span><span className="connection-orb connection-orb-live" />Tail of symbiote.log</span><span>{filteredLogLines ? `${filteredLogLines.split(/\r?\n/).length} visible lines` : 'Most recent 120 lines'} · Loopback only</span></div>
@@ -4847,7 +4911,7 @@ function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChan
       </section>
       <section className="surface-card settings-card">
         <div className="section-heading"><div><div className="eyebrow">LIVE TELEMETRY</div><h2>Refresh cadence</h2></div><span className="settings-source"><Activity size={14} />BROWSER SETTING</span></div>
-        <p className="settings-access-copy">Controls how often Health gauges and Workspace analytics request fresh gateway metrics. Host sensor readings update on the gateway’s own sampling schedule.</p>
+        <p className="settings-access-copy">Controls how often Health and Workspace request gateway data. Updates are limited to the host sampler’s cadence to keep the dashboard responsive.</p>
         <label className="telemetry-refresh-control">
           <span><strong>Health & dashboard refresh</strong><output>{refreshIntervalMs} ms</output></span>
           <input
@@ -4855,12 +4919,12 @@ function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChan
             type="range"
             min={MIN_REFRESH_INTERVAL_MS}
             max={MAX_REFRESH_INTERVAL_MS}
-            step={200}
+            step={1000}
             value={refreshIntervalMs}
             aria-label="Health and dashboard refresh interval in milliseconds"
             onChange={event => onRefreshIntervalChange(Number(event.target.value))}
           />
-          <small>400 ms–5 s · saved in this browser</small>
+          <small>3–5 s · saved in this browser</small>
         </label>
       </section>
       <section className="surface-card settings-card">

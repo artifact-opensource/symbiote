@@ -53,3 +53,26 @@ test('health telemetry counts clean uptime, outage downtime, and incidents in th
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('archiving health incidents clears the active list while preserving lifecycle and successful calls', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'symbiote-health-archive-'));
+  try {
+    const store = new HealthTelemetryStore(directory);
+    store.record({ type: 'gateway.started' });
+    store.record({ type: 'gateway.issue', subsystem: 'test', message: 'runtime failure' });
+    store.record({ type: 'provider.call', provider: 'test-provider', succeeded: false, message: 'request failed' });
+    store.record({ type: 'provider.call', provider: 'test-provider', succeeded: true });
+
+    assert.equal(store.archiveIncidents(), 2);
+    assert.equal(store.archiveIncidents(), 0);
+
+    const snapshot = new HealthTelemetryStore(directory).getSnapshot();
+    assert.equal(snapshot.gateway.issueCount, 0);
+    assert.equal(snapshot.providers.calls, 1);
+    assert.equal(snapshot.providers.failures, 0);
+    assert.equal(readFileSync(join(directory, 'health-events-archive.jsonl'), 'utf8').trim().split(/\r?\n/).length, 2);
+    assert.equal(readFileSync(join(directory, 'health-events.jsonl'), 'utf8').trim().split(/\r?\n/).length, 2);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

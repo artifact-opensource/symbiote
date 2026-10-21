@@ -271,6 +271,7 @@ export class SymbioteGateway {
   /** v2.0 — Provider health: circuit breaker, latency tracking, health states */
   private providerHealth: ProviderHealthMonitor;
   private healthTelemetry!: HealthTelemetryStore;
+  private whatsappQr?: { value: string; updatedAt: number };
   private healthHeartbeat: ReturnType<typeof setInterval> | null = null;
   private readonly releaseChecker = new ReleaseChecker(APP_VERSION);
   private readonly releaseUpdater = new ReleaseUpdater(
@@ -489,15 +490,19 @@ export class SymbioteGateway {
   // ── Start ──────────────────────────────────────────────────────────────
 
   async start(): Promise<void> {
-    const previousLifecycle = this.healthTelemetry.getLatestGatewayLifecycleEvent();
-    if (previousLifecycle && ['gateway.started', 'gateway.heartbeat'].includes(previousLifecycle.type)) {
-      this.healthTelemetry.record({
-        type: 'gateway.outage',
-        outageStartedAt: previousLifecycle.timestamp,
-        message: 'Gateway stopped without recording a graceful shutdown.',
-      });
+    try {
+      const previousLifecycle = this.healthTelemetry.getLatestGatewayLifecycleEvent();
+      if (previousLifecycle && ['gateway.started', 'gateway.heartbeat'].includes(previousLifecycle.type)) {
+        this.healthTelemetry.record({
+          type: 'gateway.outage',
+          outageStartedAt: previousLifecycle.timestamp,
+          message: 'Gateway stopped without recording a graceful shutdown.',
+        });
+      }
+      this.healthTelemetry.record({ type: 'gateway.started', message: `Gateway started (PID ${process.pid}).` });
+    } catch (error) {
+      console.error('[health] Could not persist Gateway startup telemetry; continuing with telemetry degraded:', error);
     }
-    this.healthTelemetry.record({ type: 'gateway.started', message: `Gateway started (PID ${process.pid}).` });
     this.healthHeartbeat = setInterval(() => {
       try {
         this.healthTelemetry.record({ type: 'gateway.heartbeat' });
@@ -1021,6 +1026,11 @@ export class SymbioteGateway {
             phoneNumber: channels.whatsapp.phoneNumber,
             autoRead: channels.whatsapp.autoRead ?? true,
             onQR: (qr: string) => {
+              if (!qr) {
+                this.whatsappQr = undefined;
+                return;
+              }
+              this.whatsappQr = { value: qr, updatedAt: Date.now() };
               console.log(`\n  ${palette.gold}[WhatsApp QR Code] Scan to link:${palette.reset}\n`);
               qrcode.generate(qr, { small: true }, (rendered: string) => {
                 console.log(rendered);
@@ -1259,6 +1269,7 @@ export class SymbioteGateway {
           };
         },
         recordGatewayIssue: (subsystem, message) => this.recordGatewayIssue(subsystem, message),
+        archiveHealthIncidents: () => this.healthTelemetry.archiveIncidents(),
         restartGateway: () => {
           console.log(`${palette.dim}  [gateway]${palette.reset} Restart requested from the Control Room.`);
           setTimeout(() => process.kill(process.pid, 'SIGTERM'), 200).unref();
@@ -3047,11 +3058,17 @@ export class SymbioteGateway {
     process.on('SIGTERM', () => shutdown('SIGTERM'));
     process.on('SIGINT', () => shutdown('SIGINT'));
     process.on('uncaughtExceptionMonitor', (error, origin) => {
-      this.recordGatewayIssue('process', `Uncaught ${origin}: ${error.message}`);
+      this.recordGatewayIssue('process', `Uncaught ${origin}: ${error.stack ?? error.message}`);
     });
     process.on('unhandledRejection', reason => {
       this.recordGatewayIssue('process', `Unhandled rejection: ${reason instanceof Error ? reason.message : String(reason)}`);
     });
+    for (const [name, stream] of [['stdout', process.stdout], ['stderr', process.stderr]] as const) {
+      stream.on('error', error => {
+        const code = (error as NodeJS.ErrnoException).code ?? 'unknown';
+        this.recordGatewayIssue('process', `Standard ${name} stream error (${code}): ${error.message}`);
+      });
+    }
 
     // Hot-reload config. SIGUSR1 works on Linux/macOS; Windows has no POSIX
     // signals, so fall back to watching the config file for changes instead.
@@ -3134,6 +3151,7 @@ export class SymbioteGateway {
       uptimeHuman: this.formatUptime(Date.now() - this.startTime),
       provider: `${this.providerName}/${this.model}`,
       channels: this.channelRegistry.list(),
+      ...(this.whatsappQr ? { whatsappQr: this.whatsappQr } : {}),
       activeTurns: this.activeTurns.size,
       sessions: this.sessionManager.list().length,
       tools: this.toolRegistry.list().length,

@@ -71,6 +71,7 @@ export interface WebControlPlane {
   getStatus: () => Record<string, unknown>;
   getTelemetry?: () => Record<string, unknown>;
   recordGatewayIssue?: (subsystem: string, message: string) => void;
+  archiveHealthIncidents?: () => number;
   restartGateway?: () => void;
   updateProviderModel?: (provider: string, model: string) => { provider: string; model: string };
   cloneProjectRepository?: (repositoryUrl: string) => Promise<unknown>;
@@ -628,6 +629,15 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       if (!control.getTelemetry) return json(res, { error: 'Live telemetry is unavailable in this runtime.' }, 501);
       res.setHeader('Cache-Control', 'no-store');
       return json(res, control.getTelemetry());
+    }
+    if (method === 'POST' && pathname === '/api/health/incidents/archive') {
+      if (!isSameOriginRequest(req)) return json(res, { error: 'Health incidents can only be archived from the Symbiote Control Room.' }, 403);
+      if (!control.archiveHealthIncidents) return json(res, { error: 'Health incident archiving is unavailable in this runtime.' }, 501);
+      try {
+        return json(res, { archived: control.archiveHealthIncidents() });
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Health incidents could not be archived.' }, 500);
+      }
     }
     if (method === 'POST' && pathname === '/api/gateway/restart') {
       if (!isSameOriginRequest(req)) return json(res, { error: 'Gateway restarts must be requested from the Symbiote Control Room.' }, 403);
