@@ -8,6 +8,7 @@ import { CredentialVault } from '../security/credential-vault.js';
 import {
   createCloudIntegrationTool,
   createCloudIntegrationTools,
+  getN8nConnectionInfo,
   integrationCredentialStatus,
   testCloudIntegration,
   validateIntegrationCredentials,
@@ -142,6 +143,15 @@ test('n8n uses the local .env API key and default endpoint before any saved over
 
   try {
     assert.equal(integrationCredentialStatus(vault).n8n, true);
+    const localInfo = getN8nConnectionInfo(vault);
+    assert.deepEqual(localInfo, {
+      configured: true,
+      source: 'local-env',
+      apiBaseUrl: 'http://127.0.0.1:5678/api/v1',
+      editorUrl: 'http://127.0.0.1:5678',
+      isLocal: true,
+    });
+    assert.equal(JSON.stringify(localInfo).includes('local-n8n-test-key'), false);
     await testCloudIntegration('n8n', vault, fetcher);
     assert.equal(requestUrl, 'http://127.0.0.1:5678/api/v1/workflows?limit=1');
     assert.equal(authorization, 'local-n8n-test-key');
@@ -150,6 +160,13 @@ test('n8n uses the local .env API key and default endpoint before any saved over
       baseUrl: 'https://automation.example.test/api/v1',
       apiKey: 'saved-remote-key',
     });
+    const overrideInfo = getN8nConnectionInfo(vault);
+    assert.equal(overrideInfo.configured, true);
+    assert.equal(overrideInfo.source, 'saved-override');
+    assert.equal(overrideInfo.apiBaseUrl, 'https://automation.example.test/api/v1');
+    assert.equal(overrideInfo.editorUrl, 'https://automation.example.test');
+    assert.equal(overrideInfo.isLocal, false);
+    assert.equal(JSON.stringify(overrideInfo).includes('saved-remote-key'), false);
     await testCloudIntegration('n8n', vault, fetcher);
     assert.equal(requestUrl, 'https://automation.example.test/api/v1/workflows?limit=1');
     assert.equal(authorization, 'saved-remote-key');
@@ -159,6 +176,50 @@ test('n8n uses the local .env API key and default endpoint before any saved over
     if (previousBaseUrl === undefined) delete process.env.N8N_BASE_URL;
     else process.env.N8N_BASE_URL = previousBaseUrl;
   }
+}));
+
+test('n8n workflow tool bounds workflow operations and validates identifiers and payloads', async () => withVault(async vault => {
+  vault.set('n8n', { baseUrl: 'http://127.0.0.1:5678/api/v1', apiKey: 'workflow-api-key' });
+  const calls: Array<{ url: string; method: string; body?: string }> = [];
+  const fetcher: typeof fetch = async (input, init) => {
+    calls.push({
+      url: input.toString(),
+      method: init?.method ?? 'GET',
+      body: typeof init?.body === 'string' ? init.body : undefined,
+    });
+    return response({ data: [{ id: 'workflow-1', name: 'daily-sync' }] });
+  };
+  const tool = createCloudIntegrationTools(vault, fetcher).find(candidate => candidate.name === 'n8n_workflow');
+  assert.ok(tool);
+  assert.equal(tool.idempotency?.class, 'external');
+
+  const listed = JSON.parse(await tool.execute({ action: 'list_workflows', limit: 10 })) as {
+    data: Array<{ name: string }>;
+  };
+  assert.equal(listed.data[0].name, 'daily-sync');
+  assert.equal(calls[0].url, 'http://127.0.0.1:5678/api/v1/workflows?limit=10');
+
+  const workflow = {
+    name: 'daily-sync',
+    nodes: [{ name: 'Schedule', type: 'n8n-nodes-base.scheduleTrigger', parameters: { token: 'node-secret' } }],
+    connections: {},
+  };
+  const key = tool.idempotency?.idempotencyKey?.({ action: 'create_workflow', workflow }) ?? '';
+  assert.match(key, /^n8n_workflow:[a-f0-9]{64}$/);
+  assert.equal(key.includes('node-secret'), false);
+  await tool.execute({ action: 'create_workflow', workflow });
+  assert.equal(calls[1].url, 'http://127.0.0.1:5678/api/v1/workflows');
+  assert.equal(calls[1].method, 'POST');
+  assert.deepEqual(JSON.parse(calls[1].body ?? '{}'), workflow);
+
+  const invalidId = JSON.parse(await tool.execute({ action: 'get_workflow', workflowId: '../other' })) as { error: string };
+  assert.match(invalidId.error, /valid n8n identifier/);
+  const invalidPayload = JSON.parse(await tool.execute({
+    action: 'create_workflow',
+    workflow: { name: 'invalid', nodes: [] },
+  })) as { error: string };
+  assert.match(invalidPayload.error, /workflow.connections/);
+  assert.equal(calls.length, 2);
 }));
 
 test('OCI uses RSA request signing and Kaggle uses fixed-host Basic authentication', async () => withVault(async vault => {

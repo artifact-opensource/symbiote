@@ -8,6 +8,30 @@ type JsonObject = Record<string, unknown>;
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 const DEFAULT_N8N_BASE_URL = 'http://127.0.0.1:5678/api/v1';
+const N8N_WORKFLOW_ACTIONS = [
+  'list_workflows',
+  'get_workflow',
+  'create_workflow',
+  'update_workflow',
+  'publish_workflow',
+  'unpublish_workflow',
+  'archive_workflow',
+  'unarchive_workflow',
+  'list_executions',
+  'get_execution',
+  'stop_execution',
+  'retry_execution',
+] as const;
+type N8nWorkflowAction = (typeof N8N_WORKFLOW_ACTIONS)[number];
+
+export interface N8nConnectionInfo {
+  configured: boolean;
+  source: 'local-env' | 'saved-override' | 'none';
+  apiBaseUrl: string;
+  editorUrl: string;
+  isLocal: boolean;
+}
+
 const OCI_SERVICES = {
   compute: 'iaas',
   networking: 'iaas',
@@ -31,7 +55,7 @@ type OciService = string;
 const TOOL_DOCS: Record<IntegrationProvider, string> = {
   azure: 'Use Azure Resource Manager REST APIs for the configured subscription. Supports Azure GPU VM and Azure ML compute provisioning and management. POST, PUT, PATCH, and DELETE actions apply immediately and can incur charges.',
   oci: 'Use signed REST requests across regional OCI service endpoints, including Compute, networking, Object Storage, and Resource Manager. Supports GPU instance and cluster provisioning and management. POST, PUT, PATCH, and DELETE actions apply immediately and can incur charges.',
-  n8n: 'Use the local n8n API by default for full management of the instance, including workflows, credentials, and executions. A saved API key and endpoint in Integrations explicitly override the local connection. Actions are applied immediately.',
+  n8n: 'Use n8n_workflow for normal workflow lifecycle and execution history operations. n8n owns its workflow schedules: build a Schedule Trigger into the workflow and publish it to activate the schedule. Use the selected n8n instance timezone (the local workspace instance is Asia/Karachi). The public API does not provide a general endpoint to manually execute an arbitrary workflow; use a configured Webhook Trigger or the n8n editor for manual tests. Use n8n_cloud only for advanced API resources. A saved API key and endpoint in Integrations explicitly override the local connection.',
   kaggle: 'Use Kaggle APIs to discover datasets and kernels and manage notebook jobs where the Kaggle API supports it. Kaggle GPU usage is quota-limited by Kaggle and is not an Azure/OCI GPU cluster.',
 };
 
@@ -282,6 +306,21 @@ function getN8nCredentials(vault: CredentialVault): IntegrationCredentials | nul
   const configured = vault.get('n8n');
   if (configured) return configured;
   return localN8nCredentials();
+}
+
+export function getN8nConnectionInfo(vault: CredentialVault): N8nConnectionInfo {
+  const saved = vault.get('n8n');
+  const credentials = saved ?? localN8nCredentials();
+  const apiUrl = credentials ? n8nBaseUrl(credentials) : new URL(DEFAULT_N8N_BASE_URL);
+  const hostname = apiUrl.hostname.toLowerCase();
+  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+  return {
+    configured: Boolean(credentials),
+    source: saved ? 'saved-override' : credentials ? 'local-env' : 'none',
+    apiBaseUrl: apiUrl.toString().replace(/\/+$/, ''),
+    editorUrl: apiUrl.origin,
+    isLocal,
+  };
 }
 
 async function callN8n(
@@ -565,8 +604,203 @@ export function createCloudIntegrationTool(
   };
 }
 
+function n8nWorkflowId(value: unknown, field: string): string {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) {
+    throw new Error(`${field} must be a valid n8n identifier.`);
+  }
+  return value;
+}
+
+function n8nExecutionId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[1-9]\d{0,15}$/.test(value)) {
+    throw new Error('executionId must be a positive integer.');
+  }
+  return value;
+}
+
+function n8nWorkflowPayload(value: unknown): JsonObject {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('workflow must be a JSON object.');
+  }
+  const workflow = asObject(value);
+  if (typeof workflow.name !== 'string' || !workflow.name.trim()) {
+    throw new Error('workflow.name must be a non-empty string.');
+  }
+  if (!Array.isArray(workflow.nodes)) {
+    throw new Error('workflow.nodes must be an array.');
+  }
+  if (!workflow.connections || typeof workflow.connections !== 'object' || Array.isArray(workflow.connections)) {
+    throw new Error('workflow.connections must be an object.');
+  }
+  return workflow;
+}
+
+function n8nQuery(value: unknown): JsonObject {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('query must be a JSON object.');
+  }
+  return asObject(value);
+}
+
+function n8nLimit(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > 100) {
+    throw new Error('limit must be an integer between 1 and 100.');
+  }
+  return value;
+}
+
+function n8nWorkflowRequest(input: Record<string, unknown>): {
+  method: HttpMethod;
+  path: string;
+  query?: unknown;
+  body?: unknown;
+} {
+  const actionValue = input.action;
+  if (typeof actionValue !== 'string' || !N8N_WORKFLOW_ACTIONS.includes(actionValue as N8nWorkflowAction)) {
+    throw new Error(`action must be one of: ${N8N_WORKFLOW_ACTIONS.join(', ')}.`);
+  }
+  const action = actionValue as N8nWorkflowAction;
+  const workflowId = () => n8nWorkflowId(input.workflowId, 'workflowId');
+  const executionId = () => n8nExecutionId(input.executionId);
+
+  switch (action) {
+    case 'list_workflows': {
+      const query = n8nQuery(input.query);
+      query.limit = n8nLimit(input.limit ?? query.limit ?? 20);
+      return { method: 'GET', path: '/workflows', query };
+    }
+    case 'get_workflow':
+      return {
+        method: 'GET',
+        path: `/workflows/${workflowId()}`,
+        query: input.excludePinnedData === undefined ? undefined : { excludePinnedData: input.excludePinnedData },
+      };
+    case 'create_workflow':
+      return { method: 'POST', path: '/workflows', body: n8nWorkflowPayload(input.workflow) };
+    case 'update_workflow':
+      return { method: 'PUT', path: `/workflows/${workflowId()}`, body: n8nWorkflowPayload(input.workflow) };
+    case 'publish_workflow': {
+      const options = input.publishOptions === undefined ? undefined : n8nQuery(input.publishOptions);
+      return { method: 'POST', path: `/workflows/${workflowId()}/publish`, body: options };
+    }
+    case 'unpublish_workflow':
+      return { method: 'POST', path: `/workflows/${workflowId()}/unpublish` };
+    case 'archive_workflow':
+      return { method: 'POST', path: `/workflows/${workflowId()}/archive` };
+    case 'unarchive_workflow':
+      return { method: 'POST', path: `/workflows/${workflowId()}/unarchive` };
+    case 'list_executions': {
+      const query = n8nQuery(input.query);
+      query.limit = n8nLimit(input.limit ?? query.limit ?? 20);
+      const includeData = input.includeData ?? query.includeData ?? false;
+      if (typeof includeData !== 'boolean') throw new Error('includeData must be a boolean.');
+      query.includeData = includeData;
+      return { method: 'GET', path: '/executions', query };
+    }
+    case 'get_execution': {
+      const includeData = input.includeData ?? false;
+      if (typeof includeData !== 'boolean') throw new Error('includeData must be a boolean.');
+      return {
+        method: 'GET',
+        path: `/executions/${executionId()}`,
+        query: { includeData },
+      };
+    }
+    case 'stop_execution':
+      return { method: 'POST', path: `/executions/${executionId()}/stop` };
+    case 'retry_execution':
+      return { method: 'POST', path: `/executions/${executionId()}/retry` };
+  }
+}
+
+function createN8nWorkflowTool(vault: CredentialVault, fetcher: FetchLike): ToolDefinition {
+  return {
+    name: 'n8n_workflow',
+    description: [
+      'Manage n8n workflows with the supported public REST API. Prefer this tool over n8n_cloud for workflow lifecycle and execution history.',
+      'Actions: list_workflows, get_workflow, create_workflow, update_workflow, publish_workflow, unpublish_workflow, archive_workflow, unarchive_workflow, list_executions, get_execution, stop_execution, retry_execution.',
+      'Create/update require a complete workflow object with name, nodes, and connections; create leaves it unpublished. A Schedule Trigger runs only after its workflow is published, using that n8n instance timezone (the local workspace instance is Asia/Karachi). Verify the workflow and intended external effects before publishing.',
+      'The public API has no general endpoint to manually run an arbitrary workflow. Use a Webhook Trigger or the n8n editor for manual execution. Retrying an execution can repeat external side effects; inspect it first. Archive instead of permanent deletion. Use n8n_cloud for advanced API endpoints.',
+    ].join(' '),
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: [...N8N_WORKFLOW_ACTIONS], description: 'Workflow or execution operation to perform.' },
+        workflowId: { type: 'string', description: 'Required for get, update, publish, unpublish, archive, and unarchive operations.' },
+        executionId: { type: 'string', description: 'Required for get, stop, and retry execution operations.' },
+        workflow: {
+          type: 'object',
+          description: 'Complete n8n workflow payload for create/update: name, nodes, connections, and optional settings, tags, or other supported fields.',
+          properties: {
+            name: { type: 'string' },
+            nodes: { type: 'array', items: { type: 'object' } },
+            connections: { type: 'object' },
+            settings: { type: 'object' },
+          },
+          required: ['name', 'nodes', 'connections'],
+          additionalProperties: true,
+        },
+        publishOptions: {
+          type: 'object',
+          description: 'Optional versionId, name, or description for the published workflow version.',
+          properties: {
+            versionId: { type: 'string' },
+            name: { type: 'string' },
+            description: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+        query: {
+          type: 'object',
+          description: 'Optional n8n query filters. Workflows support active, name, tags, cursor, and offset. Executions support workflowId, status, finished, and cursor.',
+          properties: {
+            active: { type: 'boolean' },
+            name: { type: 'string' },
+            tags: { type: 'string' },
+            cursor: { type: 'string' },
+            offset: { type: 'number' },
+            workflowId: { type: 'string' },
+            status: { type: 'string', enum: ['error', 'success', 'waiting', 'running', 'canceled'] },
+            finished: { type: 'boolean' },
+            includeData: { type: 'boolean' },
+          },
+          additionalProperties: false,
+        },
+        limit: { type: 'number', description: 'List page size (1–100; defaults to 20).' },
+        includeData: { type: 'boolean', description: 'Include execution payload data; defaults to false to avoid large or sensitive results.' },
+        excludePinnedData: { type: 'boolean', description: 'Exclude pinned data when reading a workflow.' },
+      },
+      required: ['action'],
+    },
+    idempotency: {
+      class: 'external',
+      externalSystem: 'n8n workflow API',
+      idempotencyKey: input => {
+        const payload = JSON.stringify(input);
+        if (payload === undefined) throw new Error('n8n workflow input cannot be serialized.');
+        return `n8n_workflow:${crypto.createHash('sha256').update(payload).digest('hex')}`;
+      },
+    },
+    async execute(input) {
+      let credentials: IntegrationCredentials | null = null;
+      try {
+        credentials = getN8nCredentials(vault);
+        if (!credentials) {
+          return JSON.stringify({ error: 'n8n is not configured. Set N8N_API_KEY in Symbiote .env or configure an endpoint and API key in Integrations.' });
+        }
+        const request = n8nWorkflowRequest(input);
+        return JSON.stringify(await callN8n(credentials, request.method, request.path, request.query, request.body, fetcher));
+      } catch (failure) {
+        return JSON.stringify({ error: safeFailureMessage(failure, credentials ?? {}) });
+      }
+    },
+  };
+}
+
 export function createCloudIntegrationTools(vault: CredentialVault, fetcher: FetchLike = fetch): ToolDefinition[] {
   const tools = (['azure', 'oci', 'n8n', 'kaggle'] as const).map(provider => createCloudIntegrationTool(provider, vault, fetcher));
+  tools.push(createN8nWorkflowTool(vault, fetcher));
   tools.push({
     name: 'kaggle_kernel_push',
     description: 'Upload and run a Python notebook on Kaggle; GPU/accelerator use is optional. This submits code remotely and consumes Kaggle quota; use isPrivate=true by default and verify GPU and dataset limits before running.',

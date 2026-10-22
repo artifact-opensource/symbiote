@@ -68,6 +68,7 @@ import { webFetchTool } from '../tools/builtin/web-fetch.js';
 import { googleWorkspaceTool } from '../tools/builtin/google-workspace.js';
 import {
   createCloudIntegrationTools,
+  getN8nConnectionInfo,
   integrationCredentialStatus,
   testCloudIntegration,
   validateIntegrationCredentials,
@@ -1557,6 +1558,7 @@ export class SymbioteGateway {
           parameters,
         })),
         getIntegrationStatus: () => integrationCredentialStatus(this.credentialVault),
+        getN8nConnectionInfo: () => getN8nConnectionInfo(this.credentialVault),
         saveIntegrationCredentials: (provider: IntegrationProvider, credentials: unknown) => {
           const merged = validateIntegrationCredentials(provider, credentials, this.credentialVault.get(provider));
           this.credentialVault.set(provider, merged);

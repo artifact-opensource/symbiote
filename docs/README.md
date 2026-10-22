@@ -22,6 +22,7 @@
 - [Built-in Tools](tools/built-in.md)
 - [Provider Overview](providers/overview.md)
 - [Cloud Integrations](cloud-integrations.md)
+- [Self-hosting n8n for Symbiote](n8n-self-hosting.md)
 - [Google Workspace](google-workspace.md)
 - [Production Deployment and Installers](advanced/production.md)
 - [CLI Reference](reference/cli.md)

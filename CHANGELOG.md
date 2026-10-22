@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased (2026-10-22)
+
+### Added
+- **n8n operations:** added the admin-only `n8n_workflow` tool for workflow lifecycle and execution history, with bounded paging, input validation, safe defaults for execution data, and explicit publish/retry operations.
+- **Integrations UI:** added n8n connection-source details, read-only testing, encrypted endpoint overrides with local `.env` fallback, and an on-demand local editor embed with a new-tab fallback.
+
+### Changed
+- Updated n8n setup and operations guidance to clarify that Schedule Trigger workflows must be published, arbitrary manual execution is not available through the public REST API, and execution retries can repeat external side effects.
+- n8n connection metadata is exposed without returning credentials; n8n workflow tools remain hidden from and denied to non-admin sessions.
+- A clean production build refreshes `dist` and `webapp/dist`; rebuild the Windows MSI to package updated application assets and the root release changelog.
+
 ## v5.5.0 (2026-10-17) — Apex
 
 Full release notes: [RELEASE_NOTES_v5.5.0.md](RELEASE_NOTES_v5.5.0.md)

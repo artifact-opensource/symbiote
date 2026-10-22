@@ -81,6 +81,7 @@ test('n8n management is hidden and denied outside admin sessions', async () => {
   const inner = {
     list: () => [
       { name: 'n8n_cloud', description: 'n8n API', parameters: {} },
+      { name: 'n8n_workflow', description: 'n8n workflow API', parameters: {} },
       { name: 'n8n_mcp_list_workflows', description: 'n8n MCP', parameters: {} },
     ],
     toProviderFormat: () => [],
@@ -101,6 +102,7 @@ test('n8n management is hidden and denied outside admin sessions', async () => {
   try {
     const restricted = createSandboxedRegistry(inner, context);
     assert.equal(restricted.list().some(tool => tool.name === 'n8n_cloud'), false);
+    assert.equal(restricted.list().some(tool => tool.name === 'n8n_workflow'), false);
     assert.equal(restricted.list().some(tool => tool.name === 'n8n_mcp_list_workflows'), false);
     const denied = JSON.parse(await restricted.execute('n8n_cloud', { method: 'GET', path: '/workflows' })) as {
       error: string;
@@ -108,6 +110,13 @@ test('n8n management is hidden and denied outside admin sessions', async () => {
     };
     assert.equal(denied.sandbox, true);
     assert.match(denied.error, /admin sessions/);
+    assert.equal(executions, 0);
+    const workflowDenied = JSON.parse(await restricted.execute('n8n_workflow', { action: 'list_workflows' })) as {
+      error: string;
+      sandbox: boolean;
+    };
+    assert.equal(workflowDenied.sandbox, true);
+    assert.match(workflowDenied.error, /admin sessions/);
     assert.equal(executions, 0);
     const mcpDenied = JSON.parse(await restricted.execute('n8n_mcp_list_workflows', {})) as {
       error: string;
@@ -119,10 +128,12 @@ test('n8n management is hidden and denied outside admin sessions', async () => {
 
     const admin = createSandboxedRegistry(inner, { ...context, isOwner: true, senderId: 'owner' });
     assert.equal(admin.list().some(tool => tool.name === 'n8n_cloud'), true);
+    assert.equal(admin.list().some(tool => tool.name === 'n8n_workflow'), true);
     assert.equal(admin.list().some(tool => tool.name === 'n8n_mcp_list_workflows'), true);
     assert.equal(await admin.execute('n8n_cloud', { method: 'GET', path: '/workflows' }), 'called');
+    assert.equal(await admin.execute('n8n_workflow', { action: 'list_workflows' }), 'called');
     assert.equal(await admin.execute('n8n_mcp_list_workflows', {}), 'called');
-    assert.equal(executions, 2);
+    assert.equal(executions, 3);
   } finally {
     configureSandbox(undefined);
   }

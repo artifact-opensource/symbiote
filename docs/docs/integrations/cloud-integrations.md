@@ -4,7 +4,8 @@ The **Integrations** page stores Azure, Oracle Cloud Infrastructure (OCI), n8n, 
 
 - `azure_cloud` — Azure Resource Manager requests limited to the configured subscription.
 - `oci_cloud` — signed regional OCI requests to Compute, Identity, Object Storage, Resource Manager, and other OCI service endpoints.
-- `n8n_cloud` — uses the local n8n API by default; an endpoint and API key saved in Integrations explicitly override it.
+- `n8n_workflow` — admin-only workflow lifecycle and execution-history operations using the local n8n API by default; an endpoint and API key saved in Integrations explicitly override it.
+- `n8n_cloud` — advanced n8n REST API requests limited to the configured `/api/v1` root.
 - `kaggle_cloud` — Kaggle API requests using the account's API credentials.
 - `kaggle_kernel_push` — uploads and runs a private Python notebook; GPU and internet use are optional notebook settings and remain subject to Kaggle policy and quotas.
 
@@ -36,9 +37,15 @@ Provide the tenancy OCID, user OCID, API key fingerprint, private key PEM, and r
 
 Install n8n on the host and put its REST API key in Symbiote's ignored `.env` as `N8N_API_KEY`. The default API root is `http://127.0.0.1:5678/api/v1`; optionally configure `N8N_BASE_URL`. An endpoint/API key saved in the Integrations UI overrides the local connection and is the explicit path for an optional remote or Cloud instance. HTTPS is required except for loopback; requests are confined to the configured API root and redirects are rejected. The separate n8n MCP endpoint uses `N8N_MCP_URL` and `N8N_MCP_KEY` (or `N8N_MCP_TOKEN`) and registers admin-only tools prefixed `n8n_mcp_`. See [Self-hosting n8n for Symbiote](../../n8n-self-hosting.md).
 
-The API key grants broad n8n instance control. The integration is available only to admin-tier sessions. Keep the editor/API private and publish only authenticated webhook routes through a TLS reverse proxy.
+The API key grants broad n8n instance control. The `n8n_workflow` tool is hidden from and restricted to admin-tier sessions. It supports workflow listing/reading/creation/update, publish/unpublish, archive/unarchive, and execution listing/reading/stopping/retrying. Use `n8n_cloud` for advanced API resources.
 
-Use n8n's Schedule Trigger for recurring workflow schedules. Symbiote's `cron_manage` is for scheduled agent work and follow-ups.
+The Integrations card shows the selected connection source and API root without disclosing the key. A saved override is encrypted in the local credential vault; removing it falls back to the local `.env` key when configured. The local n8n editor can be embedded on demand; remote editor instances open in a new tab. The editor is not loaded on page startup.
+
+Create/update requests require a complete workflow object, and creating a workflow does not publish it. Review nodes, credentials, permissions, and external effects before publishing. n8n's Schedule Trigger runs only when the workflow is published and uses the selected n8n instance timezone. The public REST API has no general endpoint to manually run an arbitrary workflow: use a configured Webhook Trigger or the n8n editor. Inspect an execution before retrying because retries can repeat external side effects. Prefer archiving to permanent deletion.
+
+Use n8n's Schedule Trigger for recurring workflow schedules. Symbiote's `cron_manage` is for scheduled agent work and follow-ups. Keep the editor/API private and publish only authenticated webhook routes through a TLS reverse proxy.
+
+The Symbiote Gateway does not require n8n's REST API to start; an unavailable REST endpoint causes the integration call to fail explicitly without disabling the rest of Symbiote. Published schedules execute within n8n and do not depend on Symbiote staying open. Remote instance-level MCP tools are discovered at Gateway startup; if that endpoint is unavailable, the Gateway logs a warning and those MCP tools require a Gateway restart after recovery.
 
 ### Kaggle
 

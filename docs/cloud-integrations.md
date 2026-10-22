@@ -4,7 +4,8 @@ The **Integrations** page stores Azure, Oracle Cloud Infrastructure (OCI), n8n, 
 
 - `azure_cloud` — Azure Resource Manager requests limited to the configured subscription.
 - `oci_cloud` — signed regional OCI requests to Compute, Identity, Object Storage, Resource Manager, and other OCI service endpoints.
-- `n8n_cloud` — manages the local n8n instance by default; a saved endpoint and API key in Integrations explicitly override it. Requests are limited to the configured `/api/v1` root.
+- `n8n_workflow` — admin-only workflow lifecycle and execution-history operations using the local n8n API by default; a saved endpoint and API key in Integrations explicitly override it.
+- `n8n_cloud` — advanced n8n REST API requests limited to the configured `/api/v1` root.
 - `kaggle_cloud` — Kaggle API requests using the account's API credentials.
 - `kaggle_kernel_push` — uploads and runs a private Python notebook; GPU and internet use are optional notebook settings and remain subject to Kaggle policy and quotas.
 
@@ -38,13 +39,19 @@ Install n8n directly on the host (see [Self-hosting n8n for Symbiote](n8n-self-h
 
 The n8n MCP endpoint is separate from the REST API and uses an instance-level MCP key. Set `N8N_MCP_URL` and `N8N_MCP_KEY` (or `N8N_MCP_TOKEN`); `INSTANCE_URL` is accepted as a legacy URL alias. Discovered tools use the `n8n_mcp_` prefix and are limited to admin sessions.
 
-The local environment connection is the default. If an endpoint and API key are saved in **Integrations**, that explicit connection takes precedence and can point to an HTTPS remote/self-hosted or Cloud instance. Thus a Cloud instance is not selected automatically: it must be explicitly configured with its API key. Treat the key like an administrator credential. The `n8n_cloud` tool can manage workflows, credentials, and executions as permitted by the key; workflows can run code and use connected accounts to affect external systems. It is available only to admin sessions. Review generated workflows and their permissions before activating them.
+The local environment connection is the default. If an endpoint and API key are saved in **Integrations**, that explicit connection takes precedence and can point to an HTTPS remote/self-hosted or Cloud instance. Thus a Cloud instance is not selected automatically: it must be explicitly configured with its API key. Treat the key like an administrator credential. The `n8n_workflow` tool handles listing, reading, creating, updating, publishing/unpublishing, archiving/unarchiving workflows, and listing, reading, stopping, or retrying executions. It is hidden from and restricted to admin-tier sessions. The lower-level `n8n_cloud` tool remains available for advanced API resources.
+
+The Integrations card shows the selected connection source and API root without disclosing the key. A saved override is encrypted in the local credential vault; removing it falls back to the local `.env` key when configured. The local n8n editor can be embedded on demand; remote editor instances open in a new tab. The editor is not loaded on page startup.
+
+Create/update requests require a complete workflow object, and creating a workflow does not publish it. Review nodes, credentials, permissions, and external effects before publishing. n8n's Schedule Trigger runs only when the workflow is published and uses the selected n8n instance timezone. The public REST API has no general endpoint to manually run an arbitrary workflow: use a configured Webhook Trigger or the n8n editor. Inspect an execution before retrying because retries can repeat external side effects. Prefer archiving to permanent deletion.
 
 For native production deployments, keep n8n and its database persistent, set and back up a stable `N8N_ENCRYPTION_KEY`, pin a tested n8n version, and restrict the editor/API to trusted access. Keep the editor/API private; publish only webhook endpoints that need external callers, through a TLS reverse proxy with workflow-level authentication. Do not expose port 5678 directly to the public internet.
 
 See [Self-hosting n8n for Symbiote](n8n-self-hosting.md) for native Linux and Windows service deployment guidance and the distinction between n8n workflow schedules and Symbiote cron jobs.
 
 n8n's native Schedule Trigger should own recurring workflow schedules. Symbiote's `cron_manage` remains for scheduled agent prompts and follow-ups; avoid creating duplicate recurring schedules in both systems. Self-hosting removes n8n Cloud hosting charges, not costs or quotas from external APIs and connected services. Community Edition is free with most core features, but some capabilities remain paid; check n8n's current [plan and edition comparison](https://docs.n8n.io/choose-how-to-use-n8n/). The Sustainable Use License allows internal business or personal use, not offering n8n as a paid hosted/white-label service; see the upstream [license](https://github.com/n8n-io/n8n/blob/master/LICENSE.md).
+
+The Symbiote Gateway does not require n8n's REST API to start; an unavailable REST endpoint causes the integration call to fail explicitly without disabling the rest of Symbiote. Published schedules execute within n8n and do not depend on Symbiote staying open. Remote instance-level MCP tools are discovered at Gateway startup; if that endpoint is unavailable, the Gateway logs a warning and those MCP tools require a Gateway restart after recovery.
 
 ### Kaggle
 

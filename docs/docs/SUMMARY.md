@@ -66,6 +66,7 @@
 
 * [Cloud and Automation Integrations](integrations/cloud-integrations.md)
 * [Google Workspace](integrations/google-workspace.md)
+* [Self-hosting n8n for Symbiote](../n8n-self-hosting.md)
 
 ## Reference
 

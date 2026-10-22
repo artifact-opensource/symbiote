@@ -12,6 +12,7 @@ import { palette, ok } from '../cli/brand.js';
 import { loadConfig } from '../config/config.js';
 import { APP_VERSION } from '../meta/version.js';
 import type { IntegrationProvider } from '../security/credential-vault.js';
+import type { N8nConnectionInfo } from '../tools/builtin/cloud-integrations.js';
 import { stripBlinkControlMessages } from '../agent/blink.js';
 import type { CronAlert, CronJob, CreateCronJobInput, UpdateCronJobInput } from '../cron/manager.js';
 import type { AgentThread, CreateThreadInput, ThreadContact } from '../threads/manager.js';
@@ -115,6 +116,7 @@ export interface WebControlPlane {
   archiveSession: (id: string) => boolean;
   getTools: () => unknown[];
   getIntegrationStatus: () => Record<IntegrationProvider, boolean>;
+  getN8nConnectionInfo?: () => N8nConnectionInfo;
   saveIntegrationCredentials: (provider: IntegrationProvider, credentials: unknown) => void;
   deleteIntegrationCredentials: (provider: IntegrationProvider) => void;
   testIntegration: (provider: IntegrationProvider) => Promise<void>;
@@ -963,6 +965,10 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         return json(res, { configured: false });
       }
       if (method === 'GET') {
+        if (provider === 'n8n' && control.getN8nConnectionInfo) {
+          res.setHeader('Cache-Control', 'no-store');
+          return json(res, control.getN8nConnectionInfo());
+        }
         return json(res, { configured: control.getIntegrationStatus()[provider] });
       }
     }

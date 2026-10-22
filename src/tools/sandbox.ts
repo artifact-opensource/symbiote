@@ -280,7 +280,7 @@ const noCrossChannelToOwner: SandboxRule = {
 const n8nAdminOnly: SandboxRule = {
   name: 'admin-only-n8n-management',
   tools: '*',
-  check: (tool, _input, ctx) => (tool === 'n8n_cloud' || tool.startsWith('n8n_mcp_'))
+  check: (tool, _input, ctx) => (tool === 'n8n_cloud' || tool === 'n8n_workflow' || tool.startsWith('n8n_mcp_'))
     && classifySession(ctx) !== 'admin'
     ? 'Full n8n API access is only available in admin sessions'
     : null,
@@ -352,7 +352,7 @@ export class SandboxedToolRegistry {
     if (this.tier !== 'admin') {
       const visibleToNonAdmin = all.filter(t =>
         t.name !== 'computer_use' && t.name !== 'workspace_manage'
-        && t.name !== 'n8n_cloud' && !t.name.startsWith('n8n_mcp_'),
+        && t.name !== 'n8n_cloud' && t.name !== 'n8n_workflow' && !t.name.startsWith('n8n_mcp_'),
       );
       if (this.tier !== 'restricted') return visibleToNonAdmin;
       // Restricted sessions don't even see dangerous tools
