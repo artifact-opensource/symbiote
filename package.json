@@ -1,6 +1,6 @@
 {
   "name": "@symbiote-agi/symbiote",
-  "version": "5.5.0",
+  "version": "5.6.0",
   "description": "Super-Agent, at scale",
   "type": "module",
   "main": "dist/index.js",

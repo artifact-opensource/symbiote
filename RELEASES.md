@@ -1,6 +1,9 @@
 # Symbiote Releases
 
-## Latest: v5.5.0 Apex (October 17, 2026)
+## Latest: v5.6.0 Apex (October 23, 2026)
+HttpMcpBridge integration for remote n8n connections, WhatsApp QR support in GatewayStatus, enhanced health telemetry with provider call tracking, stabilized Electron gateway lifecycle, UI/UX refinements, and idempotency metadata for all tool definitions. Details: [Release Notes](RELEASE_NOTES_v5.6.0.md).
+
+## v5.5.0 Apex (October 17, 2026)
 Project-scoped agent operations and project memory, a redesigned workspace hierarchy, system GPU/per-core CPU telemetry, consistent slider-controlled appearance, weighted memory similarity, and hardened Discord streaming and Windows telemetry. Details: [Release Notes](RELEASE_NOTES_v5.5.0.md).
 
 ## All Releases

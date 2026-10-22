@@ -52,6 +52,8 @@ export default function ProjectIDE({ projects, profiles, onArchiveProject, onRun
   const [selectedEntryPath, setSelectedEntryPath] = useState('');
   const [collapsedDirectories, setCollapsedDirectories] = useState<string[]>([]);
   const [idePanel, setIdePanel] = useState<'files' | 'plan'>('files');
+  const [fileViewMode, setFileViewMode] = useState<'tree' | 'list'>('tree');
+  const [livePreviewPath, setLivePreviewPath] = useState<string | null>(null);
   const [projectTasks, setProjectTasks] = useState<ProjectPlanTask[]>([]);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [content, setContent] = useState('');

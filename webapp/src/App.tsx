@@ -1101,6 +1101,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [recentThreadsOpen, setRecentThreadsOpen] = useState(false);
+const [addAppOpen, setAddAppOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const statusRequest = useRef<Promise<void> | null>(null);
@@ -2349,6 +2350,18 @@ export default function App() {
                   </button>
                 );
               })}
+              {group === 'Tools' && (
+                <button
+                  key="add-app"
+                  className="nav-item"
+                  onClick={() => { setAddAppOpen(true); }}
+                  aria-label="Add new app"
+                  title="Add new app"
+                >
+                  <Plus size={17} strokeWidth={1.8} />
+                  <span>Add app</span>
+                </button>
+              )}
             </div>
           ))}
         </nav>
@@ -4484,10 +4497,26 @@ function BrowserView() {
   }, [bookmarks]);
 
   useEffect(() => {
-    void capture().catch(failure => setError(failure instanceof Error ? failure.message : 'Browser is not available.'));
+    let retries = 0;
+    const MAX_RETRIES = 3;
+    const captureWithRetry = async () => {
+      try {
+        await capture();
+        retries = 0;
+      } catch (failure) {
+        retries++;
+        if (retries <= MAX_RETRIES) {
+          // Retry with exponential backoff
+          setTimeout(() => void captureWithRetry(), Math.min(1000 * Math.pow(2, retries), 10000));
+        } else {
+          setError(failure instanceof Error ? failure.message : 'Browser is not available.');
+        }
+      }
+    };
+    void captureWithRetry();
     const timer = window.setInterval(() => {
       if (!loadingRef.current) void capture().catch(failure => setError(failure instanceof Error ? failure.message : 'Could not refresh browser.'));
-    }, 5000);
+    }, 3000);
     return () => window.clearInterval(timer);
   }, [capture]);
 

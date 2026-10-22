@@ -1,5 +1,33 @@
 # Changelog
 
+## v5.6.0 (2026-10-23) — Apex
+
+Full release notes: [RELEASE_NOTES_v5.6.0.md](RELEASE_NOTES_v5.6.0.md)
+
+### Added
+- **HttpMcpBridge integration:** added support for remote n8n connections through the HttpMcpBridge, enhancing MCP server handling for external workflow orchestration.
+- **WhatsApp QR support:** added WhatsApp QR code display to the GatewayStatus channel tiles for streamlined WhatsApp channel setup.
+- **Enhanced health telemetry:** improved gateway issue tracking and added provider call tracking with gateway lifecycle events for better observability.
+- **Activity states:** updated activity states and enhanced UI components for improved runtime visibility.
+- **Idempotency metadata:** added idempotency metadata to all 62 tool definitions across 51 tool files, improving tool execution reliability and preventing duplicate operations.
+
+### Changed
+- **HeroAgentOrb:** enhanced responsiveness and fixed dimension/style consistency issues.
+- **Workspace hero graph:** fixed overflow issues and improved graph interaction styling.
+- **Uptime stopwatch and channel tiles:** updated styles for improved visual consistency.
+- **General UI components:** updated styles and components across the application for improved UX.
+- **Electron gateway lifecycle:** stabilized the desktop-to-Gateway lifecycle handling for more reliable communication.
+
+### Fixed
+- **OpenRouter key propagation:** fixed stale OpenRouter key propagation to ensure credentials are correctly refreshed.
+- **Workspace hero graph overflow:** fixed overflow issues in the workspace hero graph visualization.
+- **Surfacaced errors:** fixed surfaced errors and added Windows app icon.
+- **HeroAgentOrb dimensions:** fixed HeroAgentOrb dimensions and styles for consistency.
+
+### Upgrade notes
+- No configuration migration is required.
+- Run `npm ci` followed by `npm run build` when upgrading from a source checkout.
+
 ## Unreleased (2026-10-22)
 
 ### Added

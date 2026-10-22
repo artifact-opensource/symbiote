@@ -1,1 +1,1 @@
-constexpr char VERSION[] = "v5.5.0";
+constexpr char VERSION[] = "v5.6.0";
