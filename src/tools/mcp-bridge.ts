@@ -43,11 +43,60 @@ interface JsonRpcResponse {
 interface McpToolSchema {
   name: string;
   description?: string;
-  inputSchema?: {
-    type: string;
-    properties?: Record<string, { type?: string; description?: string; enum?: string[]; default?: unknown }>;
-    required?: string[];
+  inputSchema?: McpJsonSchema;
+}
+
+interface McpJsonSchema {
+  type?: string;
+  description?: string;
+  enum?: string[];
+  default?: unknown;
+  required?: string[];
+  properties?: Record<string, McpJsonSchema>;
+  items?: McpJsonSchema;
+  additionalProperties?: boolean | McpJsonSchema;
+}
+
+function toToolParameter(schema: McpJsonSchema): ToolParameter {
+  return {
+    type: schema.type ?? 'string',
+    ...(schema.description ? { description: schema.description } : {}),
+    ...(schema.enum ? { enum: schema.enum } : {}),
+    ...(schema.required ? { required: schema.required } : {}),
+    ...(schema.properties ? {
+      properties: Object.fromEntries(
+        Object.entries(schema.properties).map(([key, value]) => [key, toToolParameter(value)]),
+      ),
+    } : {}),
+    ...(schema.items ? { items: toToolParameter(schema.items) } : {}),
+    ...(schema.additionalProperties !== undefined ? {
+      additionalProperties: typeof schema.additionalProperties === 'boolean'
+        ? schema.additionalProperties
+        : toToolParameter(schema.additionalProperties),
+    } : {}),
   };
+}
+
+function parseMcpResponse(text: string, requestId: number): JsonRpcResponse | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  const events = trimmed.split(/\r?\n\r?\n/);
+  const candidates = events.flatMap(event => {
+    const dataLines = event.split(/\r?\n/).filter(line => line.startsWith('data:'));
+    return dataLines.length > 0
+      ? [dataLines.map(line => line.slice(5).trimStart()).join('\n')]
+      : [];
+  });
+  if (candidates.length === 0) candidates.push(trimmed);
+  for (const candidate of candidates) {
+    try {
+      const message = JSON.parse(candidate) as JsonRpcResponse;
+      if (message.id === requestId) return message;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
 }
 
 export class McpBridge {
@@ -213,11 +262,7 @@ export class McpBridge {
     const inputSchema = schema.inputSchema ?? { type: 'object', properties: {}, required: [] };
     const properties: Record<string, ToolParameter> = {};
     for (const [key, val] of Object.entries(inputSchema.properties ?? {})) {
-      properties[key] = {
-        type: val.type ?? 'string',
-        description: val.description,
-        ...(val.enum ? { enum: val.enum } : {}),
-      };
+      properties[key] = toToolParameter(val);
     }
 
     return {
@@ -268,5 +313,203 @@ export class McpBridge {
   private _notify(method: string, params?: Record<string, unknown>): void {
     const msg: JsonRpcRequest = { jsonrpc: '2.0', method, ...(params ? { params } : {}) };
     this.process?.stdin?.write(JSON.stringify(msg) + '\n');
+  }
+}
+
+export interface HttpMcpBridgeConfig {
+  url: string;
+  token: string;
+  timeout?: number;
+  toolPrefix?: string;
+  fetcher?: typeof fetch;
+}
+
+/** MCP Streamable HTTP client for remote servers that use bearer-token auth. */
+export class HttpMcpBridge {
+  private readonly config: HttpMcpBridgeConfig;
+  private readonly endpoint: URL;
+  private readonly fetcher: typeof fetch;
+  private requestId = 0;
+  private sessionId: string | undefined;
+  private protocolVersion: string | undefined;
+  private serverInfo: { name?: string; version?: string } = {};
+  private discoveredTools: McpToolSchema[] = [];
+  private connected = false;
+
+  constructor(config: HttpMcpBridgeConfig) {
+    this.config = config;
+    this.fetcher = config.fetcher ?? fetch;
+    this.endpoint = this.validateEndpoint(config.url);
+    if (!config.token.trim()) throw new Error('MCP bearer token cannot be empty.');
+  }
+
+  async connect(): Promise<void> {
+    const timeout = this.config.timeout ?? 30_000;
+    const initialized = await this.request('initialize', {
+      protocolVersion: '2025-03-26',
+      capabilities: {},
+      clientInfo: { name: 'symbiote', version: APP_VERSION },
+    }, timeout);
+    const result = initialized.result as Record<string, unknown> | undefined;
+    if (!result || typeof result !== 'object') throw new Error('MCP initialize returned an invalid response.');
+    if (typeof result.protocolVersion !== 'string') {
+      throw new Error('MCP initialize did not negotiate a protocol version.');
+    }
+    this.protocolVersion = result.protocolVersion;
+    this.serverInfo = (result.serverInfo as { name?: string; version?: string } | undefined) ?? {};
+    if (!result.capabilities || typeof result.capabilities !== 'object'
+      || !('tools' in result.capabilities)) {
+      throw new Error('MCP server does not advertise tool support.');
+    }
+
+    await this.notify('notifications/initialized');
+    const discovered: McpToolSchema[] = [];
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const listed = await this.request('tools/list', cursor ? { cursor } : {}, timeout);
+      const listResult = listed.result as { tools?: unknown; nextCursor?: unknown } | undefined;
+      if (!listResult || !Array.isArray(listResult.tools)) {
+        throw new Error('MCP tools/list returned an invalid response.');
+      }
+      discovered.push(...listResult.tools.filter((tool): tool is McpToolSchema =>
+        Boolean(tool) && typeof tool === 'object'
+        && typeof (tool as McpToolSchema).name === 'string'
+        && (tool as McpToolSchema).name.length > 0,
+      ));
+      if (typeof listResult.nextCursor !== 'string' || !listResult.nextCursor) {
+        cursor = undefined;
+      } else if (cursors.has(listResult.nextCursor) || cursors.size >= 99) {
+        throw new Error('MCP tools/list returned an invalid or excessive pagination cursor.');
+      } else {
+        cursor = listResult.nextCursor;
+        cursors.add(cursor);
+      }
+    } while (cursor);
+    this.discoveredTools = discovered;
+    this.connected = true;
+    console.log(
+      `[mcp-bridge] Connected to ${this.serverInfo.name ?? 'remote server'}`
+      + `${this.serverInfo.version ? ` v${this.serverInfo.version}` : ''} — `
+      + `${this.discoveredTools.length} tools discovered`,
+    );
+  }
+
+  getTools(): ToolDefinition[] {
+    const prefix = this.config.toolPrefix ?? '';
+    return this.discoveredTools.map(schema => this.wrapTool(schema, prefix));
+  }
+
+  async callTool(name: string, args: Record<string, unknown>): Promise<string> {
+    if (!this.connected) return JSON.stringify({ error: 'MCP bridge not connected' });
+    try {
+      const response = await this.request('tools/call', { name, arguments: args }, 60_000);
+      const result = response.result as {
+        content?: Array<{ type?: string; text?: string }>;
+      } | undefined;
+      if (!result) return JSON.stringify({ error: 'MCP tools/call returned an invalid response.' });
+      const text = result.content?.flatMap(item =>
+        item.type === 'text' && typeof item.text === 'string' ? [item.text] : [],
+      );
+      return text?.length ? text.join('\n') : JSON.stringify(result);
+    } catch (failure) {
+      return JSON.stringify({ error: failure instanceof Error ? failure.message : String(failure) });
+    }
+  }
+
+  disconnect(): void {
+    this.connected = false;
+    this.sessionId = undefined;
+  }
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  private wrapTool(schema: McpToolSchema, prefix: string): ToolDefinition {
+    const bridge = this;
+    const properties = Object.fromEntries(
+      Object.entries(schema.inputSchema?.properties ?? {}).map(([key, value]) => [key, toToolParameter(value)]),
+    );
+    return {
+      name: `${prefix}${schema.name}`,
+      description: schema.description ?? `MCP tool: ${schema.name}`,
+      parameters: {
+        type: 'object',
+        properties,
+        ...(schema.inputSchema?.required ? { required: schema.inputSchema.required } : {}),
+      },
+      async execute(input): Promise<string> {
+        return bridge.callTool(schema.name, input);
+      },
+    };
+  }
+
+  private async request(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs: number,
+  ): Promise<JsonRpcResponse> {
+    const id = ++this.requestId;
+    const response = await this.fetcher(this.endpoint, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    this.sessionId = response.headers.get('mcp-session-id') ?? this.sessionId;
+    const text = await response.text();
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`MCP server authorization failed (HTTP ${response.status}). Check the n8n MCP access token.`);
+      }
+      throw new Error(`MCP ${method} request failed (HTTP ${response.status}).`);
+    }
+    const message = parseMcpResponse(text, id);
+    if (!message) throw new Error(`MCP ${method} returned no matching JSON-RPC response.`);
+    if (message.error) throw new Error(`MCP ${method} failed: ${message.error.message}`);
+    return message;
+  }
+
+  private async notify(method: string): Promise<void> {
+    const response = await this.fetcher(this.endpoint, {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify({ jsonrpc: '2.0', method }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(this.config.timeout ?? 30_000),
+    });
+    this.sessionId = response.headers.get('mcp-session-id') ?? this.sessionId;
+    if (!response.ok) throw new Error(`MCP ${method} notification failed (HTTP ${response.status}).`);
+    await response.body?.cancel();
+  }
+
+  private headers(): Headers {
+    const headers = new Headers({
+      Authorization: `Bearer ${this.config.token}`,
+      Accept: 'application/json, text/event-stream',
+      'Content-Type': 'application/json',
+    });
+    if (this.sessionId) headers.set('mcp-session-id', this.sessionId);
+    if (this.protocolVersion) headers.set('MCP-Protocol-Version', this.protocolVersion);
+    return headers;
+  }
+
+  private validateEndpoint(value: string): URL {
+    let endpoint: URL;
+    try {
+      endpoint = new URL(value);
+    } catch (failure) {
+      throw new Error('MCP endpoint must be an absolute HTTP(S) URL.', { cause: failure });
+    }
+    const hostname = endpoint.hostname.toLowerCase();
+    const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+    if ((endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && isLoopback))
+      || endpoint.username || endpoint.password || endpoint.search || endpoint.hash
+      || endpoint.pathname !== '/mcp-server/http') {
+      throw new Error('MCP endpoint must be HTTPS (or loopback HTTP), end in /mcp-server/http, and contain no credentials, query, or fragment.');
+    }
+    return endpoint;
   }
 }

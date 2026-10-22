@@ -1137,7 +1137,7 @@ export default function App() {
     { id: 'google-workspace', label: 'Google Workspace', online: googleWorkspaceOnline, view: 'integrations', icon: <GoogleWorkspaceMark /> },
     { id: 'azure', label: 'Microsoft Azure', online: cloudProviderStatus.azure, view: 'integrations', icon: <Cloud /> },
     { id: 'oci', label: 'Oracle Cloud Infrastructure', online: cloudProviderStatus.oci, view: 'integrations', icon: <Database /> },
-    { id: 'n8n', label: 'n8n Cloud', online: cloudProviderStatus.n8n, view: 'integrations', icon: <Workflow /> },
+    { id: 'n8n', label: 'n8n (local)', online: cloudProviderStatus.n8n, view: 'integrations', icon: <Workflow /> },
     { id: 'kaggle', label: 'Kaggle', online: cloudProviderStatus.kaggle, view: 'integrations', icon: <Cpu /> },
   ];
   const sessionDraft = sessionDrafts[activeSessionId] ?? '';

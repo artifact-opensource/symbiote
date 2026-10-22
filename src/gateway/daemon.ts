@@ -119,7 +119,7 @@ import { formatForChannel } from '../channels/formatter.js';
 import { configureSandbox, createSandboxedRegistry, type SessionContext } from '../tools/sandbox.js';
 import { HttpApiServer, type ChatRequest, type ChatResponse } from '../web/http-api.js';
 import { startWebServer } from '../web/server.js';
-import { McpBridge } from '../tools/mcp-bridge.js';
+import { HttpMcpBridge, McpBridge } from '../tools/mcp-bridge.js';
 import { MetricsCollector, getMetrics } from '../metrics/collector.js';
 import { HotResumeManager } from '../sessions/hot-resume.js';
 import { ProviderHealthMonitor } from '../providers/health.js';
@@ -248,7 +248,7 @@ export class SymbioteGateway {
   private startTime = Date.now();
   private httpApi: HttpApiServer | null = null;
   private webServer: import('node:http').Server | null = null;
-  private mcpBridges: McpBridge[] = [];
+  private mcpBridges: Array<McpBridge | HttpMcpBridge> = [];
   /** Per-adapter system prompt file overrides (adapterId → file list) */
   private adapterPromptFiles = new Map<string, { path: string; label: string }[]>();
   /** Fallback provider chain — tried in order if primary fails */
@@ -870,20 +870,16 @@ export class SymbioteGateway {
 
   private async connectMcpServers(): Promise<void> {
     const mcpConfig = (this.gatewayConfig as any).mcpServers;
-    if (!mcpConfig || typeof mcpConfig !== 'object') {
-      console.log(info(`MCP: no servers configured`));
-      return;
-    }
-
-    const entries = Object.entries(mcpConfig) as [string, { command: string[]; args?: string[]; cwd?: string; env?: Record<string, string>; enabled?: boolean }][];
+    const entries = mcpConfig && typeof mcpConfig === 'object'
+      ? Object.entries(mcpConfig) as [string, { command: string[]; args?: string[]; cwd?: string; env?: Record<string, string>; enabled?: boolean }][]
+      : [];
     const enabled = entries.filter(([_, cfg]) => cfg.enabled !== false);
 
-    if (enabled.length === 0) {
-      console.log(info(`MCP: no enabled servers`));
-      return;
+    if (enabled.length > 0) {
+      console.log(info(`MCP: connecting to ${palette.white}${enabled.length}${palette.reset} stdio server(s)...`));
+    } else {
+      console.log(info(`MCP: no stdio servers configured`));
     }
-
-    console.log(info(`MCP: connecting to ${palette.white}${enabled.length}${palette.reset} server(s)...`));
 
     for (const [name, cfg] of enabled) {
       try {
@@ -908,6 +904,32 @@ export class SymbioteGateway {
       } catch (err) {
         console.log(warn(`MCP: ${name} — ${err instanceof Error ? err.message : err}`));
         // Non-fatal — other servers + builtins still work
+      }
+    }
+
+    const n8nMcpUrl = process.env.N8N_MCP_URL?.trim() || process.env.INSTANCE_URL?.trim();
+    const n8nMcpToken = process.env.N8N_MCP_TOKEN?.trim() || process.env.N8N_MCP_KEY?.trim();
+    if (n8nMcpUrl || n8nMcpToken) {
+      if (!n8nMcpUrl || !n8nMcpToken) {
+        console.log(warn('MCP: n8n remote connection needs both N8N_MCP_URL (or INSTANCE_URL) and an n8n MCP token'));
+      } else {
+        let bridge: HttpMcpBridge | undefined;
+        try {
+          bridge = new HttpMcpBridge({
+            url: n8nMcpUrl,
+            token: n8nMcpToken,
+            timeout: 30_000,
+            toolPrefix: 'n8n_mcp_',
+          });
+          await bridge.connect();
+          const tools = bridge.getTools();
+          for (const tool of tools) this.toolRegistry.register(tool);
+          this.mcpBridges.push(bridge);
+          console.log(ok(`MCP: n8n remote — ${tools.length} tools`));
+        } catch (err) {
+          bridge?.disconnect();
+          console.log(warn(`MCP: n8n remote — ${err instanceof Error ? err.message : err}`));
+        }
       }
     }
 

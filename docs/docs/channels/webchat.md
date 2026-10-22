@@ -57,7 +57,7 @@ The **Zen** entry in the sidebar opens the games area. Its game tabs are registe
 * **Operations** shows channel/provider health, whole-host CPU and memory use, network and disk I/O, available temperature sensors, resource warnings, and recent gateway logs. Temperature is reported only when the operating system exposes a sensor; unavailable sensors are not estimated.
 * **Notifications** prioritizes runtime alerts and attention items in the control room. Optional native browser notifications require browser permission and a secure context; this is not an offline Web Push service.
 * **Tool registry** lists tools available to the runtime.
-* **Integrations** configures optional Google Workspace, Azure, OCI, n8n Cloud, and Kaggle connections. See [Google Workspace](../integrations/google-workspace.md) and [Cloud Integrations](../integrations/cloud-integrations.md) for setup and access limits.
+* **Integrations** configures optional Google Workspace, Azure, OCI, local n8n (or an explicitly configured remote instance), and Kaggle connections. See [Google Workspace](../integrations/google-workspace.md) and [Cloud Integrations](../integrations/cloud-integrations.md) for setup and access limits.
 * **Configuration** displays runtime settings without allowing web-based edits; on the gateway host it can reveal the LAN access token and, in Electron on Windows, configure the optional firewall rule.
 * Light and dark themes are available; brightness and palette settings are shared through the gateway.
 

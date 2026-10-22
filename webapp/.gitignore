@@ -9,8 +9,9 @@ dist/
 *.key
 credentials*.json
 service-account*.json
-src/lib/firebase-applet-config.json
-src/lib/googleWorkspace.js
-src/lib/googleWorkspace.js.map
-src/lib/googleWorkspace.d.ts
-src/lib/googleWorkspace.d.ts.map
+webapp/firebase.json
+webapp/src/lib/firebase-applet-config.json
+webapp/src/lib/googleWorkspace.js
+webapp/src/lib/googleWorkspace.js.map
+webapp/src/lib/googleWorkspace.d.ts
+webapp/src/lib/googleWorkspace.d.ts.map

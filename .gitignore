@@ -131,3 +131,25 @@ package.json
 test_sample.wav
 .models/vosk-model-small-en-us-0.15
 .admin
+
+
+# ── WebApp ────────────────────────────────────────────
+webapp/firebase.json
+
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*.key
+credentials*.json
+service-account*.json
+webapp/firebase.json
+webapp/src/lib/firebase-applet-config.json
+webapp/src/lib/googleWorkspace.js
+webapp/src/lib/googleWorkspace.js.map
+webapp/src/lib/googleWorkspace.d.ts
+webapp/src/lib/googleWorkspace.d.ts.map

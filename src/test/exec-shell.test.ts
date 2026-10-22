@@ -75,6 +75,59 @@ test('sandbox config can tighten owner and internal-session access', () => {
   configureSandbox(undefined);
 });
 
+test('n8n management is hidden and denied outside admin sessions', async () => {
+  configureSandbox(undefined);
+  let executions = 0;
+  const inner = {
+    list: () => [
+      { name: 'n8n_cloud', description: 'n8n API', parameters: {} },
+      { name: 'n8n_mcp_list_workflows', description: 'n8n MCP', parameters: {} },
+    ],
+    toProviderFormat: () => [],
+    execute: async () => {
+      executions++;
+      return 'called';
+    },
+  };
+  const context = {
+    sessionId: 'n8n-session',
+    adapterId: 'discord-main',
+    channelType: 'discord',
+    chatType: 'direct' as const,
+    senderId: 'external-user',
+    isOwner: false,
+  };
+
+  try {
+    const restricted = createSandboxedRegistry(inner, context);
+    assert.equal(restricted.list().some(tool => tool.name === 'n8n_cloud'), false);
+    assert.equal(restricted.list().some(tool => tool.name === 'n8n_mcp_list_workflows'), false);
+    const denied = JSON.parse(await restricted.execute('n8n_cloud', { method: 'GET', path: '/workflows' })) as {
+      error: string;
+      sandbox: boolean;
+    };
+    assert.equal(denied.sandbox, true);
+    assert.match(denied.error, /admin sessions/);
+    assert.equal(executions, 0);
+    const mcpDenied = JSON.parse(await restricted.execute('n8n_mcp_list_workflows', {})) as {
+      error: string;
+      sandbox: boolean;
+    };
+    assert.equal(mcpDenied.sandbox, true);
+    assert.match(mcpDenied.error, /admin sessions/);
+    assert.equal(executions, 0);
+
+    const admin = createSandboxedRegistry(inner, { ...context, isOwner: true, senderId: 'owner' });
+    assert.equal(admin.list().some(tool => tool.name === 'n8n_cloud'), true);
+    assert.equal(admin.list().some(tool => tool.name === 'n8n_mcp_list_workflows'), true);
+    assert.equal(await admin.execute('n8n_cloud', { method: 'GET', path: '/workflows' }), 'called');
+    assert.equal(await admin.execute('n8n_mcp_list_workflows', {}), 'called');
+    assert.equal(executions, 2);
+  } finally {
+    configureSandbox(undefined);
+  }
+});
+
 test('project sandbox defaults shell workdir to the workspace and rejects outside paths', async () => {
   configureSandbox({ enabled: true });
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-project-sandbox-'));

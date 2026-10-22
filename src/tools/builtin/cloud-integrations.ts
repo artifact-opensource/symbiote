@@ -7,6 +7,7 @@ type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 type JsonObject = Record<string, unknown>;
 
 const METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+const DEFAULT_N8N_BASE_URL = 'http://127.0.0.1:5678/api/v1';
 const OCI_SERVICES = {
   compute: 'iaas',
   networking: 'iaas',
@@ -30,7 +31,7 @@ type OciService = string;
 const TOOL_DOCS: Record<IntegrationProvider, string> = {
   azure: 'Use Azure Resource Manager REST APIs for the configured subscription. Supports Azure GPU VM and Azure ML compute provisioning and management. POST, PUT, PATCH, and DELETE actions apply immediately and can incur charges.',
   oci: 'Use signed REST requests across regional OCI service endpoints, including Compute, networking, Object Storage, and Resource Manager. Supports GPU instance and cluster provisioning and management. POST, PUT, PATCH, and DELETE actions apply immediately and can incur charges.',
-  n8n: 'Use the configured n8n Cloud public API to inspect, create, update, activate, deactivate, and execute workflows. Actions are applied immediately to the connected workspace.',
+  n8n: 'Use the local n8n API by default for full management of the instance, including workflows, credentials, and executions. A saved API key and endpoint in Integrations explicitly override the local connection. Actions are applied immediately.',
   kaggle: 'Use Kaggle APIs to discover datasets and kernels and manage notebook jobs where the Kaggle API supports it. Kaggle GPU usage is quota-limited by Kaggle and is not an Azure/OCI GPU cluster.',
 };
 
@@ -253,14 +254,34 @@ async function callOci(
 }
 
 function n8nBaseUrl(credentials: IntegrationCredentials): URL {
-  const base = requiredString(credentials, 'baseUrl', 'n8n Cloud').replace(/\/+$/, '');
+  const base = requiredString(credentials, 'baseUrl', 'n8n').replace(/\/+$/, '');
   const url = new URL(base);
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash
-    || !url.hostname.toLowerCase().endsWith('.n8n.cloud')) {
-    throw new Error('n8n Cloud baseUrl must use a public *.n8n.cloud HTTPS host without credentials, query, or fragment.');
+  const hostname = url.hostname.toLowerCase();
+  const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopback))
+    || url.username || url.password || url.search || url.hash) {
+    throw new Error('n8n baseUrl must use HTTPS, or HTTP on a loopback host, without credentials, query, or fragment.');
   }
-  if (!url.pathname.endsWith('/api/v1')) throw new Error('n8n baseUrl must end in /api/v1.');
+  if (url.pathname.replace(/\/+$/, '') !== '/api/v1') {
+    throw new Error('n8n baseUrl path must be exactly /api/v1.');
+  }
+  url.pathname = '/api/v1';
   return url;
+}
+
+function localN8nCredentials(): IntegrationCredentials | null {
+  const apiKey = process.env.N8N_API_KEY?.trim();
+  if (!apiKey) return null;
+  const baseUrl = process.env.N8N_BASE_URL?.trim() || DEFAULT_N8N_BASE_URL;
+  const credentials = { baseUrl, apiKey };
+  n8nBaseUrl(credentials);
+  return credentials;
+}
+
+function getN8nCredentials(vault: CredentialVault): IntegrationCredentials | null {
+  const configured = vault.get('n8n');
+  if (configured) return configured;
+  return localN8nCredentials();
 }
 
 async function callN8n(
@@ -283,7 +304,7 @@ async function callN8n(
   const response = await fetcher(url, {
     method,
     headers: {
-      'X-N8N-API-KEY': requiredString(credentials, 'apiKey', 'n8n Cloud'),
+      'X-N8N-API-KEY': requiredString(credentials, 'apiKey', 'n8n'),
       Accept: 'application/json',
       ...(encodedBody ? { 'Content-Type': 'application/json' } : {}),
     },
@@ -520,8 +541,13 @@ export function createCloudIntegrationTool(
     async execute(input) {
       let credentials: IntegrationCredentials | null = null;
       try {
-        credentials = vault.get(provider);
-        if (!credentials) return JSON.stringify({ error: `${provider} is not configured. Add its credentials in Integrations first.` });
+        credentials = provider === 'n8n' ? getN8nCredentials(vault) : vault.get(provider);
+        if (!credentials) {
+          const guidance = provider === 'n8n'
+            ? 'Set N8N_API_KEY in Symbiote .env or configure an explicit n8n endpoint and API key in Integrations.'
+            : 'Add its credentials in Integrations first.';
+          return JSON.stringify({ error: `${provider} is not configured. ${guidance}` });
+        }
         const method = assertMethod(input.method);
         const apiPath = validatePath(input.path, provider === 'kaggle' ? '/api/v1/' : undefined);
         const result = provider === 'azure'
@@ -584,7 +610,7 @@ export async function testCloudIntegration(
   vault: CredentialVault,
   fetcher: FetchLike = fetch,
 ): Promise<{ ok: true }> {
-  const credentials = vault.get(provider);
+  const credentials = provider === 'n8n' ? getN8nCredentials(vault) : vault.get(provider);
   if (!credentials) throw new Error(`${provider} is not configured.`);
   try {
     if (provider === 'azure') {
@@ -608,7 +634,7 @@ export function integrationCredentialStatus(vault: CredentialVault): Record<Inte
   return {
     azure: vault.has('azure'),
     oci: vault.has('oci'),
-    n8n: vault.has('n8n'),
+    n8n: vault.has('n8n') || Boolean(process.env.N8N_API_KEY?.trim()),
     kaggle: vault.has('kaggle'),
   };
 }

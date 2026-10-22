@@ -277,6 +277,15 @@ const noCrossChannelToOwner: SandboxRule = {
   },
 };
 
+const n8nAdminOnly: SandboxRule = {
+  name: 'admin-only-n8n-management',
+  tools: '*',
+  check: (tool, _input, ctx) => (tool === 'n8n_cloud' || tool.startsWith('n8n_mcp_'))
+    && classifySession(ctx) !== 'admin'
+    ? 'Full n8n API access is only available in admin sessions'
+    : null,
+};
+
 /** All built-in rules */
 const BUILTIN_RULES: SandboxRule[] = [
   noEngineModification,
@@ -285,6 +294,7 @@ const BUILTIN_RULES: SandboxRule[] = [
   projectWorkspaceBoundary,
   restrictedLimitations,
   noCrossChannelToOwner,
+  n8nAdminOnly,
 ];
 
 // ─── Audit Log ─────────────────────────────────────────────────────────────
@@ -340,7 +350,10 @@ export class SandboxedToolRegistry {
   list(): Array<{ name: string; description: string; parameters: any }> {
     const all = this.inner.list();
     if (this.tier !== 'admin') {
-      const visibleToNonAdmin = all.filter(t => t.name !== 'computer_use' && t.name !== 'workspace_manage');
+      const visibleToNonAdmin = all.filter(t =>
+        t.name !== 'computer_use' && t.name !== 'workspace_manage'
+        && t.name !== 'n8n_cloud' && !t.name.startsWith('n8n_mcp_'),
+      );
       if (this.tier !== 'restricted') return visibleToNonAdmin;
       // Restricted sessions don't even see dangerous tools
       const hiddenTools = new Set(['exec', 'process_start', 'process_kill', 'write', 'edit', 'spawn', 'message', 'delete_message']);

@@ -94,14 +94,14 @@ const CLOUD_PROVIDERS: Array<{
   },
   {
     id: 'n8n',
-    name: 'n8n Cloud',
-    description: 'Manage and execute workflows through the n8n public API.',
-    info: 'The API key can inspect, create, edit, activate, deactivate, and execute workflows in the configured n8n Cloud workspace. Workflows can affect connected external systems.',
-    apps: ['Workflows', 'Executions', 'Activation & management'],
+    name: 'n8n (local by default)',
+    description: 'Manage workflows through the local n8n API; save an endpoint and API key to explicitly use another instance.',
+    info: 'By default Symbiote connects to http://127.0.0.1:5678/api/v1 using N8N_API_KEY from its .env. Saving an endpoint and API key here overrides that local connection. The key grants broad control over the n8n instance, including workflows that can affect external systems.',
+    apps: ['Workflows', 'Executions', 'Triggers & scheduling'],
     icon: Workflow,
     fields: [
-      { id: 'baseUrl', label: 'API root (https://…/api/v1)' },
-      { id: 'apiKey', label: 'API key', secret: true },
+      { id: 'baseUrl', label: 'Override API root (https://host/api/v1; optional)' },
+      { id: 'apiKey', label: 'Override API key (optional)', secret: true },
     ],
   },
   {

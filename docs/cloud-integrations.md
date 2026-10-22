@@ -1,10 +1,10 @@
 # Cloud and Automation Integrations
 
-The **Integrations** page stores Azure, Oracle Cloud Infrastructure (OCI), n8n Cloud, and Kaggle credentials for use by the gateway's built-in tools:
+The **Integrations** page stores Azure, Oracle Cloud Infrastructure (OCI), n8n, and Kaggle credentials for use by the gateway's built-in tools:
 
 - `azure_cloud` — Azure Resource Manager requests limited to the configured subscription.
 - `oci_cloud` — signed regional OCI requests to Compute, Identity, Object Storage, Resource Manager, and other OCI service endpoints.
-- `n8n_cloud` — requests limited to the configured HTTPS `/api/v1` root.
+- `n8n_cloud` — manages the local n8n instance by default; a saved endpoint and API key in Integrations explicitly override it. Requests are limited to the configured `/api/v1` root.
 - `kaggle_cloud` — Kaggle API requests using the account's API credentials.
 - `kaggle_kernel_push` — uploads and runs a private Python notebook; GPU and internet use are optional notebook settings and remain subject to Kaggle policy and quotas.
 
@@ -32,9 +32,19 @@ Create an Entra ID application/service principal and provide its tenant ID, appl
 
 Provide the tenancy OCID, user OCID, API key fingerprint, private key PEM, and region. Upload the matching public key to the OCI user profile and configure OCI policies for the required resource families. Known service aliases cover common OCI APIs; other endpoint labels are also accepted but requests remain under the selected region's `oraclecloud.com` host. OCI permissions are governed by those policies and the private key; this integration does not broaden them.
 
-### n8n Cloud
+### n8n local (default) or optional remote instance
 
-Create an API key in n8n and enter it with the instance API root ending in `/api/v1`, such as `https://example.app.n8n.cloud/api/v1`. The client enforces HTTPS and confines requests to that API root.
+Install n8n directly on the host (see [Self-hosting n8n for Symbiote](n8n-self-hosting.md)). Create an n8n REST API key, then set `N8N_API_KEY` in Symbiote's ignored `.env`. The default API root is `http://127.0.0.1:5678/api/v1`; set `N8N_BASE_URL` only if the local instance uses a different API root. Restart Symbiote after environment changes. Requests are confined to the configured API root and redirects are rejected.
+
+The n8n MCP endpoint is separate from the REST API and uses an instance-level MCP key. Set `N8N_MCP_URL` and `N8N_MCP_KEY` (or `N8N_MCP_TOKEN`); `INSTANCE_URL` is accepted as a legacy URL alias. Discovered tools use the `n8n_mcp_` prefix and are limited to admin sessions.
+
+The local environment connection is the default. If an endpoint and API key are saved in **Integrations**, that explicit connection takes precedence and can point to an HTTPS remote/self-hosted or Cloud instance. Thus a Cloud instance is not selected automatically: it must be explicitly configured with its API key. Treat the key like an administrator credential. The `n8n_cloud` tool can manage workflows, credentials, and executions as permitted by the key; workflows can run code and use connected accounts to affect external systems. It is available only to admin sessions. Review generated workflows and their permissions before activating them.
+
+For native production deployments, keep n8n and its database persistent, set and back up a stable `N8N_ENCRYPTION_KEY`, pin a tested n8n version, and restrict the editor/API to trusted access. Keep the editor/API private; publish only webhook endpoints that need external callers, through a TLS reverse proxy with workflow-level authentication. Do not expose port 5678 directly to the public internet.
+
+See [Self-hosting n8n for Symbiote](n8n-self-hosting.md) for native Linux and Windows service deployment guidance and the distinction between n8n workflow schedules and Symbiote cron jobs.
+
+n8n's native Schedule Trigger should own recurring workflow schedules. Symbiote's `cron_manage` remains for scheduled agent prompts and follow-ups; avoid creating duplicate recurring schedules in both systems. Self-hosting removes n8n Cloud hosting charges, not costs or quotas from external APIs and connected services. Community Edition is free with most core features, but some capabilities remain paid; check n8n's current [plan and edition comparison](https://docs.n8n.io/choose-how-to-use-n8n/). The Sustainable Use License allows internal business or personal use, not offering n8n as a paid hosted/white-label service; see the upstream [license](https://github.com/n8n-io/n8n/blob/master/LICENSE.md).
 
 ### Kaggle
 
@@ -44,4 +54,4 @@ Create an API token in Kaggle account settings and enter it. Leave the username 
 
 Use **Test** on an individual provider card to run a small read-only request. A configured indicator means credentials are stored; it is not a continuously refreshed health check. Connection tests require valid account credentials, network access, and enabled provider APIs. Tests do not provision resources or run Kaggle GPU jobs.
 
-Generic API requests currently accept JSON request bodies up to 1 MB. Kaggle notebook uploads are limited to 1 MB of notebook source. The integrations are local to the gateway machine and are not isolated per remote Control Room user; anyone authorized to use the agent can invoke its provider tools.
+Generic API requests currently accept JSON request bodies up to 1 MB. Kaggle notebook uploads are limited to 1 MB of notebook source. The integrations are local to the gateway machine and are not isolated per remote Control Room user. Admin-only n8n access is enforced in the tool sandbox; other configured provider tools follow their existing access policy.

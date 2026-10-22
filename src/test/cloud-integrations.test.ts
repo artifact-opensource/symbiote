@@ -5,7 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { CredentialVault } from '../security/credential-vault.js';
-import { createCloudIntegrationTool, createCloudIntegrationTools, validateIntegrationCredentials } from '../tools/builtin/cloud-integrations.js';
+import {
+  createCloudIntegrationTool,
+  createCloudIntegrationTools,
+  integrationCredentialStatus,
+  testCloudIntegration,
+  validateIntegrationCredentials,
+} from '../tools/builtin/cloud-integrations.js';
 
 function withVault(run: (vault: CredentialVault) => Promise<void>): Promise<void> {
   const directory = mkdtempSync(path.join(os.tmpdir(), 'symbiote-cloud-integration-'));
@@ -90,6 +96,69 @@ test('n8n requests remain inside the API root and redact secret response fields'
     path: '/../../workflows',
   })) as { error: string };
   assert.match(invalid.error, /traversal|absolute path/);
+}));
+
+test('n8n accepts self-hosted API roots without allowing insecure remote endpoints', () => {
+  assert.deepEqual(validateIntegrationCredentials('n8n', {
+    baseUrl: 'http://127.0.0.1:5678/api/v1/',
+    apiKey: 'local-key',
+  }, null), {
+    baseUrl: 'http://127.0.0.1:5678/api/v1/',
+    apiKey: 'local-key',
+  });
+  assert.deepEqual(validateIntegrationCredentials('n8n', {
+    baseUrl: 'https://automation.example.test/api/v1',
+    apiKey: 'remote-key',
+  }, null), {
+    baseUrl: 'https://automation.example.test/api/v1',
+    apiKey: 'remote-key',
+  });
+  for (const baseUrl of [
+    'http://automation.example.test/api/v1',
+    'http://192.168.1.10:5678/api/v1',
+    'https://automation.example.test/proxy/api/v1',
+    'https://automation.example.test/api/v1?redirect=1',
+    'https://user:password@automation.example.test/api/v1',
+  ]) {
+    assert.throws(() => validateIntegrationCredentials('n8n', {
+      baseUrl,
+      apiKey: 'key',
+    }, null), /n8n baseUrl/);
+  }
+});
+
+test('n8n uses the local .env API key and default endpoint before any saved override', async () => withVault(async vault => {
+  const previousApiKey = process.env.N8N_API_KEY;
+  const previousBaseUrl = process.env.N8N_BASE_URL;
+  process.env.N8N_API_KEY = 'local-n8n-test-key';
+  delete process.env.N8N_BASE_URL;
+  let requestUrl = '';
+  let authorization = '';
+  const fetcher: typeof fetch = async (input, init) => {
+    requestUrl = input.toString();
+    authorization = new Headers(init?.headers).get('X-N8N-API-KEY') ?? '';
+    return response({ data: [] });
+  };
+
+  try {
+    assert.equal(integrationCredentialStatus(vault).n8n, true);
+    await testCloudIntegration('n8n', vault, fetcher);
+    assert.equal(requestUrl, 'http://127.0.0.1:5678/api/v1/workflows?limit=1');
+    assert.equal(authorization, 'local-n8n-test-key');
+
+    vault.set('n8n', {
+      baseUrl: 'https://automation.example.test/api/v1',
+      apiKey: 'saved-remote-key',
+    });
+    await testCloudIntegration('n8n', vault, fetcher);
+    assert.equal(requestUrl, 'https://automation.example.test/api/v1/workflows?limit=1');
+    assert.equal(authorization, 'saved-remote-key');
+  } finally {
+    if (previousApiKey === undefined) delete process.env.N8N_API_KEY;
+    else process.env.N8N_API_KEY = previousApiKey;
+    if (previousBaseUrl === undefined) delete process.env.N8N_BASE_URL;
+    else process.env.N8N_BASE_URL = previousBaseUrl;
+  }
 }));
 
 test('OCI uses RSA request signing and Kaggle uses fixed-host Basic authentication', async () => withVault(async vault => {
@@ -184,9 +253,9 @@ test('Kaggle kernel tool uploads a private GPU notebook archive', async () => wi
 test('provider credential validation rejects malformed setup instead of storing it', async () => withVault(async vault => {
   assert.throws(() => validateIntegrationCredentials('azure', {}, null), /Missing required azure credential fields/);
   assert.throws(() => validateIntegrationCredentials('n8n', {
-    baseUrl: 'http://127.0.0.1/api/v1',
+    baseUrl: 'http://n8n.example.test/api/v1',
     apiKey: 'secret',
-  }, null), /n8n\.cloud HTTPS host/);
+  }, null), /HTTPS, or HTTP on a loopback host/);
   assert.throws(() => validateIntegrationCredentials('oci', {
     tenancyOcid: 'tenancy',
     userOcid: 'user',

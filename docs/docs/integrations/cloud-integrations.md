@@ -1,10 +1,10 @@
 # Cloud and Automation Integrations
 
-The **Integrations** page stores Azure, Oracle Cloud Infrastructure (OCI), n8n Cloud, and Kaggle credentials for use by the gateway's built-in tools:
+The **Integrations** page stores Azure, Oracle Cloud Infrastructure (OCI), n8n, and Kaggle credentials for use by the gateway's built-in tools:
 
 - `azure_cloud` — Azure Resource Manager requests limited to the configured subscription.
 - `oci_cloud` — signed regional OCI requests to Compute, Identity, Object Storage, Resource Manager, and other OCI service endpoints.
-- `n8n_cloud` — requests limited to the configured HTTPS `/api/v1` root.
+- `n8n_cloud` — uses the local n8n API by default; an endpoint and API key saved in Integrations explicitly override it.
 - `kaggle_cloud` — Kaggle API requests using the account's API credentials.
 - `kaggle_kernel_push` — uploads and runs a private Python notebook; GPU and internet use are optional notebook settings and remain subject to Kaggle policy and quotas.
 
@@ -32,9 +32,13 @@ Create an Entra ID application/service principal and provide its tenant ID, appl
 
 Provide the tenancy OCID, user OCID, API key fingerprint, private key PEM, and region. Upload the matching public key to the OCI user profile and configure OCI policies for the required resource families. Known service aliases cover common OCI APIs; other endpoint labels are also accepted but requests remain under the selected region's `oraclecloud.com` host. OCI permissions are governed by those policies and the private key; this integration does not broaden them.
 
-### n8n Cloud
+### n8n local (default) or optional remote instance
 
-Create an API key in n8n and enter it with the instance API root ending in `/api/v1`, such as `https://example.app.n8n.cloud/api/v1`. The client enforces HTTPS and confines requests to that API root.
+Install n8n on the host and put its REST API key in Symbiote's ignored `.env` as `N8N_API_KEY`. The default API root is `http://127.0.0.1:5678/api/v1`; optionally configure `N8N_BASE_URL`. An endpoint/API key saved in the Integrations UI overrides the local connection and is the explicit path for an optional remote or Cloud instance. HTTPS is required except for loopback; requests are confined to the configured API root and redirects are rejected. The separate n8n MCP endpoint uses `N8N_MCP_URL` and `N8N_MCP_KEY` (or `N8N_MCP_TOKEN`) and registers admin-only tools prefixed `n8n_mcp_`. See [Self-hosting n8n for Symbiote](../../n8n-self-hosting.md).
+
+The API key grants broad n8n instance control. The integration is available only to admin-tier sessions. Keep the editor/API private and publish only authenticated webhook routes through a TLS reverse proxy.
+
+Use n8n's Schedule Trigger for recurring workflow schedules. Symbiote's `cron_manage` is for scheduled agent work and follow-ups.
 
 ### Kaggle
 
