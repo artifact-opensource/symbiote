@@ -2,7 +2,7 @@
 
 ## Symbiote Documentation
 
-**Persistent AI agent runtime · v5.5.0**
+**Persistent AI agent runtime · v5.6.0**
 
 [Quick Start](getting-started/quick-start.md) · [Configuration](getting-started/configuration.md) · [CLI](reference/cli.md) · [Tools](tools/built-in.md)
 

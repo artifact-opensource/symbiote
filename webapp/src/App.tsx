@@ -17,6 +17,7 @@ import ReasoningDisplay from './components/ReasoningDisplay';
 import CronPanel from './components/CronPanel';
 import ThreadsPanel from './components/ThreadsPanel';
 import { AgentIcon as AgentGlyph, AgentIconPicker } from './components/AgentIconPicker';
+import AddAppModal from './components/AddAppModal';
 
 declare const __SYMBIOTE_VERSION__: string;
 
@@ -2384,6 +2385,7 @@ const [addAppOpen, setAddAppOpen] = useState(false);
               {sessions.length === 0 && <p className="sidebar-empty">Your conversations will appear here.</p>}
             </div>
           </div>
+            <AddAppModal isOpen={addAppOpen} onClose={() => setAddAppOpen(false)} />
         </div>
           <div className="sidebar-footer">
             <a className="sidebar-footer-link" href="https://www.artifactvirtual.com" target="_blank" rel="noreferrer" aria-label="Open Artifact Virtual website">

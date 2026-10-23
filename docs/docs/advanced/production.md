@@ -108,7 +108,7 @@ Existing ProgramData configuration is preserved on upgrades.
 
 ```powershell
 node .\dist\index.js stop
-msiexec /i .\dist\windows-installer\Symbiote-5.5.0-x64.msi SYMBIOTE_SEED_DIRECTORY="C:\workspace\symbiote"
+msiexec /i .\dist\windows-installer\Symbiote-5.6.0-x64.msi SYMBIOTE_SEED_DIRECTORY="C:\workspace\symbiote"
 ```
 
 Stop an already-running gateway before installation; the service installer refuses
