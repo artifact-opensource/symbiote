@@ -1,7 +1,7 @@
 // Symbiote — Core Agent Runner
 // The heart: prompt → LLM → tool calls → loop → response
 
-import type { Message, ToolCall, StreamEvent, Provider, ProviderConfig, ToolDef } from '../providers/types.js';
+import { DEFAULT_LLM_REQUEST_TIMEOUT_MS, type Message, type ToolCall, type StreamEvent, type Provider, type ProviderConfig, type ToolDef } from '../providers/types.js';
 import { truncateContext } from './context.js';
 import { ContextMonitor } from './context-monitor.js';
 import type { PolicyEngine } from '../tools/policy.js';
@@ -83,7 +83,8 @@ export const resolveToolTimeoutMs = (toolName: string, input: Record<string, unk
     ? rule.timeoutMs
     : 15 * 60_000;
 };
-const streamIdleMs = (): number => envMs('SYMBIOTE_STREAM_IDLE_MS', 3 * 60_000);
+const streamIdleMs = (requestTimeoutMs?: number): number =>
+  envMs('SYMBIOTE_STREAM_IDLE_MS', requestTimeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS);
 
 function isTransientStreamError(err: unknown): boolean {
   const e = err as { name?: string; message?: string; cause?: { code?: string } } | undefined;
@@ -95,7 +96,8 @@ function isTransientStreamError(err: unknown): boolean {
 function withTimeout<T>(promise: Promise<T>, ms: number, signal: AbortSignal | undefined, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let settled = false;
-    const timer = setTimeout(() => finish(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`))), ms);
+    const timeout = ms < 1000 ? `${ms}ms` : `${Math.round(ms / 1000)}s`;
+    const timer = setTimeout(() => finish(() => reject(new Error(`${label} timed out after ${timeout}`))), ms);
     const onAbort = () => finish(() => reject(new Error(`${label} aborted`)));
     const finish = (settle: () => void) => {
       if (settled) return;
@@ -148,11 +150,22 @@ function executeToolWithTimeout<T>(
 }
 
 /** Wrap a stream so that a provider that goes silent fails fast and gets retried. */
-async function* withIdleTimeout<T>(source: AsyncIterable<T>, ms: number, signal?: AbortSignal): AsyncGenerator<T> {
+async function* withIdleTimeout<T>(
+  source: AsyncIterable<T>,
+  ms: number,
+  signal: AbortSignal | undefined,
+  onTimeout: (error: Error) => void,
+): AsyncGenerator<T> {
   const it = source[Symbol.asyncIterator]();
   try {
     while (true) {
-      const next = await withTimeout(it.next(), ms, signal, 'stream idle:');
+      let next: IteratorResult<T>;
+      try {
+        next = await withTimeout(it.next(), ms, signal, 'stream idle:');
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith('stream idle: timed out')) onTimeout(error);
+        throw error;
+      }
       if (next.done) return;
       yield next.value;
     }
@@ -245,6 +258,7 @@ export async function runAgent(
   let emptyNudges = 0;
   let blockerReviewUsed = false;
   let todoChecklistRequired = false;
+  let lastTodoChecklistSignature: string | null = null;
   const callCounts = new Map<string, number>();
   const todoScope = config.todoScope ?? `run-${randomUUID()}`;
   const completionReviewId = config.turnId ?? randomUUID();
@@ -403,11 +417,6 @@ export async function runAgent(
       console.log(`[runner] Iteration ${iterations}/${maxIter}: ${truncated.length} messages`);
     }
     const streamStartTime = Date.now();
-    effectiveProviderConfig = {
-      ...effectiveProviderConfig,
-      ...(config.abortSignal ? { signal: config.abortSignal } : {}),
-    };
-
     // Collect response (transient mid-stream failures are retried so one dropped connection cannot kill a long run)
     const pendingToolCalls: ToolCall[] = [];
     const toolInputBuffers = new Map<string, string>(); // id → accumulated JSON string
@@ -416,9 +425,21 @@ export async function runAgent(
     pendingToolCalls.length = 0;
     toolInputBuffers.clear();
     textAccum = '';
+    const streamController = new AbortController();
+    const propagateAbort = () => streamController.abort(config.abortSignal?.reason);
+    if (config.abortSignal?.aborted) propagateAbort();
+    else config.abortSignal?.addEventListener('abort', propagateAbort, { once: true });
     try {
-      const stream = config.provider.stream(truncated, tools, effectiveProviderConfig);
-      for await (const event of withIdleTimeout(stream, streamIdleMs(), config.abortSignal)) {
+      const stream = config.provider.stream(truncated, tools, {
+        ...effectiveProviderConfig,
+        signal: streamController.signal,
+      });
+      for await (const event of withIdleTimeout(
+        stream,
+        streamIdleMs(effectiveProviderConfig.timeoutMs),
+        config.abortSignal,
+        error => streamController.abort(error),
+      )) {
         config.onEvent?.(event);
 
         switch (event.type) {
@@ -448,6 +469,8 @@ export async function runAgent(
       }
       break;
     } catch (err) {
+      config.abortSignal?.removeEventListener('abort', propagateAbort);
+      if (!streamController.signal.aborted) streamController.abort(err);
       // Stream interrupted (abort, network error, etc.)
       if (config.abortSignal?.aborted) {
         console.log(`[runner] Stream aborted at iteration ${iterations}. Returning partial result.`);
@@ -469,6 +492,8 @@ export async function runAgent(
       }
       markTodoBlocked(err instanceof Error ? err.message : String(err));
       throw err;
+    } finally {
+      config.abortSignal?.removeEventListener('abort', propagateAbort);
     }
     }
 
@@ -554,12 +579,27 @@ export async function runAgent(
       const openTodos = unresolvedTodos.filter(task => task.status === 'pending' || task.status === 'in_progress');
       if (openTodos.length > 0) {
         const checklist = openTodos.map(task => `- ${task.title}${task.description ? `: ${task.description}` : ''}`).join('\n');
+        const signature = JSON.stringify(openTodos.map(({ id, status, title, description }) => ({ id, status, title, description })));
+        if (signature === lastTodoChecklistSignature) {
+          const text = `${textAccum.trim()}\n\nUnresolved checklist items:\n${checklist}`.trim();
+          return {
+            text,
+            messages: omitEphemeralImages(currentMessages),
+            toolCalls: allToolCalls,
+            iterations,
+            maxIterationsHit: false,
+            aborted: false,
+            temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined,
+          };
+        }
+        lastTodoChecklistSignature = signature;
         currentMessages.push({
           role: 'system',
           content: `Checklist verification found unfinished tasks. Do not report completion. Continue the work and update each task only after verifying its result:\n${checklist}`,
         });
         continue;
       }
+      lastTodoChecklistSignature = null;
       if (unresolvedTodos.length > 0 && !blockerReviewUsed) {
         blockerReviewUsed = true;
         const checklist = unresolvedTodos.map(task => `- ${task.title}${task.description ? `: ${task.description}` : ''}`).join('\n');

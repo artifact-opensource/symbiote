@@ -63,6 +63,34 @@ test('loading an orphaned tool result persists cleanup once', () => {
   }
 });
 
+test('session save retries Windows rename locks with a real delay', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-session-rename-'));
+  const rename = fs.renameSync;
+  try {
+    const manager = new SessionManager(directory);
+    const session = manager.create('rename-retry');
+    let attempts = 0;
+    fs.renameSync = ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
+      attempts++;
+      if (attempts === 1) {
+        const error = Object.assign(new Error('File is locked.'), { code: 'EPERM' });
+        throw error;
+      }
+      return rename(oldPath, newPath);
+    }) as typeof fs.renameSync;
+
+    const startedAt = Date.now();
+    manager.save(session);
+
+    assert.equal(attempts, 2);
+    assert.ok(Date.now() - startedAt >= 20);
+    assert.ok(fs.existsSync(path.join(directory, 'rename-retry.json')));
+  } finally {
+    fs.renameSync = rename;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('channel routes survive session-manager restarts and remain adapter-scoped', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-session-routes-'));
   try {

@@ -39,6 +39,44 @@ test('runner retries a stream that drops mid-response', async () => {
   assert.equal(result.text, 'recovered');
 });
 
+test('a silent provider stream is aborted before bounded retries', async () => {
+  const previousIdleTimeout = process.env.SYMBIOTE_STREAM_IDLE_MS;
+  const originalCwd = process.cwd();
+  const workspace = mkdtempSync(join(tmpdir(), 'symbiote-runner-idle-'));
+  process.env.SYMBIOTE_STREAM_IDLE_MS = '25';
+  const streamSignals: AbortSignal[] = [];
+  const provider = {
+    name: 'silent',
+    async *stream(_messages: unknown, _tools: unknown, config: { signal?: AbortSignal }) {
+      const signal = config.signal!;
+      streamSignals.push(signal);
+      await new Promise<never>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    },
+  };
+
+  try {
+    process.chdir(workspace);
+    await assert.rejects(
+      runAgent([{ role: 'user', content: 'wait for a response' }], {
+        ...base,
+        provider: provider as any,
+        toolRegistry: registry(async () => 'ok'),
+        todoScope: 'idle-timeout-test',
+      }),
+      /stream idle: timed out/,
+    );
+    assert.equal(streamSignals.length, 4);
+    assert.ok(streamSignals.every(signal => signal.aborted));
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(workspace, { recursive: true, force: true });
+    if (previousIdleTimeout === undefined) delete process.env.SYMBIOTE_STREAM_IDLE_MS;
+    else process.env.SYMBIOTE_STREAM_IDLE_MS = previousIdleTimeout;
+  }
+});
+
 test('runner reports cut-off tool arguments instead of running the tool with {}', async () => {
   let executed = 0;
   const seen: any[][] = [];
@@ -58,6 +96,48 @@ test('runner reports cut-off tool arguments instead of running the tool with {}'
   const toolMsg = seen[1].find(m => m.role === 'tool');
   assert.match(toolMsg.content, /not valid JSON/);
   assert.equal(result.text.includes('done'), true);
+});
+
+test('unchanged unfinished todos stop instead of repeating the checklist indefinitely', async () => {
+  const originalCwd = process.cwd();
+  const workspace = mkdtempSync(join(tmpdir(), 'symbiote-runner-checklist-'));
+  let providerCalls = 0;
+  const provider = {
+    name: 'unfinished-checklist',
+    async *stream() {
+      providerCalls++;
+      if (providerCalls === 1) {
+        yield { type: 'tool_use_start', id: 'todo-add', name: 'todo' };
+        yield { type: 'tool_use_delta', id: 'todo-add', input: '{"action":"add","title":"Finish the work"}' };
+        yield { type: 'tool_use_end', id: 'todo-add' };
+        return;
+      }
+      yield { type: 'text_delta', text: 'The checklist is still unfinished.' };
+    },
+  };
+
+  try {
+    process.chdir(workspace);
+    const result = await runAgent([{ role: 'user', content: 'Finish the work' }], {
+      ...base,
+      provider: provider as any,
+      toolRegistry: registry(async () => JSON.stringify({ ok: true })),
+      todoScope: 'unfinished-checklist-test',
+    });
+
+    assert.equal(providerCalls, 4);
+    assert.equal(result.iterations, 4);
+    assert.match(result.text, /Unresolved checklist items:[\s\S]*Finish the work/);
+    assert.equal(
+      result.messages.filter(message => message.role === 'system'
+        && typeof message.content === 'string'
+        && message.content.startsWith('Checklist verification found unfinished tasks.')).length,
+      1,
+    );
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(workspace, { recursive: true, force: true });
+  }
 });
 
 test('runner keeps the tail of oversized tool output', async () => {

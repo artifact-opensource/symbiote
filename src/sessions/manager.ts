@@ -9,6 +9,8 @@ import type { Session, SessionSummary, SessionMetadata } from './types.js';
 import { stripBlinkControlMessages } from '../agent/blink.js';
 import { deriveConversationTitle } from './title.js';
 
+const renameRetryDelay = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+
 // Windows-safe atomic rename with retry for EPERM/ENOENT
 // (antivirus/indexer may lock the .tmp file during rename)
 function atomicRename(oldPath: string, newPath: string): void {
@@ -21,7 +23,7 @@ function atomicRename(oldPath: string, newPath: string): void {
       if (attempt >= 4) throw err;
       if (err.code === 'EPERM' || err.code === 'ENOENT') {
         // Brief pause before retry — file may be locked by antivirus/indexer
-        require('node:timers').setTimeout(() => {}, 25 * (attempt + 1));
+        Atomics.wait(renameRetryDelay, 0, 0, 25 * (attempt + 1));
         continue;
       }
       throw err;
