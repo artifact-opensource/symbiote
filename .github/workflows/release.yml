@@ -66,6 +66,7 @@ jobs:
             package-lock.json
             webapp/package-lock.json
       - run: npm ci
+      - run: node node_modules/electron/install.js
       - run: npm --prefix webapp ci
       - run: npm run build:msi
       - name: Add MSI checksum
