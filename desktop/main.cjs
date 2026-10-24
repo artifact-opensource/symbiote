@@ -1039,16 +1039,18 @@ function createTray() {
   tray = new Tray(icon);
   tray.setToolTip('Symbiote');
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open Symbiote', click: showMainWindow },
+    { label: 'Symbiote', enabled: false, icon: icon.resize({ width: 16, height: 16 }) },
+    { type: 'separator' },
+    { label: 'Open', click: showMainWindow },
     { label: 'Check for updates', click: () => {
       void runMaintenanceAction('update').catch(error => {
         console.error('Could not check for Symbiote updates:', error);
         dialog.showErrorBox('Symbiote update check failed', error.message);
       });
     } },
-    { label: 'Restart Symbiote', click: restartDesktop },
     { type: 'separator' },
-    { label: 'Quit Symbiote', click: () => app.quit() },
+    { label: 'Restart', click: restartDesktop },
+    { label: 'Quit', click: () => app.quit() },
   ]));
   tray.on('click', showMainWindow);
   tray.on('double-click', showMainWindow);
