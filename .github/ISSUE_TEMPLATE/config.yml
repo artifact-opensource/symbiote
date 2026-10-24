@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/artifact-opensource/symbiote/security/advisories/new
+    about: Report security vulnerabilities privately; do not disclose them in a public issue.
+  - name: Documentation
+    url: https://artifactvirtual.gitbook.io/symbiote/
+    about: Check the documentation for installation, configuration, and usage guidance.

@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible problem with Symbiote.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: "For security vulnerabilities, do not open a public issue. Follow the private reporting process in [SECURITY.md](https://github.com/artifact-opensource/symbiote/blob/master/SECURITY.md)."
+  - type: input
+    id: version
+    attributes:
+      label: Symbiote version
+      description: Include the release version or commit you are using.
+      placeholder: "5.6.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide the smallest set of steps that consistently reproduces the problem.
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include relevant error messages.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Redact API keys, tokens, personal data, and other secrets before posting.
+      render: text
+    validations:
+      required: false

@@ -156,6 +156,10 @@ node --test dist/test/*.test.js
 
 The project includes focused tests for provider routing, continuation behavior, VDB-backed Memograph import, tool execution and result handling, operational-memory expiry and retrieval, Discord progress formatting, and session persistence. Provider and channel integrations should also be exercised with their configured test credentials before deployment.
 
+## Contributing and community
+
+Contributions are welcome. Please read the [contribution guidelines](.github/CONTRIBUTING.md) and follow the [Code of Conduct](.github/CODE_OF_CONDUCT.md). For vulnerability reports, use the private process in [SECURITY.md](SECURITY.md).
+
 ## Documentation
 
 Additional guides live in [`docs/`](docs/README.md). Start with [Quick Start](docs/getting-started/quick-start.md), [Configuration](docs/getting-started/configuration.md), [Built-in Tools](docs/tools/built-in.md), and the [full changelog](CHANGELOG.md). Current release details are in [Release Notes](RELEASE_NOTES_v5.3.0.md).
@@ -163,4 +167,3 @@ Additional guides live in [`docs/`](docs/README.md). Start with [Quick Start](do
 ## License
 
 [MIT](LICENSE)
-
