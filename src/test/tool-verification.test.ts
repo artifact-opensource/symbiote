@@ -58,7 +58,7 @@ test('every built-in tool is registered with a provider-safe schema', () => {
     const definitions = registry.list();
     const names = definitions.map(tool => tool.name);
 
-    assert.equal(definitions.length, 62);
+    assert.equal(definitions.length, 63);
     assert.equal(new Set(names).size, names.length, 'built-in tool names must be unique');
     assert.deepEqual(registry.toProviderFormat().map(tool => tool.name), names);
     for (const tool of definitions) {
