@@ -945,7 +945,7 @@ function showMainWindow() {
 
 function createTray() {
   if (tray) return;
-  const icon = nativeImage.createFromPath(path.join(__dirname, 'tray-icon.png'));
+  const icon = nativeImage.createFromPath(path.join(__dirname, process.platform === 'win32' ? 'app-icon.ico' : 'tray-icon.png'));
   if (icon.isEmpty()) throw new Error('The Symbiote system-tray icon could not be loaded.');
   tray = new Tray(icon);
   tray.setToolTip('Symbiote');

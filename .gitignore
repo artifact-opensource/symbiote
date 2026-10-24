@@ -79,6 +79,7 @@ whatsapp-auth/
 /logs/
 /docs/upgrade_6/
 /PORTS.md
+/symbiote.link.lnk
 
 # ── Backups & scratch ───────────────────────────────────
 *.bak
