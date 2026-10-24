@@ -8,6 +8,8 @@ const { promisify } = require('node:util');
 const fs = require('node:fs');
 const path = require('node:path');
 
+if (process.platform === 'win32') app.setAppUserModelId('com.artifactvirtual.symbiote');
+
 const execFileAsync = promisify(execFile);
 const isDesktopDev = process.env.SYMBIOTE_DESKTOP_URL;
 let mainWindow;
@@ -59,7 +61,6 @@ function finishUpdateInstall(started) {
   resolve?.(started);
 }
 const ownsSingleInstanceLock = app.requestSingleInstanceLock();
-if (process.platform === 'win32') app.setAppUserModelId('com.artifactvirtual.symbiote');
 
 try {
   const preferences = JSON.parse(fs.readFileSync(preferencesPath, 'utf8'));
@@ -808,12 +809,15 @@ function loadGatewayWithRetry(target, minimal) {
 
 function createMainWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
+  const iconPath = path.join(__dirname, process.platform === 'win32' ? 'app-icon.ico' : 'tray-icon.png');
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) throw new Error(`The Symbiote application icon could not be loaded: ${iconPath}`);
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 920,
     minWidth: 900,
     minHeight: 640,
-    icon: path.join(__dirname, process.platform === 'win32' ? 'app-icon.ico' : 'tray-icon.png'),
+    icon,
     show: false,
     backgroundColor: desktopTheme === 'dark' ? '#000000' : desktopTheme === 'light' ? '#ffffff' : nativeTheme.shouldUseDarkColors ? '#000000' : '#ffffff',
     webPreferences: {
@@ -823,6 +827,7 @@ function createMainWindow() {
       sandbox: true,
     },
   });
+  if (process.platform === 'win32') mainWindow.setIcon(icon);
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
     if (process.platform === 'win32') void configureLanAccess();

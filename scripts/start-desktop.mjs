@@ -1,13 +1,25 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
+import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+if (Number(process.versions.node.split('.')[0]) < 20) {
+  throw new Error(`Node.js 20 or newer is required to start Symbiote; found ${process.versions.node}.`);
+}
 const entry = path.join(root, 'dist', 'index.js');
+const desktopMain = path.join(root, 'desktop', 'main.cjs');
 const buildFingerprintPath = path.join(root, 'dist', '.symbiote-build-fingerprint');
-const sourceDirectories = ['src', path.join('webapp', 'src'), path.join('webapp', 'public')];
+const sourceDirectories = [
+  'src',
+  path.join('webapp', 'src'),
+  path.join('webapp', 'public'),
+  'desktop',
+  'assets',
+];
 const sourceFiles = [
   'package.json',
   'package-lock.json',
@@ -59,6 +71,103 @@ function hasBuildOutputs() {
   return requiredFiles.every(file => fs.existsSync(file));
 }
 
+function stopPreviousInstances() {
+  if (process.platform !== 'win32') return;
+
+  const script = String.raw`
+$root = [System.IO.Path]::GetFullPath($env:SYMBIOTE_LAUNCH_ROOT).TrimEnd('\')
+$all = @(Get-CimInstance Win32_Process)
+$roots = @($all | Where-Object {
+  $_.CommandLine -and (
+    ($_.Name -ieq 'electron.exe' -and $_.CommandLine.IndexOf("$root\desktop\main.cjs", [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+    ($_.Name -ieq 'node.exe' -and $_.CommandLine.IndexOf("$root\dist\gateway\daemon.js", [StringComparison]::OrdinalIgnoreCase) -ge 0)
+  )
+})
+$ids = [System.Collections.Generic.HashSet[int]]::new()
+foreach ($item in $roots) { [void]$ids.Add([int]$item.ProcessId) }
+do {
+  $added = $false
+  foreach ($item in $all) {
+    if ($ids.Contains([int]$item.ParentProcessId) -and $ids.Add([int]$item.ProcessId)) { $added = $true }
+  }
+} while ($added)
+foreach ($processId in $ids) {
+  try {
+    Stop-Process -Id $processId -Force -ErrorAction Stop
+  } catch {
+    if (Get-Process -Id $processId -ErrorAction SilentlyContinue) {
+      Write-Error "Could not stop Symbiote process $($processId): $($_.Exception.Message)"
+      exit 1
+    }
+  }
+}
+$deadline = [DateTime]::UtcNow.AddSeconds(10)
+while ($true) {
+  $remaining = @(Get-CimInstance Win32_Process | Where-Object {
+    $_.CommandLine -and (
+      ($_.Name -ieq 'electron.exe' -and $_.CommandLine.IndexOf("$root\desktop\main.cjs", [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+      ($_.Name -ieq 'node.exe' -and $_.CommandLine.IndexOf("$root\dist\gateway\daemon.js", [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    )
+  })
+  if ($remaining.Count -eq 0) { break }
+  if ([DateTime]::UtcNow -ge $deadline) {
+    $remaining | ForEach-Object { Write-Error "Symbiote process $($_.ProcessId) is still running: $($_.CommandLine)" }
+    exit 1
+  }
+  Start-Sleep -Milliseconds 500
+}
+`;
+  const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
+  const result = spawnSync('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-EncodedCommand',
+    encodedScript,
+  ], {
+    cwd: root,
+    env: { ...process.env, SYMBIOTE_LAUNCH_ROOT: root },
+    stdio: 'inherit',
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error('Could not stop all previous Symbiote desktop and Gateway processes.');
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function checkGateway(port) {
+  return new Promise((resolve, reject) => {
+    const request = http.get({
+      hostname: '127.0.0.1',
+      port,
+      path: '/api/status',
+      timeout: 2000,
+    }, response => {
+      response.resume();
+      response.once('end', () => resolve(response.statusCode === 200));
+    });
+    request.once('timeout', () => request.destroy(new Error('Gateway readiness request timed out.')));
+    request.once('error', () => resolve(false));
+  });
+}
+
+async function waitForGateway(port, child) {
+  const deadline = Date.now() + 5 * 60_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) {
+      throw new Error(`The Symbiote desktop exited before the Gateway became healthy (exit ${child.exitCode}).`);
+    }
+    if (await checkGateway(port)) return;
+    await wait(1000);
+  }
+  throw new Error(`The Gateway did not return HTTP 200 from /api/status on port ${port} within five minutes.`);
+}
+
+stopPreviousInstances();
+
 const hasBuildSource = fs.existsSync(path.join(root, 'src', 'gateway', 'daemon.ts'))
   && fs.existsSync(path.join(root, 'tsconfig.json'));
 const currentFingerprint = hasBuildSource ? getBuildFingerprint() : null;
@@ -89,25 +198,42 @@ if (buildRequired && hasBuildSource) {
 const launchLog = path.join(root, '.session', 'desktop-launch.log');
 fs.mkdirSync(path.dirname(launchLog), { recursive: true });
 const logFd = fs.openSync(launchLog, 'w');
+const configPath = path.join(root, 'symbiote.json');
+const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+const gatewayPort = Number(config.webPort ?? 3009);
+if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65535) {
+  fs.closeSync(logFd);
+  throw new Error(`Invalid Gateway webPort in ${configPath}: ${config.webPort}`);
+}
+
+const electronExecutable = createRequire(import.meta.url)('electron');
+let child;
 try {
-  await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [entry, 'start'], {
-      cwd: root,
-      detached: true,
-      windowsHide: true,
-      stdio: ['ignore', logFd, logFd],
-      env: {
-        ...process.env,
-        ...(hasBuildSource ? { SYMBIOTE_BUILD_READY: '1' } : {}),
-      },
-    });
-    child.once('error', reject);
-    child.once('spawn', () => {
-      child.unref();
-      resolve();
-    });
+  child = spawn(electronExecutable, [desktopMain], {
+    cwd: root,
+    detached: true,
+    windowsHide: true,
+    stdio: ['ignore', logFd, logFd],
+    env: {
+      ...process.env,
+      SYMBIOTE_CONFIG: configPath,
+      ...(hasBuildSource ? { SYMBIOTE_BUILD_READY: '1' } : {}),
+    },
   });
+  await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('spawn', resolve);
+  });
+  await waitForGateway(gatewayPort, child);
+  child.unref();
+} catch (error) {
+  try {
+    stopPreviousInstances();
+  } catch (cleanupError) {
+    error.message += ` Cleanup also failed: ${cleanupError.message}`;
+  }
+  throw error;
 } finally {
   fs.closeSync(logFd);
 }
-console.log(`Symbiote startup handed off; diagnostics: ${path.relative(root, launchLog)}`);
+console.log(`Symbiote is ready: desktop PID ${child.pid}, Gateway HTTP 200 on port ${gatewayPort}. Diagnostics: ${path.relative(root, launchLog)}`);
