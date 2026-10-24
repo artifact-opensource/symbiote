@@ -75,7 +75,7 @@ export interface SetupWriteResult {
 
 /** Wizard-controlled fields. Everything else in an existing config is preserved on re-run. */
 const WIZARD_KEYS = ['name', 'emoji', 'defaultProvider', 'defaultModel', 'temperature', 'maxTokens', 'maxIterations',
-  'workspace', 'ownerIds', 'apiHost', 'apiPort', 'webHost', 'webPort', 'allowedOrigins'] as const;
+  'workspace', 'ownerIds', 'apiHost', 'apiPort', 'webHost', 'webPort', 'xmcpPort', 'allowedOrigins'] as const;
 
 export function defaultSetupInput(existing?: SymbioteConfig, envPath = path.resolve('.env')): SetupInput {
   const env = readEnv(envPath);

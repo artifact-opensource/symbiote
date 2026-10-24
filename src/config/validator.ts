@@ -87,8 +87,26 @@ export function validateConfig(config: SymbioteConfig): ValidationError[] {
     issues.push({ field: 'webPort', message: `Invalid web UI port: ${config.webPort}`, severity: 'error' });
   }
 
-  if (config.apiPort && config.webPort && config.apiPort === config.webPort) {
-    issues.push({ field: 'apiPort', message: 'API port and web UI port must be different', severity: 'error' });
+  if (!validPort(config.xmcpPort)) {
+    issues.push({ field: 'xmcpPort', message: `Invalid xMCP port: ${config.xmcpPort}`, severity: 'error' });
+  }
+
+  const ports = [
+    ['apiPort', config.apiPort],
+    ['webPort', config.webPort],
+    ['xmcpPort', config.xmcpPort],
+  ] as const;
+  for (let index = 0; index < ports.length; index++) {
+    const [field, port] = ports[index];
+    if (!port) continue;
+    const duplicate = ports.slice(0, index).find(([, previousPort]) => previousPort === port);
+    if (duplicate) {
+      issues.push({
+        field,
+        message: `${field} and ${duplicate[0]} must use different ports`,
+        severity: 'error',
+      });
+    }
   }
 
   if (config.allowedOrigins?.includes('*') && !isLoopbackHost(config.apiHost)) {

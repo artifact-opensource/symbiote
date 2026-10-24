@@ -3,7 +3,22 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = Number(process.env.XMCP_PORT || 3011);
+const configPath = path.resolve(process.env.SYMBIOTE_CONFIG || path.join(__dirname, '..', 'symbiote.json'));
+require('dotenv').config({ path: path.join(path.dirname(configPath), '.env') });
+let config = {};
+try {
+  const raw = fs.readFileSync(configPath, 'utf8');
+  config = JSON.parse(raw.replace(
+    /"(?:[^"\\]|\\.)*"|\/\/.*$|\/\*[\s\S]*?\*\//gm,
+    match => match.startsWith('"') ? match : '',
+  ));
+} catch (error) {
+  if (error.code !== 'ENOENT') throw new Error(`Could not read Symbiote config ${configPath}: ${error.message}`, { cause: error });
+}
+const PORT = Number(process.env.XMCP_PORT || config.xmcpPort || 9999);
+if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+  throw new RangeError(`Invalid xMCP port: ${PORT}`);
+}
 const KEY_PATH = process.env.XMCP_KEY_PATH || path.join(__dirname, '..', '.mcp', 'xmcp_api_key');
 let API_KEY = process.env.XMCP_API_KEY || null;
 if (!API_KEY) {

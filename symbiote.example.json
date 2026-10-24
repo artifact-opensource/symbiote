@@ -21,6 +21,7 @@
   "apiPort": 3006,
   "webHost": "0.0.0.0",
   "webPort": 3009,
+  "xmcpPort": 9999,
   "allowedOrigins": [
     "http://127.0.0.1:3009",
     "http://localhost:3009"

@@ -78,6 +78,7 @@ whatsapp-auth/
 *.log
 /logs/
 /docs/upgrade_6/
+/PORTS.md
 
 # ── Backups & scratch ───────────────────────────────────
 *.bak

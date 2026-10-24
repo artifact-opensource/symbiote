@@ -55,6 +55,7 @@ const TOOL_ACTIVITY: Record<string, ActivityDisplay> = {
   read:            { text: '📖 Reading files...', type: ActivityType.Custom },
   write:           { text: '✍️ Writing...', type: ActivityType.Custom },
   edit:            { text: '✏️ Editing...', type: ActivityType.Custom },
+  exec:            { text: '⚡ Executing...', type: ActivityType.Custom },
   process_start:   { text: '🚀 Launching process...', type: ActivityType.Custom },
   process_poll:    { text: '📊 Checking process...', type: ActivityType.Custom },
   process_kill:   { text: '🛑 Stopping process...', type: ActivityType.Custom },
@@ -76,6 +77,7 @@ const TOOL_ACTIVITY: Record<string, ActivityDisplay> = {
 
 const THINKING_ACTIVITY: ActivityDisplay = { text: '🤔 Thinking...', type: ActivityType.Custom };
 const REASONING_ACTIVITY: ActivityDisplay = { text: '🧩 Reasoning...', type: ActivityType.Custom };
+const WRITING_ACTIVITY: ActivityDisplay = { text: '✍️ Writing response...', type: ActivityType.Custom };
 const IDLE_ACTIVITY: ActivityDisplay = { text: process.env.IDLE_EMOJI ?? '', type: ActivityType.Custom };
 
 // ─── Presence Manager ──────────────────────────────────────────────────────
@@ -111,6 +113,7 @@ export class PresenceManager {
    */
   registerDiscordClient(adapterId: string, client: DiscordClient): void {
     this.discordClients.set(adapterId, client);
+    client.on(Events.ShardResume, () => this.applyActivity(client));
     client.once(Events.ClientReady, () => this.applyActivity(client));
     if (client.isReady()) this.applyActivity(client);
   }
@@ -229,7 +232,6 @@ export class PresenceManager {
       clearTimeout(this.activityTimeout);
       this.activityTimeout = null;
     }
-    if (toolName === 'exec') return;
     const activity = TOOL_ACTIVITY[toolName] ?? {
       text: `${TOOL_EMOJI[toolName] ?? '🧰'} Using ${toolName.replaceAll('_', ' ')}...`,
       type: ActivityType.Custom,
@@ -257,13 +259,15 @@ export class PresenceManager {
   /**
    * Signal the current LLM stream activity without exposing streamed content.
    */
-  llmStreaming(state: 'thinking' | 'reasoning' | 'idle' = 'thinking'): void {
+  llmStreaming(state: 'thinking' | 'reasoning' | 'writing' | 'idle' = 'thinking'): void {
     if (this.activityTimeout) clearTimeout(this.activityTimeout);
     const activity = state === 'reasoning'
       ? REASONING_ACTIVITY
-      : state === 'idle'
-        ? IDLE_ACTIVITY
-        : THINKING_ACTIVITY;
+      : state === 'writing'
+        ? WRITING_ACTIVITY
+        : state === 'idle'
+          ? IDLE_ACTIVITY
+          : THINKING_ACTIVITY;
     this.setActivity(activity);
   }
 
@@ -311,7 +315,7 @@ export class PresenceManager {
       // A normal Playing activity is supported and remains visible in the member list.
       if (!this.currentActivity.text) {
         const status = client.user.presence.status;
-        client.user.setPresence({ activities: [], ...(status === 'offline' ? {} : { status }) });
+        client.user.setPresence({ activities: [], status: status === 'offline' ? 'online' : status });
         return;
       }
       client.user.setActivity(this.currentActivity.text, { type: ActivityType.Playing });

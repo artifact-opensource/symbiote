@@ -2639,7 +2639,7 @@ export class SymbioteGateway {
             presenceManager.llmStreaming('reasoning');
           } else if (ev.type === 'text_delta') {
             presenceManager.startTyping(typingTarget);
-            presenceManager.llmStreaming('idle');
+            presenceManager.llmStreaming('writing');
           } else if (ev.type === 'tool_use_start') {
             presenceManager.stopTyping(typingTarget, false);
           }

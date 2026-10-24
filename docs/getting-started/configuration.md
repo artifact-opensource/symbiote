@@ -33,6 +33,7 @@ The setup flow writes every section below. Values shown are the defaults.
   "apiPort": 3006,
   "webHost": "0.0.0.0",
   "webPort": 3009,
+  "xmcpPort": 9999,
   "allowedOrigins": ["http://127.0.0.1:3009", "http://localhost:3009"],
 
   // Runtime
@@ -138,7 +139,8 @@ SYMBIOTE_WEB_TOKEN=
 | `apiHost` | string | `"127.0.0.1"` | HTTP API bind host |
 | `apiPort` | number | `3006` | HTTP API port |
 | `webHost` | string | `"0.0.0.0"` | Web Control Room bind host |
-| `webPort` | number | `3009` | Web UI port |
+| `webPort` | number | `3009` | React webapp port |
+| `xmcpPort` | number | `9999` | Standalone xMCP HTTP server port |
 
 ## Web UI Configuration
 
@@ -147,7 +149,8 @@ The Web UI runs on a separate port from the HTTP API:
 ```jsonc
 {
   "apiPort": 3006,         // HTTP API (agent runner, channels)
-  "webPort": 3009          // Web UI (browser chat interface)
+  "webPort": 3009,         // React webapp
+  "xmcpPort": 9999         // Standalone xMCP service
 }
 ```
 

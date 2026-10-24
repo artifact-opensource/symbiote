@@ -1,6 +1,6 @@
 # HTTP API
 
-Symbiote exposes an authenticated HTTP API and a separate browser Control Room. The API server defaults to `127.0.0.1:3006`; the Control Room defaults to `0.0.0.0:3009`. Configure these with `apiHost`/`apiPort` and `webHost`/`webPort` in `symbiote.json`.
+Symbiote exposes an authenticated HTTP API and a React browser app. The API server defaults to `127.0.0.1:3006`; the React app defaults to `0.0.0.0:3009`. Configure these with `apiHost`/`apiPort` and `webHost`/`webPort` in `symbiote.json`.
 
 ## Authentication
 
@@ -52,6 +52,8 @@ Returns `501` if relay is not configured.
 ## Web Control Room
 
 The React/Vite Control Room is served on `webPort` (default `3009`), not `apiPort`. Its project management, Agent IDE, project plan, terminal, and run-monitoring features use the gateway's web control API. The UI is built with `npm run build`; it is not a single static HTML file.
+
+xMCP uses `xmcpPort` (default `9999`) and is a separate process; see [xMCP](../../xmcp/README.md).
 
 ## CORS
 

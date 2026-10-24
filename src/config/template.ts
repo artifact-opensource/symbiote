@@ -28,6 +28,7 @@ export interface TemplateInput {
   apiPort?: number;
   webHost?: string;
   webPort?: number;
+  xmcpPort?: number;
   discord?: { enabled?: boolean; botId?: string };
   whatsapp?: { enabled?: boolean; phoneNumber?: string; authDir?: string };
 }
@@ -40,6 +41,7 @@ export function buildConfigTemplate(input: TemplateInput = {}): Record<string, a
   const webHost = input.webHost ?? '0.0.0.0';
   const apiPort = input.apiPort ?? 3006;
   const webPort = input.webPort ?? 3009;
+  const xmcpPort = input.xmcpPort ?? 9999;
   const ownerIds = [...new Set((input.ownerIds ?? []).map(String).filter(Boolean))];
   const discordOn = input.discord?.enabled === true;
   const whatsappOn = input.whatsapp?.enabled === true;
@@ -76,6 +78,7 @@ export function buildConfigTemplate(input: TemplateInput = {}): Record<string, a
     apiPort,
     webHost,
     webPort,
+    xmcpPort,
     allowedOrigins: [`http://127.0.0.1:${webPort}`, `http://localhost:${webPort}`],
 
     toolProgress: true,

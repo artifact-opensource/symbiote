@@ -3,15 +3,17 @@ import assert from 'node:assert/strict';
 import { ActivityType, type Client } from 'discord.js';
 import { PresenceManager } from '../channels/presence.js';
 
-test('Discord presence omits tool execution and response-writing while preserving other activity states', () => {
-  const updates: Array<{ name?: string; type?: ActivityType }> = [];
+test('Discord presence reflects execution and response writing alongside other activity states', () => {
+  const updates: Array<{ name?: string; type?: ActivityType; status?: string }> = [];
+  let resumeActivity: (() => void) | undefined;
   const client = {
     isReady: () => true,
+    on: (_event: unknown, listener: () => void) => { resumeActivity = listener; },
     once: () => undefined,
     user: {
-      presence: { status: 'online' },
+      presence: { status: 'offline' },
       setActivity: (name: string, options?: { type: ActivityType }) => { updates.push({ name, ...options }); },
-      setPresence: () => { updates.push({ name: undefined }); },
+      setPresence: (presence?: { status?: string }) => { updates.push({ name: undefined, status: presence?.status }); },
     },
   } as unknown as Client;
   const manager = new PresenceManager();
@@ -25,8 +27,10 @@ test('Discord presence omits tool execution and response-writing while preservin
   manager.toolStart('exec');
   manager.toolStart('hardware');
   manager.toolStart('edit');
+  manager.toolStart('write');
   manager.toolStart('comb_recall');
-  manager.llmStreaming('idle');
+  manager.llmStreaming('writing');
+  resumeActivity?.();
   manager.endTurn(target);
 
   const states = updates.map(update => update.name);
@@ -34,19 +38,25 @@ test('Discord presence omits tool execution and response-writing while preservin
     undefined,
     '🤔 Thinking...',
     '🧩 Reasoning...',
+    '⚡ Executing...',
     '🔧 Using hardware...',
     '✏️ Editing...',
+    '✍️ Writing...',
     '🧠 Recalling...',
+    '✍️ Writing response...',
+    '✍️ Writing response...',
     undefined,
   ]);
   assert.ok(updates.filter(update => update.name).every(update => update.type === ActivityType.Playing));
+  assert.equal(updates[0].status, 'online');
   manager.stopAll();
 });
 
-test('tool completion returns to thinking while the turn remains active without a typing indicator', async () => {
+test('exec activity returns to thinking after tool completion without a typing indicator', async () => {
   const updates: Array<string | undefined> = [];
   const client = {
     isReady: () => true,
+    on: () => undefined,
     once: () => undefined,
     user: {
       presence: { status: 'online' },
@@ -60,6 +70,7 @@ test('tool completion returns to thinking while the turn remains active without 
 
   manager.beginTurn(target);
   manager.toolStart('exec');
+  assert.equal(updates.at(-1), '⚡ Executing...');
   manager.toolEnd('exec');
   await new Promise(resolve => setTimeout(resolve, 350));
 

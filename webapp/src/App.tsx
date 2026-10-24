@@ -17,7 +17,6 @@ import ReasoningDisplay from './components/ReasoningDisplay';
 import CronPanel from './components/CronPanel';
 import ThreadsPanel from './components/ThreadsPanel';
 import { AgentIcon as AgentGlyph, AgentIconPicker } from './components/AgentIconPicker';
-import AddAppModal from './components/AddAppModal';
 
 declare const __SYMBIOTE_VERSION__: string;
 
@@ -1102,7 +1101,6 @@ export default function App() {
   const [error, setError] = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [recentThreadsOpen, setRecentThreadsOpen] = useState(false);
-const [addAppOpen, setAddAppOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const statusRequest = useRef<Promise<void> | null>(null);
@@ -2351,18 +2349,6 @@ const [addAppOpen, setAddAppOpen] = useState(false);
                   </button>
                 );
               })}
-              {group === 'Tools' && (
-                <button
-                  key="add-app"
-                  className="nav-item"
-                  onClick={() => { setAddAppOpen(true); }}
-                  aria-label="Add new app"
-                  title="Add new app"
-                >
-                  <Plus size={17} strokeWidth={1.8} />
-                  <span>Add app</span>
-                </button>
-              )}
             </div>
           ))}
         </nav>
@@ -2385,7 +2371,6 @@ const [addAppOpen, setAddAppOpen] = useState(false);
               {sessions.length === 0 && <p className="sidebar-empty">Your conversations will appear here.</p>}
             </div>
           </div>
-            <AddAppModal isOpen={addAppOpen} onClose={() => setAddAppOpen(false)} />
         </div>
           <div className="sidebar-footer">
             <a className="sidebar-footer-link" href="https://www.artifactvirtual.com" target="_blank" rel="noreferrer" aria-label="Open Artifact Virtual website">

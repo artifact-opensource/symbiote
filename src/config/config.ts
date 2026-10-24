@@ -107,6 +107,7 @@ export interface SymbioteConfig {
   apiHost?: string;
   webPort?: number;
   webHost?: string;
+  xmcpPort?: number;
   allowedOrigins?: string[];
   heartbeat?: HeartbeatConfigBlock;
   timeouts?: Record<string, number>;
@@ -149,6 +150,7 @@ const DEFAULT_CONFIG: SymbioteConfig = {
   apiHost: '127.0.0.1',
   webPort: 3009,
   webHost: '0.0.0.0',
+  xmcpPort: 9999,
   allowedOrigins: [
     'http://127.0.0.1:3009',
     'http://localhost:3009',

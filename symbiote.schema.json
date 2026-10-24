@@ -36,6 +36,7 @@
     "apiPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
     "webHost": { "type": "string", "default": "0.0.0.0" },
     "webPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "xmcpPort": { "type": "integer", "default": 9999, "minimum": 1, "maximum": 65535, "description": "Standalone xMCP HTTP server port." },
     "allowedOrigins": { "type": "array", "items": { "type": "string" }, "description": "CORS origins. Wildcards are rejected when the API is not bound to loopback." },
 
     "toolProgress": { "type": "boolean", "description": "Show live tool progress in chat channels." },

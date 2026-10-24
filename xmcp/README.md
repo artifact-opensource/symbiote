@@ -1,6 +1,6 @@
-# XMCP — Extended Model Context Protocol
+# xMCP — Extended Model Context Protocol
 
-**XMCP** is the extended MCP (Model Context Protocol) server and bridge system for the Symbiote ecosystem. It provides standardized tool and resource exposure to AI agents.
+**xMCP** is the standalone HTTP service and bridge support for the Symbiote ecosystem.
 
 ## Files
 
@@ -18,43 +18,33 @@
 ## Architecture
 
 ```
-MCP Client (AI Agent)
-        │
-        ▼
-┌─────────────────┐
-│  xmcp-proxy.js   │  ← Routes requests
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  xmcp-server.js  │  ← Tool/resource registry
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  mcp-bridge.js   │  ← Connects to Symbiote tools
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Symbiote Gateway   │  ← Port 3006
-└─────────────────┘
+External caller / tunnel
+          │
+          ▼
+   xMCP HTTP server :9999
+   /health, /bind, /outbound
 ```
 
-## Port Allocation
+The standalone server is not embedded in the Gateway and does not currently proxy requests into the React Control Room or Gateway APIs. Its implemented routes are `/health`, `/bind`, and `/outbound`; all requests require the configured bearer key.
 
-| Port | Service |
-|------|---------|
-| 3009 | XMCP (reserved) |
-| 3006 | Symbiote Gateway |
+## Port
+
+The default xMCP port is `9999`. Set `xmcpPort` in `symbiote.json` or override it with `XMCP_PORT`. Start the service from the repository root with:
+
+```powershell
+$env:SYMBIOTE_CONFIG = "C:\path\to\symbiote.json"
+node xmcp/xmcp-server.cjs
+```
+
+When running behind a tunnel or reverse proxy, route its xMCP origin to `http://127.0.0.1:9999`. Keep the API key in `.mcp/xmcp_api_key` or `XMCP_API_KEY`; do not expose the key in logs or source control.
 
 ## Usage
 
-The XMCP server is started as part of the Symbiote daemon. It does not run as a standalone service — it's embedded in the gateway process.
+The current repository does not register xMCP as a Gateway-managed child process. Run or supervise it separately.
 
 ## API Key
 
-The XMCP API key is stored in `xmcp_api_key`. This is used for authenticating MCP client connections.
+The xMCP API key is stored in `.mcp/xmcp_api_key` by default. This is used for authenticating HTTP requests.
 
 ## Future
 
