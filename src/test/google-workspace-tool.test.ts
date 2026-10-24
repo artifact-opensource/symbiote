@@ -13,32 +13,6 @@ test('Google Workspace tool sends the short-lived bearer token to the selected G
     return new Response(JSON.stringify({ id: 'document-1' }), { status: 200 });
   });
 
-  test('Google Workspace tool can route requests to every Workspace API', async () => {
-    const applications = [
-      ['www.googleapis.com', '/drive/v3/files'],
-      ['gmail.googleapis.com', '/v1/users/me/profile'],
-      ['calendar.googleapis.com', '/calendar/v3/calendars/primary'],
-      ['people.googleapis.com', '/v1/people/me'],
-      ['docs.googleapis.com', '/v1/documents/document-1'],
-      ['sheets.googleapis.com', '/v4/spreadsheets/sheet-1'],
-      ['slides.googleapis.com', '/v1/presentations/slides-1'],
-      ['tasks.googleapis.com', '/tasks/v1/users/@me/lists'],
-      ['chat.googleapis.com', '/v1/spaces'],
-      ['forms.googleapis.com', '/v1/forms/form-1'],
-    ] as const;
-    const visited: string[] = [];
-    const tool = createGoogleWorkspaceTool(async input => {
-      visited.push(String(input));
-      return new Response('{}');
-    });
-
-    for (const [host, path] of applications) {
-      const result = await tool.execute({ host, path, method: 'GET' }, { googleWorkspaceAccessToken: 'ephemeral-token' });
-      assert.deepEqual(JSON.parse(result), {});
-    }
-    assert.deepEqual(visited, applications.map(([host, path]) => `https://${host}${path}`));
-  });
-
   const result = await tool.execute({
     host: 'docs.googleapis.com',
     path: '/v1/documents/document-1',
@@ -54,6 +28,32 @@ test('Google Workspace tool sends the short-lived bearer token to the selected G
   assert.equal(requestInit?.method, 'PATCH');
   assert.deepEqual(JSON.parse(String(requestInit?.body)), { title: 'Updated title' });
   assert.deepEqual(JSON.parse(result), { id: 'document-1' });
+});
+
+test('Google Workspace tool can route requests to every Workspace API', async () => {
+  const applications = [
+    ['www.googleapis.com', '/drive/v3/files'],
+    ['gmail.googleapis.com', '/v1/users/me/profile'],
+    ['calendar.googleapis.com', '/calendar/v3/calendars/primary'],
+    ['people.googleapis.com', '/v1/people/me'],
+    ['docs.googleapis.com', '/v1/documents/document-1'],
+    ['sheets.googleapis.com', '/v4/spreadsheets/sheet-1'],
+    ['slides.googleapis.com', '/v1/presentations/slides-1'],
+    ['tasks.googleapis.com', '/tasks/v1/users/@me/lists'],
+    ['chat.googleapis.com', '/v1/spaces'],
+    ['forms.googleapis.com', '/v1/forms/form-1'],
+  ] as const;
+  const visited: string[] = [];
+  const tool = createGoogleWorkspaceTool(async input => {
+    visited.push(String(input));
+    return new Response('{}');
+  });
+
+  for (const [host, path] of applications) {
+    const result = await tool.execute({ host, path, method: 'GET' }, { googleWorkspaceAccessToken: 'ephemeral-token' });
+    assert.deepEqual(JSON.parse(result), {});
+  }
+  assert.deepEqual(visited, applications.map(([host, path]) => `https://${host}${path}`));
 });
 
 test('Google Workspace tool rejects missing access, non-Google hosts, and malformed API paths', async () => {
