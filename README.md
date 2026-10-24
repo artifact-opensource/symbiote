@@ -161,3 +161,5 @@ Additional guides live in [`docs/`](docs/README.md). Start with [Quick Start](do
 ## License
 
 [MIT](LICENSE)
+
+[![Build and publish release assets](https://github.com/artifact-opensource/symbiote/actions/workflows/release.yml/badge.svg)](https://github.com/artifact-opensource/symbiote/actions/workflows/release.yml)
