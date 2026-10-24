@@ -7,7 +7,9 @@
 [![Version](https://img.shields.io/badge/version-5.6.0-blue?style=flat-square)](https://github.com/Artifact-Virtual/symbiote/releases)
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-project-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-[![MIT License](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE)
+[![MIT License](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE) <br>
+[![Build and release assets](https://github.com/artifact-opensource/symbiote/actions/workflows/release.yml/badge.svg)](https://github.com/artifact-opensource/symbiote/actions/workflows/release.yml)
+
 
 [Features](#persistent-intelligent-and-built-for-real-work) · [Quick start](#quick-start) · [Configuration](#configuration) · [Memory](#memory) · [CLI](#cli)
 
@@ -162,4 +164,3 @@ Additional guides live in [`docs/`](docs/README.md). Start with [Quick Start](do
 
 [MIT](LICENSE)
 
-[![Build and publish release assets](https://github.com/artifact-opensource/symbiote/actions/workflows/release.yml/badge.svg)](https://github.com/artifact-opensource/symbiote/actions/workflows/release.yml)
