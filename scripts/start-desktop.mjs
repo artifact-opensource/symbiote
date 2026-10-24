@@ -67,6 +67,7 @@ function hasBuildOutputs() {
     path.join(root, 'dist', 'gateway', 'daemon.js'),
     path.join(root, 'webapp', 'dist', 'index.html'),
     path.join(root, 'dist', 'webapp', 'dist', 'index.html'),
+    path.join(root, 'desktop', 'app-icon.ico'),
   ];
   return requiredFiles.every(file => fs.existsSync(file));
 }
@@ -74,60 +75,18 @@ function hasBuildOutputs() {
 function stopPreviousInstances() {
   if (process.platform !== 'win32') return;
 
-  const script = String.raw`
-$root = [System.IO.Path]::GetFullPath($env:SYMBIOTE_LAUNCH_ROOT).TrimEnd('\')
-$all = @(Get-CimInstance Win32_Process)
-$roots = @($all | Where-Object {
-  $_.CommandLine -and (
-    ($_.Name -ieq 'electron.exe' -and $_.CommandLine.IndexOf("$root\desktop\main.cjs", [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
-    ($_.Name -ieq 'node.exe' -and $_.CommandLine.IndexOf("$root\dist\gateway\daemon.js", [StringComparison]::OrdinalIgnoreCase) -ge 0)
-  )
-})
-$ids = [System.Collections.Generic.HashSet[int]]::new()
-foreach ($item in $roots) { [void]$ids.Add([int]$item.ProcessId) }
-do {
-  $added = $false
-  foreach ($item in $all) {
-    if ($ids.Contains([int]$item.ParentProcessId) -and $ids.Add([int]$item.ProcessId)) { $added = $true }
-  }
-} while ($added)
-foreach ($processId in $ids) {
-  try {
-    Stop-Process -Id $processId -Force -ErrorAction Stop
-  } catch {
-    if (Get-Process -Id $processId -ErrorAction SilentlyContinue) {
-      Write-Error "Could not stop Symbiote process $($processId): $($_.Exception.Message)"
-      exit 1
-    }
-  }
-}
-$deadline = [DateTime]::UtcNow.AddSeconds(10)
-while ($true) {
-  $remaining = @(Get-CimInstance Win32_Process | Where-Object {
-    $_.CommandLine -and (
-      ($_.Name -ieq 'electron.exe' -and $_.CommandLine.IndexOf("$root\desktop\main.cjs", [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
-      ($_.Name -ieq 'node.exe' -and $_.CommandLine.IndexOf("$root\dist\gateway\daemon.js", [StringComparison]::OrdinalIgnoreCase) -ge 0)
-    )
-  })
-  if ($remaining.Count -eq 0) { break }
-  if ([DateTime]::UtcNow -ge $deadline) {
-    $remaining | ForEach-Object { Write-Error "Symbiote process $($_.ProcessId) is still running: $($_.CommandLine)" }
-    exit 1
-  }
-  Start-Sleep -Milliseconds 500
-}
-`;
-  const encodedScript = Buffer.from(script, 'utf16le').toString('base64');
+  const script = path.join(root, 'scripts', 'windows', 'stop-symbiote.ps1');
   const result = spawnSync('powershell.exe', [
     '-NoProfile',
     '-NonInteractive',
     '-ExecutionPolicy',
     'Bypass',
-    '-EncodedCommand',
-    encodedScript,
+    '-File',
+    script,
+    '-Root',
+    root,
   ], {
     cwd: root,
-    env: { ...process.env, SYMBIOTE_LAUNCH_ROOT: root },
     stdio: 'inherit',
   });
   if (result.error) throw result.error;
@@ -146,21 +105,47 @@ function checkGateway(port) {
       path: '/api/status',
       timeout: 2000,
     }, response => {
-      response.resume();
-      response.once('end', () => resolve(response.statusCode === 200));
+      const chunks = [];
+      response.on('data', chunk => chunks.push(Buffer.from(chunk)));
+      response.once('end', () => {
+        if (response.statusCode !== 200) return resolve(null);
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        } catch {
+          resolve(null);
+        }
+      });
     });
     request.once('timeout', () => request.destroy(new Error('Gateway readiness request timed out.')));
-    request.once('error', () => resolve(false));
+    request.once('error', () => resolve(null));
   });
 }
 
-async function waitForGateway(port, child) {
+function readGatewayProcessRecord(recordPath) {
+  try {
+    return JSON.parse(fs.readFileSync(recordPath, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function waitForGateway(port, child, recordPath, configPath, daemonPath) {
   const deadline = Date.now() + 5 * 60_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(`The Symbiote desktop exited before the Gateway became healthy (exit ${child.exitCode}).`);
     }
-    if (await checkGateway(port)) return;
+    const status = await checkGateway(port);
+    if (status) {
+      const record = readGatewayProcessRecord(recordPath);
+      if (!record || status.pid !== record.pid
+        || path.resolve(record.configPath) !== configPath
+        || path.resolve(record.daemonPath) !== daemonPath) {
+        throw new Error(`Port ${port} returned HTTP 200, but it is not served by this launch's Gateway child.`);
+      }
+      return;
+    }
     await wait(1000);
   }
   throw new Error(`The Gateway did not return HTTP 200 from /api/status on port ${port} within five minutes.`);
@@ -199,6 +184,9 @@ const launchLog = path.join(root, '.session', 'desktop-launch.log');
 fs.mkdirSync(path.dirname(launchLog), { recursive: true });
 const logFd = fs.openSync(launchLog, 'w');
 const configPath = path.join(root, 'symbiote.json');
+const daemonPath = path.join(root, 'dist', 'gateway', 'daemon.js');
+const gatewayProcessPath = path.join(root, '.session', 'desktop-gateway-process.json');
+fs.rmSync(gatewayProcessPath, { force: true });
 const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 const gatewayPort = Number(config.webPort ?? 3009);
 if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65535) {
@@ -217,6 +205,7 @@ try {
     env: {
       ...process.env,
       SYMBIOTE_CONFIG: configPath,
+      SYMBIOTE_GATEWAY_PROCESS_PATH: gatewayProcessPath,
       ...(hasBuildSource ? { SYMBIOTE_BUILD_READY: '1' } : {}),
     },
   });
@@ -224,7 +213,7 @@ try {
     child.once('error', reject);
     child.once('spawn', resolve);
   });
-  await waitForGateway(gatewayPort, child);
+  await waitForGateway(gatewayPort, child, gatewayProcessPath, configPath, daemonPath);
   child.unref();
 } catch (error) {
   try {

@@ -19,7 +19,9 @@ let overlayOpacity = 0.88;
 let declinedFirewallPort;
 let desktopTheme;
 const preferencesPath = path.join(app.getPath('userData'), 'desktop-preferences.json');
-const gatewayProcessPath = path.join(app.getPath('userData'), 'gateway-process.json');
+const gatewayProcessPath = process.env.SYMBIOTE_GATEWAY_PROCESS_PATH
+  ? path.resolve(process.env.SYMBIOTE_GATEWAY_PROCESS_PATH)
+  : path.join(app.getPath('userData'), 'gateway-process.json');
 const gatewaySupervisorLogPath = path.join(app.getPath('userData'), 'logs', 'gateway-supervisor.log');
 const gatewayRequestTimeoutMs = 10_000;
 const gatewayStartupTimeoutMs = 5 * 60_000;
@@ -41,6 +43,7 @@ let desktopControlToken;
 let updateInstallArmed = false;
 let updateInstallTimer;
 let resolveUpdateInstall;
+let maintenanceActionRunning = false;
 
 function logGatewaySupervisor(message) {
   const line = `${new Date().toISOString()} ${message}\n`;
@@ -948,6 +951,87 @@ function showMainWindow() {
   mainWindow.focus();
 }
 
+function runMaintenanceAction(action) {
+  if (maintenanceActionRunning) {
+    return Promise.reject(new Error('A Symbiote maintenance action is already running.'));
+  }
+  if (process.platform !== 'win32') {
+    return Promise.reject(new Error('Tray update and full-restart actions are currently supported only by the Windows launcher.'));
+  }
+  if (action === 'update' && app.isPackaged) {
+    return Promise.reject(new Error('The source-checkout updater is not available in the installed app. Use the Control Room update installer instead.'));
+  }
+
+  const root = path.resolve(__dirname, '..');
+  const script = path.join(root, 'scripts', 'windows', 'update-symbiote.ps1');
+  const launcher = path.join(root, 'symbiote.exe');
+  if (!fs.existsSync(script)) {
+    return Promise.reject(new Error(`The Symbiote maintenance script is missing: ${script}`));
+  }
+  if (action === 'restart' && !fs.existsSync(launcher)) {
+    return Promise.reject(new Error(`The Symbiote launcher is missing: ${launcher}`));
+  }
+
+  let controlPath = desktopControlPath;
+  if (!controlPath) {
+    const gateway = readGatewayConfig();
+    controlPath = path.join(gateway.configDirectory, '.session', 'desktop-control.json');
+  }
+  const args = [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    script,
+    '-Root',
+    root,
+    '-DesktopProcessId',
+    String(process.pid),
+    '-DesktopControlPath',
+    controlPath,
+    ...(action === 'restart' ? ['-RestartOnly'] : ['-FromTray']),
+  ];
+
+  maintenanceActionRunning = true;
+  return new Promise((resolve, reject) => {
+    const child = spawn('powershell.exe', args, {
+      cwd: root,
+      detached: true,
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    child.once('error', error => {
+      maintenanceActionRunning = false;
+      reject(new Error(`Could not start the Symbiote ${action} flow: ${error.message}`));
+    });
+    child.once('spawn', () => {
+      child.unref();
+      resolve();
+    });
+    child.once('exit', code => {
+      maintenanceActionRunning = false;
+      if (code !== 0) {
+        logGatewaySupervisor(`Symbiote ${action} helper exited with code ${code ?? 'none'}.`);
+      }
+    });
+  });
+}
+
+function restartDesktop() {
+  if (app.isPackaged) {
+    app.relaunch();
+    app.quit();
+    return;
+  }
+  void runMaintenanceAction('restart').then(() => {
+    app.quit();
+  }).catch(error => {
+    console.error('Could not restart the complete Symbiote desktop:', error);
+    dialog.showErrorBox('Symbiote restart failed', error.message);
+  });
+}
+
 function createTray() {
   if (tray) return;
   const icon = nativeImage.createFromPath(path.join(__dirname, process.platform === 'win32' ? 'app-icon.ico' : 'tray-icon.png'));
@@ -956,12 +1040,13 @@ function createTray() {
   tray.setToolTip('Symbiote');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Symbiote', click: showMainWindow },
-    { label: 'Restart Gateway', click: () => {
-      void restartManagedGateway().catch(error => {
-        console.error('Could not restart the Symbiote Gateway:', error);
-        dialog.showErrorBox('Gateway restart failed', error.message);
+    { label: 'Check for updates', click: () => {
+      void runMaintenanceAction('update').catch(error => {
+        console.error('Could not check for Symbiote updates:', error);
+        dialog.showErrorBox('Symbiote update check failed', error.message);
       });
     } },
+    { label: 'Restart Symbiote', click: restartDesktop },
     { type: 'separator' },
     { label: 'Quit Symbiote', click: () => app.quit() },
   ]));

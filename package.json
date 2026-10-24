@@ -13,6 +13,8 @@
     "webapp/dist",
     "desktop",
     "scripts/start-desktop.mjs",
+    "scripts/windows/stop-symbiote.ps1",
+    "scripts/windows/update-symbiote.ps1",
     "skills/cron-autonomy",
     "README.md",
     "CHANGELOG.md",

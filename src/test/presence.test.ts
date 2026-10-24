@@ -22,14 +22,14 @@ test('Discord presence reflects execution and response writing alongside other a
   manager.registerAdapter('discord-main', async () => undefined);
   const target = { adapterId: 'discord-main', chatId: 'channel' };
   manager.beginTurn(target);
-  manager.llmStreaming('thinking');
-  manager.llmStreaming('reasoning');
-  manager.toolStart('exec');
-  manager.toolStart('hardware');
-  manager.toolStart('edit');
-  manager.toolStart('write');
-  manager.toolStart('comb_recall');
-  manager.llmStreaming('writing');
+  manager.llmStreaming(target, 'thinking');
+  manager.llmStreaming(target, 'reasoning');
+  manager.toolStart(target, 'exec');
+  manager.toolStart(target, 'hardware');
+  manager.toolStart(target, 'edit');
+  manager.toolStart(target, 'write');
+  manager.toolStart(target, 'comb_recall');
+  manager.llmStreaming(target, 'writing');
   resumeActivity?.();
   manager.endTurn(target);
 
@@ -69,9 +69,9 @@ test('exec activity returns to thinking after tool completion without a typing i
   const target = { adapterId: 'discord-main', chatId: 'channel' };
 
   manager.beginTurn(target);
-  manager.toolStart('exec');
+  manager.toolStart(target, 'exec');
   assert.equal(updates.at(-1), '⚡ Executing...');
-  manager.toolEnd('exec');
+  manager.toolEnd(target, 'exec');
   await new Promise(resolve => setTimeout(resolve, 350));
 
   assert.equal(updates.at(-1), '🤔 Thinking...');
@@ -88,18 +88,48 @@ test('typing notifications are opt-in and do not start for thinking, reasoning, 
     typingCalls.push({ chatId, durationMs });
   });
 
-  manager.llmStreaming('thinking');
-  manager.llmStreaming('reasoning');
-  manager.toolStart('exec');
+  manager.llmStreaming(target, 'thinking');
+  manager.llmStreaming(target, 'reasoning');
+  manager.toolStart(target, 'exec');
   assert.deepEqual(typingCalls, []);
 
   manager.startTyping(target);
-  manager.llmStreaming('idle');
+  manager.llmStreaming(target, 'idle');
   assert.deepEqual(typingCalls, [{ chatId: 'chat', durationMs: Infinity }]);
   manager.stopTyping(target);
   assert.deepEqual(typingCalls, [
     { chatId: 'chat', durationMs: Infinity },
     { chatId: 'chat', durationMs: 0 },
   ]);
+  manager.stopAll();
+});
+
+test('one Discord turn finishing a tool does not hide another turn still executing', async () => {
+  const updates: Array<string | undefined> = [];
+  const client = {
+    isReady: () => true,
+    on: () => undefined,
+    once: () => undefined,
+    user: {
+      presence: { status: 'online' },
+      setActivity: (name: string) => { updates.push(name); },
+      setPresence: () => { updates.push(undefined); },
+    },
+  } as unknown as Client;
+  const manager = new PresenceManager();
+  manager.registerDiscordClient('discord-main', client);
+  const first = { adapterId: 'discord-main', chatId: 'first-channel' };
+  const second = { adapterId: 'discord-main', chatId: 'second-channel' };
+
+  manager.beginTurn(first);
+  manager.toolStart(first, 'exec');
+  manager.beginTurn(second);
+  manager.toolStart(second, 'write');
+  manager.toolEnd(second, 'write');
+  await new Promise(resolve => setTimeout(resolve, 350));
+
+  assert.equal(updates.at(-1), '⚡ Executing...');
+  manager.endTurn(first);
+  manager.endTurn(second);
   manager.stopAll();
 });

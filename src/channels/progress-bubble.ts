@@ -123,6 +123,7 @@ export class ToolProgressBubble {
     private timer: ReturnType<typeof setTimeout> | null = null;
     private closed = false;
     private totalCount = 0;
+    private lastRenderedText: string | null = null;
     private flushPromise: Promise<boolean> | null = null;
     private flushPending = false;
     private forcePending = false;
@@ -235,6 +236,9 @@ export class ToolProgressBubble {
             }
         }
         const text = this.render();
+        if (this.messageId !== null && this.messageId !== '' && text === this.lastRenderedText) {
+            return true;
+        }
         try {
             if (this.messageId === null) {
                 const r = await this.deps.send(this.adapterId, this.chatId, text);
@@ -243,6 +247,7 @@ export class ToolProgressBubble {
                 }
                 // '' sentinel = sent but not editable (no messageId back)
                 this.messageId = r && r.messageId ? r.messageId : '';
+                this.lastRenderedText = text;
                 if (this.deps.edit === null) this.closed = false;
             }
             else if (this.messageId !== '' && this.deps.edit) {
@@ -250,6 +255,7 @@ export class ToolProgressBubble {
                 if (edited === null || edited === false) {
                     throw new Error('Channel did not confirm the progress-message edit.');
                 }
+                this.lastRenderedText = text;
             }
             this.lastEdit = Date.now();
             return this.messageId !== '';

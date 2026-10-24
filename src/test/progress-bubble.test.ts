@@ -122,6 +122,33 @@ test('concurrent tool events create one message and finalization leaves one summ
   assert.equal(edits.at(-1), '✅ **Done — 1 tool call**');
 });
 
+test('finalization does not repeat an in-flight final summary edit', async () => {
+  const sent: string[] = [];
+  const edits: string[] = [];
+  let releaseSend!: (result: { messageId: string }) => void;
+  const firstSend = new Promise<{ messageId: string }>(resolve => { releaseSend = resolve; });
+  const bubble = new ToolProgressBubble({
+    enabled: true,
+    send: async (_adapterId, _chatId, content) => {
+      sent.push(content);
+      return firstSend;
+    },
+    edit: async (_adapterId, _chatId, _messageId, content) => {
+      edits.push(content);
+    },
+  }, 'discord-main', 'channel');
+
+  const firstTool = bubble.toolLine('read', { path: 'README.md' });
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const secondTool = bubble.toolLine('edit', { path: 'README.md' });
+  const finalization = bubble.finalize();
+  releaseSend({ messageId: 'progress-message' });
+  await Promise.all([firstTool, secondTool, finalization]);
+
+  assert.equal(sent.length, 1);
+  assert.deepEqual(edits, ['✅ **Done — 2 tool calls**']);
+});
+
 test('tool completion does not trigger an additional progress-message edit', async () => {
   const sent: string[] = [];
   const edits: string[] = [];

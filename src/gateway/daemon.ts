@@ -92,6 +92,7 @@ import { registerBuiltinTools } from '../tools/builtin/register.js';
 import { SubAgentManager } from '../sessions/sub-agent.js';
 import { createMessageTool, createTypingTool, createPresenceTool, createDeleteMessageTool, createMarkReadTool } from '../tools/builtin/message.js';
 import { createWorkspaceSessionManager, SessionManager } from '../sessions/manager.js';
+import { acquireGatewayInstanceLock } from './instance-lock.js';
 import { WorkspaceRegistry, type WorkspaceProject } from '../agent/workspace-registry.js';
 import { ProjectTerminalManager } from '../web/project-terminal.js';
 import { buildSystemPrompt } from '../agent/system-prompt.js';
@@ -979,6 +980,7 @@ export class SymbioteGateway {
             interaction,
           ),
         );
+        adapter.onClientReady(client => presenceManager.registerDiscordClient(adapterId, client));
         // Day 21 — Mention-Only Protocol: one rule for all bots.
         // Process message only if it @mentions this bot's ID (or is a DM).
         const policy: ChannelPolicy = {
@@ -996,9 +998,6 @@ export class SymbioteGateway {
         );
         console.log(ok(`Discord ${palette.cyan}${adapterId}${palette.reset} ${palette.green}connected${palette.reset}`));
         presenceManager.registerAdapter(adapterId, (chatId, durationMs) => adapter.typing(chatId, durationMs));
-        // Register Discord client for rich activity presence
-        const discordClient = adapter.getClient();
-        if (discordClient) presenceManager.registerDiscordClient(adapterId, discordClient);
         // Store per-adapter prompt file overrides
         if (dcfg.promptFiles?.length) {
           this.adapterPromptFiles.set(adapterId, dcfg.promptFiles);
@@ -2636,10 +2635,10 @@ export class SymbioteGateway {
           }
           if (ev.type === 'thinking_delta') {
             presenceManager.stopTyping(typingTarget, false);
-            presenceManager.llmStreaming('reasoning');
+            presenceManager.llmStreaming(typingTarget, 'reasoning');
           } else if (ev.type === 'text_delta') {
             presenceManager.startTyping(typingTarget);
-            presenceManager.llmStreaming('writing');
+            presenceManager.llmStreaming(typingTarget, 'writing');
           } else if (ev.type === 'tool_use_start') {
             presenceManager.stopTyping(typingTarget, false);
           }
@@ -2647,13 +2646,13 @@ export class SymbioteGateway {
         onToolStart: (name: string, input: Record<string, unknown>) => {
           presenceManager.stopTyping(typingTarget, false);
           console.log(`  ${palette.violet}[TOOL] ${name}${palette.reset}`);
-          presenceManager.toolStart(name);
+          presenceManager.toolStart(typingTarget, name);
           void progressBubble.toolLine(name, input);
         },
         onToolEnd: (name: string, res: string) => {
           const preview = res.length > 100 ? res.slice(0, 100) + '...' : res;
           console.log(`  ${palette.green}✓ ${name}${palette.reset} ${palette.dim}${preview.split('\n')[0]}${palette.reset}`);
-          presenceManager.toolEnd(name);
+          presenceManager.toolEnd(typingTarget, name);
         },
         onTodoCompleted: async (update: TodoCompletionUpdate) => {
           await progressBubble.todoLine(formatTodoProgressUpdate(update));
@@ -3393,9 +3392,15 @@ export async function startGateway(configPath?: string): Promise<SymbioteGateway
     webHost: config.webHost ?? '0.0.0.0',
   };
 
-  const gateway = new SymbioteGateway(gatewayConfig);
-  await gateway.start();
-  return gateway;
+  const releaseInstanceLock = acquireGatewayInstanceLock(config.workspace);
+  try {
+    const gateway = new SymbioteGateway(gatewayConfig);
+    await gateway.start();
+    return gateway;
+  } catch (error) {
+    releaseInstanceLock();
+    throw error;
+  }
 }
 
 // Run directly

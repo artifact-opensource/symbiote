@@ -99,6 +99,8 @@ export class DiscordAdapter extends BaseAdapter {
   readonly capabilities = DISCORD_CAPABILITIES;
 
   private client?: Client;
+  private connectionConfig?: DiscordAdapterConfig;
+  private clientReadyHandlers = new Set<(client: Client) => void>();
   private token = '';
   private botId = '';
   private channelId = '';
@@ -121,6 +123,7 @@ export class DiscordAdapter extends BaseAdapter {
 
   protected async platformConnect(config: ChannelConfig): Promise<void> {
     const discordConfig = config as DiscordAdapterConfig;
+    this.connectionConfig = discordConfig;
     this.token = discordConfig.token;
     this.channelId = discordConfig.channelId ?? '';
 
@@ -171,6 +174,13 @@ export class DiscordAdapter extends BaseAdapter {
     this.client.on(Events.ClientReady, () => {
       this.botId = this.client!.user?.id ?? '';
       console.log(`[${this.id}] Connected as ${this.client!.user?.tag} (${this.botId})`);
+      for (const handler of this.clientReadyHandlers) {
+        try {
+          handler(this.client!);
+        } catch (err) {
+          console.error(`[${this.id}] Client-ready handler failed:`, err);
+        }
+      }
       void this.registerSlashCommands().catch((err) => {
         console.error(`[${this.id}] Slash command registration failed:`, err);
       });
@@ -282,7 +292,15 @@ export class DiscordAdapter extends BaseAdapter {
   protected async platformReconnect(): Promise<void> {
     this.client?.destroy();
     this.client = undefined;
-    await this.platformConnect({ token: this.token } as ChannelConfig);
+    if (!this.connectionConfig) {
+      throw new Error(`Cannot reconnect Discord adapter ${this.id}: its connection configuration was not retained.`);
+    }
+    await this.platformConnect(this.connectionConfig);
+  }
+
+  onClientReady(handler: (client: Client) => void): void {
+    this.clientReadyHandlers.add(handler);
+    if (this.client?.isReady()) handler(this.client);
   }
 
   // ── Inbound Handlers ──────────────────────────────────────────────────

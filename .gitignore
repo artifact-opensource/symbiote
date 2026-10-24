@@ -73,6 +73,9 @@ whatsapp-auth/
 !/skills/cron-autonomy/
 !/skills/cron-autonomy/SKILL.md
 /.index/
+!/.index/
+/.index/*
+!/.index/agent-loop-map.md
 
 # ── Logs ────────────────────────────────────────────────
 *.log
