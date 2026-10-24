@@ -69,12 +69,6 @@ jobs:
       - run: node node_modules/electron/install.js
       - run: npm --prefix webapp ci
       - run: npm run build:msi
-      - name: Add MSI checksum
-        shell: pwsh
-        run: |
-          $msi = Get-ChildItem dist\windows-installer\*.msi
-          $hash = (Get-FileHash -LiteralPath $msi.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $($msi.Name)" | Set-Content -Encoding ascii (Join-Path $msi.DirectoryName 'SHA256SUMS-windows.txt')
       - uses: actions/upload-artifact@v4
         with:
           name: windows-release-assets

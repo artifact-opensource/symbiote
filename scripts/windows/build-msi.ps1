@@ -26,6 +26,22 @@ $nssmSha256 = 'DD65D65D805CE646148D7BA18A9FCD1A1E8402F9E3822981252A6544136AAD22'
 $wixUrl = 'https://github.com/wixtoolset/wix3/releases/download/wix3112rtm/wix311-binaries.zip'
 $wixSha256 = '2C1888D5D1DBA377FC7FA14444CF556963747FF9A0A289A3599CF09DA03B9E2E'
 
+function Get-Sha256Hash([string]$Path) {
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+      return [BitConverter]::ToString($sha256.ComputeHash($stream)).Replace('-', '')
+    }
+    finally {
+      $stream.Dispose()
+    }
+  }
+  finally {
+    $sha256.Dispose()
+  }
+}
+
 function Get-VerifiedArchive([string]$Url, [string]$Destination, [string]$ExpectedSha256) {
   $archiveName = [IO.Path]::GetFileName($Destination)
   $cachedArchive = if ($DependencyCacheDirectory) { Join-Path $DependencyCacheDirectory $archiveName } else { '' }
@@ -41,7 +57,7 @@ function Get-VerifiedArchive([string]$Url, [string]$Destination, [string]$Expect
     }
   }
 
-  $actualSha256 = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash
+  $actualSha256 = Get-Sha256Hash -Path $Destination
   if ($actualSha256 -ne $ExpectedSha256) {
     throw "SHA-256 verification failed for $Destination."
   }
@@ -202,9 +218,13 @@ try {
     (Join-Path $objectDirectory 'ApplicationFiles.wixobj')
   if ($LASTEXITCODE -ne 0) { throw "WiX light failed (exit $LASTEXITCODE)." }
 
-  $hash = (Get-FileHash -LiteralPath $msiPath -Algorithm SHA256).Hash
+  $hash = Get-Sha256Hash -Path $msiPath
   Write-Host "Created $msiPath"
   Write-Host "SHA-256 $hash"
+  $checksumPath = Join-Path $OutputDirectory 'SHA256SUMS-windows.txt'
+  $checksumLine = '{0}  {1}' -f $hash.ToLowerInvariant(), [IO.Path]::GetFileName($msiPath)
+  [IO.File]::WriteAllText($checksumPath, "$checksumLine`n", [Text.Encoding]::ASCII)
+  Write-Host "Created $checksumPath"
 }
 finally {
   if (Test-Path -LiteralPath $workDirectory) {

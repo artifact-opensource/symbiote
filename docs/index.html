@@ -86,6 +86,9 @@
         <!-- Background Ambient Glow -->
         <div class="absolute w-[240px] h-[240px] sm:w-[350px] sm:h-[350px] md:w-[600px] md:h-[600px] bg-gradient-to-tr from-neutral-900 to-neutral-800 rounded-full blur-3xl opacity-20 -z-10 pointer-events-none"></div>
 
+        <!-- Mascot -->
+        <img src="../assets/mascot.png" alt="Symbiote mascot" class="w-24 h-24 sm:w-32 sm:h-32 object-contain mb-6 sm:mb-8 drop-shadow-[0_0_28px_rgba(74,222,128,0.28)]">
+
         <!-- Main Headline -->
         <h1 class="text-3xl sm:text-5xl md:text-7xl font-light tracking-tight max-w-4xl leading-[1.15] mb-4 sm:mb-6">
             AUTONOMOUS<br>SUPER-AGENTS<br>AT SCALE
@@ -95,6 +98,18 @@
         <p class="text-neutral-400 text-sm sm:text-lg md:text-xl max-w-xl font-light leading-relaxed mb-8 px-2">
             A single-process foundry for building distributed agents and networks. With long-running workflows and drop-in persistence for any type of job.
         </p>
+
+        <!-- Windows Installer -->
+        <a href="https://github.com/artifact-opensource/symbiote/releases/latest" target="_blank" rel="noopener noreferrer" class="group mb-4 inline-flex items-center gap-3 rounded-lg border border-emerald-900/70 bg-emerald-950/30 px-5 py-3 text-left transition-all hover:border-emerald-500/70 hover:bg-emerald-950/60 hover:shadow-[0_0_24px_rgba(16,185,129,0.12)]">
+            <span class="flex h-9 w-9 items-center justify-center rounded-md border border-emerald-800/70 bg-emerald-900/30 text-emerald-300 transition-colors group-hover:text-emerald-200">
+                <i class="fa-brands fa-windows text-sm"></i>
+            </span>
+            <span class="flex flex-col">
+                <span class="text-sm font-medium text-neutral-100">Download for Windows</span>
+                <span class="mt-0.5 font-mono text-[10px] tracking-wide text-emerald-400/80">MSI INSTALLER · X64 · LATEST RELEASE</span>
+            </span>
+            <i class="fa-solid fa-arrow-down text-xs text-emerald-400/70 transition-transform group-hover:translate-y-0.5"></i>
+        </a>
 
         <!-- Command Install Box -->
         <div id="install" class="w-full max-w-xs sm:max-w-sm bg-neutral-950 border border-neutral-800 rounded-lg p-1.5 sm:p-2 flex items-center justify-between text-left shadow-2xl transition-all">
