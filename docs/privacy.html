@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Privacy information for the Symbiote website and self-hosted software.">
+    <title>Privacy Policy | Symbiote</title>
+    <link rel="icon" type="image/x-icon" href="../assets/biohazard_white.ico">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&family=Lexend:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./legal.css">
+</head>
+<body>
+    <div class="site-shell">
+        <header class="site-header">
+            <a href="./index.html" class="brand">SYMBIOTE</a>
+            <a href="./index.html" class="home-link">Back to home</a>
+        </header>
+
+        <main>
+            <p class="eyebrow">Legal</p>
+            <h1>Privacy Policy</h1>
+            <p class="updated">Last updated: October 25, 2026</p>
+
+            <p>This policy describes how the Symbiote website and self-hosted Symbiote software handle information. Symbiote is maintained by Artifact Virtual (SMC-Private) Limited ("Artifact Virtual," "we," or "us").</p>
+
+            <section>
+                <h2>Website and downloads</h2>
+                <p>The website does not require an account or ask you to submit personal details. To display the page and find current release downloads, it loads resources from Google Fonts, cdnjs, the Tailwind CSS CDN, and the GitHub Releases API. The site host and these services may receive standard connection information, such as your IP address, browser and device headers, requested URL, referrer, and request time. Their own privacy notices govern how they handle that information.</p>
+                <p>The page does not implement first-party account, advertising, or analytics features and does not intentionally set first-party tracking cookies. Following download links or using the npm command connects your browser or package manager to GitHub, npm, or the services you choose.</p>
+            </section>
+
+            <section>
+                <h2>Using the self-hosted software</h2>
+                <p>Symbiote runs in the environment you install and configure. It can process information you provide to agents, sessions, tools, and integrations. Providers, channels, MCP servers, and other services you connect may receive the inputs or outputs needed to perform the actions you request. Their privacy practices and terms apply to that processing; review them before connecting a service or sending sensitive information.</p>
+                <p>Symbiote's runtime metrics are stored locally by default in <code>.symbiote/metrics</code>. They can include provider call, token, latency, and error details; tool call and duration statistics; session counters; and system resource snapshots. The metrics history rotates after seven days by default, and the storage directory is configurable. Other application data may also be stored according to your configuration. Review local records before sharing them, as error details or user-provided content may be sensitive.</p>
+            </section>
+
+            <section>
+                <h2>Retention and your choices</h2>
+                <p>Website request logs are handled by the site host and external services under their respective policies. Local Symbiote records remain in the storage configured for your installation until you remove them or they expire under the relevant retention settings. Connected providers and platforms control their own retention. You can choose which integrations to enable and what information to provide to them.</p>
+                <p>Please do not post credentials, private personal information, or sensitive logs in public issues. For general privacy questions, contact Artifact Virtual through <a href="https://www.artifactvirtual.com" target="_blank" rel="noopener noreferrer">its website</a>. Report security vulnerabilities through the private process in the project's <a href="https://github.com/artifact-opensource/symbiote/blob/master/SECURITY.md" target="_blank" rel="noopener noreferrer">security policy</a>.</p>
+            </section>
+
+            <section>
+                <h2>Changes to this policy</h2>
+                <p>We may update this page as the website or software changes. The date above identifies the latest revision.</p>
+            </section>
+        </main>
+
+        <footer class="site-footer">
+            <a href="./terms.html">Terms of Use</a>
+            <span aria-hidden="true"> · </span>
+            <a href="./license.html">License</a>
+        </footer>
+    </div>
+</body>
+</html>

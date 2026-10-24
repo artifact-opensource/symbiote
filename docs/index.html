@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&family=Lexend:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body {
             background-color: #000000;
@@ -17,18 +17,26 @@
             font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             letter-spacing: -0.015em;
             overflow-x: hidden;
+            isolation: isolate;
         }
-        #genCanvas {
+        #ambient-canvas {
             position: fixed;
             top: 0;
             left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000000;
+            z-index: -1;
             pointer-events: none;
         }
         .font-mono {
             font-family: 'Geist Mono', monospace;
+        }
+        .font-lexend {
+            font-family: 'Lexend', 'Geist', sans-serif;
+        }
+        .font-geist {
+            font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         .tab {
             color: #737373;
@@ -64,10 +72,10 @@
 </head>
 <body class="bg-black text-white min-h-screen flex flex-col justify-between selection:bg-white selection:text-black">
 
-    <!-- Background Animation Canvas -->
-    <div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-        <canvas id="genCanvas" class="w-full h-full block"></canvas>
-    </div>
+    <!-- WAVEFORMS theme background -->
+    <canvas id="ambient-canvas" aria-hidden="true"></canvas>
+
+    <a href="./index.html" aria-label="Symbiote home" class="fixed left-20 top-5 z-50 font-lexend text-xs font-bold tracking-[0.22em] text-neutral-300 hover:text-white transition-colors">SYMBIOTE</a>
 
     <!-- LEFT SIDEBAR -->
     <aside class="fixed left-0 top-0 h-screen w-16 border-r border-neutral-900 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-between py-8">
@@ -103,7 +111,6 @@
 
     <!-- MAIN HERO CONTENT -->
     <main id="hero" class="flex-1 flex flex-col items-center justify-center px-4 sm:px-6 md:px-12 ml-16 mr-16 min-h-screen text-center relative py-12">
-        
         <!-- Background Ambient Glow -->
         <div class="absolute w-[240px] h-[240px] sm:w-[350px] sm:h-[350px] md:w-[600px] md:h-[600px] bg-gradient-to-tr from-neutral-900 to-neutral-800 rounded-full blur-3xl opacity-20 -z-10 pointer-events-none"></div>
 
@@ -111,12 +118,12 @@
         <img src="../assets/mascot.png" alt="Symbiote mascot" class="w-24 h-24 sm:w-32 sm:h-32 object-contain mb-6 sm:mb-8 drop-shadow-[0_0_28px_rgba(74,222,128,0.28)]">
 
         <!-- Main Headline -->
-        <h1 class="text-3xl sm:text-5xl md:text-7xl font-light tracking-tight max-w-4xl leading-[1.15] mb-4 sm:mb-6">
+        <h1 class="font-lexend text-3xl sm:text-5xl md:text-7xl font-medium tracking-tight max-w-4xl leading-[1.15] mb-4 sm:mb-6">
             AUTONOMOUS<br>SUPER-AGENTS<br>AT SCALE
         </h1>
 
         <!-- Subheading -->
-        <p class="text-neutral-400 text-sm sm:text-lg md:text-xl max-w-xl font-light leading-relaxed mb-8 px-2">
+        <p class="font-geist text-neutral-400 text-sm sm:text-lg md:text-xl max-w-xl font-light leading-relaxed mb-8 px-2">
             A single-process foundry for building distributed agents and networks. With long-running workflows and drop-in persistence for any type of job.
         </p>
 
@@ -180,11 +187,19 @@
     </main>
 
     <!-- FOOTER -->
-    <footer class="ml-16 mr-16 py-6 border-t border-neutral-900 text-center text-neutral-600 text-[11px] flex flex-col md:flex-row justify-between items-center px-6 gap-3">
-        <div>&copy; 2026 ARTIFACT VIRTUAL. All rights reserved.</div>
-        <div class="flex gap-4">
-            <a href="https://github.com/artifact-opensource/symbiote/blob/master/LICENSE" target="_blank" class="hover:text-neutral-400">License</a>
+    <footer class="relative z-10 ml-16 mr-16 py-5 border-t border-neutral-900 px-6 text-center text-neutral-600 text-[11px]">
+        <div class="flex flex-col md:flex-row justify-between items-center gap-3">
+            <div>&copy; 2026 ARTIFACT VIRTUAL. All rights reserved.</div>
+            <nav aria-label="Legal" class="flex flex-wrap justify-center gap-4">
+                <a href="./privacy.html" class="hover:text-neutral-400">Privacy</a>
+                <a href="./terms.html" class="hover:text-neutral-400">Terms of Use</a>
+                <a href="./license.html" class="hover:text-neutral-400">License</a>
+            </nav>
         </div>
+        <p class="mx-auto mt-3 max-w-3xl text-[10px] leading-relaxed text-neutral-500">
+            Symbiote is in active development and changes rapidly; bugs, crashes, or unexpected behavior may occur.
+            Check the <a href="https://github.com/artifact-opensource/symbiote/releases/latest" target="_blank" rel="noopener noreferrer" class="hover:text-neutral-300 underline underline-offset-2">latest releases</a> regularly for current code and fixes.
+        </p>
     </footer>
 
     <script>
@@ -324,8 +339,150 @@
         loadReleaseDownloads();
     </script>
 
-    <!-- Background Animation Script -->
-    
+    <script>
+        (function() {
+            const canvas = document.getElementById('ambient-canvas');
+            const context = canvas.getContext('2d', { alpha: false });
+            if (!context) {
+                console.error('Unable to create the ambient background canvas context.');
+                return;
+            }
+
+            const color = '52, 211, 153';
+            const opacityMultiplier = 1.5;
+            const speed = 1;
+            const connectionDistance = 120;
+            const motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+            const nodes = [];
+            let width = 0;
+            let height = 0;
+            let dpr = 1;
+            let animationFrame = 0;
+
+            function drawFrame(animateNodes) {
+                context.fillStyle = '#000000';
+                context.fillRect(0, 0, width, height);
+
+                const grid = new Map();
+                nodes.forEach((node, index) => {
+                    if (animateNodes) {
+                        node.x += node.vx * speed;
+                        node.y += node.vy * speed;
+
+                        if (node.x < 0 || node.x > width) {
+                            node.vx *= -1;
+                            node.x = Math.max(0, Math.min(node.x, width));
+                        }
+                        if (node.y < 0 || node.y > height) {
+                            node.vy *= -1;
+                            node.y = Math.max(0, Math.min(node.y, height));
+                        }
+                    }
+
+                    const cellX = Math.floor(node.x / connectionDistance);
+                    const cellY = Math.floor(node.y / connectionDistance);
+                    const key = `${cellX}:${cellY}`;
+                    let cell = grid.get(key);
+                    if (!cell) {
+                        cell = [];
+                        grid.set(key, cell);
+                    }
+                    cell.push(index);
+                });
+
+                nodes.forEach((node, index) => {
+                    const cellX = Math.floor(node.x / connectionDistance);
+                    const cellY = Math.floor(node.y / connectionDistance);
+
+                    for (let offsetX = -1; offsetX <= 1; offsetX++) {
+                        for (let offsetY = -1; offsetY <= 1; offsetY++) {
+                            const nearby = grid.get(`${cellX + offsetX}:${cellY + offsetY}`);
+                            if (!nearby) continue;
+
+                            for (const otherIndex of nearby) {
+                                if (otherIndex <= index) continue;
+
+                                const other = nodes[otherIndex];
+                                const dx = node.x - other.x;
+                                const dy = node.y - other.y;
+                                const distance = Math.sqrt(dx * dx + dy * dy);
+                                if (distance >= connectionDistance) continue;
+
+                                const alpha = (1 - distance / connectionDistance) * 0.25 * opacityMultiplier;
+                                context.strokeStyle = `rgba(${color}, ${alpha})`;
+                                context.lineWidth = 0.75;
+                                context.beginPath();
+                                context.moveTo(node.x, node.y);
+                                context.lineTo(other.x, other.y);
+                                context.stroke();
+                            }
+                        }
+                    }
+
+                    context.fillStyle = `rgba(${color}, ${0.6 * opacityMultiplier})`;
+                    context.beginPath();
+                    context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+                    context.fill();
+                });
+            }
+
+            function resize() {
+                dpr = Math.min(window.devicePixelRatio || 1, 2);
+                width = window.innerWidth;
+                height = window.innerHeight;
+                canvas.width = Math.round(width * dpr);
+                canvas.height = Math.round(height * dpr);
+                context.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+                const nodeCount = Math.min(Math.floor((width * height) / 12000 * 2), 2000);
+                nodes.length = 0;
+                for (let i = 0; i < nodeCount; i++) {
+                    nodes.push({
+                        x: Math.random() * width,
+                        y: Math.random() * height,
+                        vx: (Math.random() - 0.5) * 0.4,
+                        vy: (Math.random() - 0.5) * 0.4,
+                        radius: Math.random() * 1.5 + 0.8
+                    });
+                }
+                drawFrame(false);
+            }
+
+            function stopAnimation() {
+                if (!animationFrame) return;
+                window.cancelAnimationFrame(animationFrame);
+                animationFrame = 0;
+            }
+
+            function animate() {
+                animationFrame = 0;
+                if (document.hidden || motionPreference.matches) return;
+                drawFrame(true);
+                animationFrame = window.requestAnimationFrame(animate);
+            }
+
+            function updateAnimation() {
+                stopAnimation();
+                if (!document.hidden && !motionPreference.matches) {
+                    animationFrame = window.requestAnimationFrame(animate);
+                }
+            }
+
+            window.addEventListener('resize', resize, { passive: true });
+            document.addEventListener('visibilitychange', updateAnimation);
+            motionPreference.addEventListener('change', () => {
+                if (motionPreference.matches) {
+                    stopAnimation();
+                    drawFrame(false);
+                } else {
+                    updateAnimation();
+                }
+            });
+
+            resize();
+            updateAnimation();
+        })();
+    </script>
 
 </body>
 </html>
