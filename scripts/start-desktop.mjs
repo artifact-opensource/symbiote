@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import rcedit from 'rcedit';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 if (Number(process.versions.node.split('.')[0]) < 20) {
@@ -195,6 +196,16 @@ if (!Number.isInteger(gatewayPort) || gatewayPort < 1 || gatewayPort > 65535) {
 }
 
 const electronExecutable = createRequire(import.meta.url)('electron');
+if (process.platform === 'win32') {
+  try {
+    await rcedit(electronExecutable, { icon: path.join(root, 'assets', 'biohazard_green.ico') });
+  } catch (error) {
+    throw new Error(
+      `Could not apply the Symbiote icon to ${electronExecutable}. Close Symbiote and retry startup.`,
+      { cause: error },
+    );
+  }
+}
 let child;
 try {
   child = spawn(electronExecutable, [desktopMain], {
