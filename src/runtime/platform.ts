@@ -62,6 +62,35 @@ export function defaultIpcKeyringPath(): string {
   ]) ?? appPath('ipc-keyring.json');
 }
 
+export function getWorkingDirectoryError(directory: string): string | undefined {
+  try {
+    if (!fs.statSync(directory).isDirectory()) return `Working directory is not a directory: ${directory}`;
+    return undefined;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return `Working directory does not exist: ${directory}`;
+    throw error;
+  }
+}
+
+export function isExecutableAvailable(file: string): boolean {
+  const hasPath = file.includes('/') || file.includes('\\');
+  const extensions = isWindows()
+    ? ['', ...(process.env.PATHEXT ?? '.EXE;.CMD;.BAT;.COM').split(';')]
+    : [''];
+  const candidates = hasPath
+    ? extensions.map(extension => `${file}${extension}`)
+    : (process.env.PATH ?? '').split(path.delimiter)
+      .flatMap(directory => extensions.map(extension => path.join(directory, `${file}${extension}`)));
+  return candidates.some(candidate => {
+    try {
+      return fs.statSync(candidate).isFile();
+    } catch {
+      return false;
+    }
+  });
+}
+
 let cachedWindowsShell: string | undefined;
 let cachedBash: string | null | undefined;
 

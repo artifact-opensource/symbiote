@@ -347,7 +347,7 @@ export class SandboxedToolRegistry {
   }
 
   /** Proxy: list all tools (but may filter for restricted sessions) */
-  list(): Array<{ name: string; description: string; parameters: any }> {
+  list(): Array<{ name: string; description: string; parameters: any; idempotency?: ToolDefinition['idempotency'] }> {
     const all = this.inner.list();
     if (this.tier !== 'admin') {
       const visibleToNonAdmin = all.filter(t =>

@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runAgent } from '../agent/runner.js';
+import { fetchWithRetry } from '../providers/retry.js';
 
 type Script = Array<() => AsyncGenerator<any>>;
 
@@ -37,6 +38,113 @@ test('runner retries a stream that drops mid-response', async () => {
   const result = await runAgent([{ role: 'user', content: 'hi' }], { ...base, provider, toolRegistry: registry(async () => 'ok') });
   assert.equal(calls, 2);
   assert.equal(result.text, 'recovered');
+});
+
+test('runner does not repeat a provider request after its fetch retry budget is exhausted', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalCwd = process.cwd();
+  const workspace = mkdtempSync(join(tmpdir(), 'symbiote-fetch-retry-'));
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    throw new TypeError('fetch failed');
+  };
+  globalThis.setTimeout = ((callback: TimerHandler, delay?: number, ...args: unknown[]) =>
+    originalSetTimeout(callback, delay && delay > 30_000 ? delay : 0, ...args)) as typeof setTimeout;
+  const provider = {
+    name: 'fetch-retry',
+    async *stream() {
+      await fetchWithRetry('https://provider.invalid', {});
+      yield { type: 'text_delta', text: 'unreachable' };
+    },
+  };
+
+  try {
+    process.chdir(workspace);
+    await assert.rejects(
+      runAgent([{ role: 'user', content: 'hello' }], {
+        ...base,
+        provider: provider as any,
+        toolRegistry: registry(async () => 'ok'),
+        todoScope: 'fetch-retry-test',
+      }),
+      error => (error as Error & { code?: string }).code === 'PROVIDER_FETCH_RETRIES_EXHAUSTED',
+    );
+    assert.equal(requests, 4);
+  } finally {
+    process.chdir(originalCwd);
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('read-only tool turns skip completion review', async () => {
+  const seen: any[][] = [];
+  let providerCalls = 0;
+  const provider = fakeProvider([
+    async function* () {
+      providerCalls++;
+      yield { type: 'tool_use_start', id: 'hardware-1', name: 'hardware' };
+      yield { type: 'tool_use_delta', id: 'hardware-1', input: '{"kind":"summary"}' };
+      yield { type: 'tool_use_end', id: 'hardware-1' };
+      yield { type: 'done', stopReason: 'tool_use' };
+    },
+    async function* () {
+      providerCalls++;
+      yield { type: 'text_delta', text: 'The hardware summary is ready.' };
+      yield { type: 'done', stopReason: 'end_turn' };
+    },
+  ], seen);
+  const result = await runAgent([{ role: 'user', content: 'Inspect hardware.' }], {
+    ...base,
+    provider,
+    toolRegistry: {
+      ...registry(async () => 'hardware details'),
+      list: () => [{ name: 'hardware', description: 'Inspect hardware', parameters: {}, idempotency: { class: 'read' as const } }],
+    },
+  });
+
+  assert.equal(providerCalls, 2);
+  assert.equal(result.text, 'The hardware summary is ready.');
+  assert.equal(result.messages.some(message => message.role === 'system'
+    && typeof message.content === 'string'
+    && message.content.startsWith('Internal completion review:')), false);
+});
+
+test('mutating tool completion review is not saved as a duplicate assistant response', async () => {
+  const seen: any[][] = [];
+  const checkpoints: any[][] = [];
+  const provider = fakeProvider([
+    async function* () {
+      yield { type: 'tool_use_start', id: 'write-1', name: 'write' };
+      yield { type: 'tool_use_delta', id: 'write-1', input: '{"path":"result.txt"}' };
+      yield { type: 'tool_use_end', id: 'write-1' };
+      yield { type: 'done', stopReason: 'tool_use' };
+    },
+    say('Unverified draft response.'),
+    say('The result was written and verified.'),
+  ], seen);
+  const result = await runAgent([{ role: 'user', content: 'Write the result.' }], {
+    ...base,
+    provider,
+    toolRegistry: {
+      ...registry(async () => 'written'),
+      list: () => [{ name: 'write', description: 'Write a file', parameters: {}, idempotency: { class: 'reversible_local' as const } }],
+    },
+    onCheckpoint: messages => checkpoints.push(messages),
+  });
+
+  assert.equal(result.text, 'The result was written and verified.');
+  assert.equal(seen.length, 3);
+  for (const messages of [...checkpoints, result.messages]) {
+    assert.equal(messages.some((message: any) => message.role === 'system'
+      && typeof message.content === 'string'
+      && message.content.startsWith('Internal completion review:')), false);
+    assert.equal(messages.some((message: any) => message.role === 'assistant'
+      && message.content === 'Unverified draft response.'), false);
+  }
 });
 
 test('a silent provider stream is aborted before bounded retries', async () => {

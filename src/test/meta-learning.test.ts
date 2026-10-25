@@ -22,7 +22,7 @@ function record(
     id,
     timestamp: new Date().toISOString(),
     taskType: options.taskType ?? 'simple_qa',
-    provider: options.provider ?? 'groq',
+    provider: options.provider ?? 'openrouter',
     model: 'test-model',
     tokensUsed: good ? 100 : 2000,
     latencyMs: good ? 500 : 4000,

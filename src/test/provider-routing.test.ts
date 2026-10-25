@@ -13,11 +13,11 @@ test('SARSI P1-P5 routes use valid providers and the supported Groq model ID', (
   try {
     const store = initSarsi(stateDir);
     const expected = [
-      ['code', 'groq', 'llama-3.3-70b-versatile'],
-      ['reasoning', 'anthropic', 'claude-sonnet-4'],
-      ['creative', 'openai', 'gpt-4o'],
-      ['simple_qa', 'groq', 'llama-3.3-70b-versatile'],
-      ['long_context', 'anthropic', 'claude-sonnet-4'],
+      ['code', 'openrouter', 'openrouter/free'],
+      ['reasoning', 'openrouter', 'openrouter/free'],
+      ['creative', 'openrouter', 'openrouter/free'],
+      ['simple_qa', 'openrouter', 'openrouter/free'],
+      ['long_context', 'openrouter', 'openrouter/free'],
     ] as const;
 
     for (const [taskType, provider, model] of expected) {
@@ -29,10 +29,10 @@ test('SARSI P1-P5 routes use valid providers and the supported Groq model ID', (
     }
 
     const persisted = store.load();
-    persisted.providerRules.find(rule => rule.id === 'p1')!.model = 'llama-3.3-70b';
+    persisted.providerRules.find(rule => rule.id === 'p1')!.model = 'openrouter/free';
     store.save(persisted);
     initSarsi(stateDir);
-    assert.equal(routeProvider('code')?.model, 'llama-3.3-70b-versatile');
+    assert.equal(routeProvider('code')?.model, 'openrouter/free');
   } finally {
     rmSync(stateDir, { recursive: true, force: true });
   }
@@ -58,15 +58,35 @@ test('SARSI route selection falls back without credentials and selects configure
     assert.equal(fallback.name, 'openrouter');
     assert.equal(fallback.routed, false);
 
+    const notExplicitlyAllowed = selectProviderRoute(
+      { provider: 'groq', model: 'llama-3.3-70b-versatile' },
+      providers,
+      { groq: { apiKey: 'test-key', model: 'llama-3.3-70b-versatile' } },
+      { name: 'openrouter', provider: fallbackProvider, model: 'openrouter/free' },
+    );
+    assert.equal(notExplicitlyAllowed.name, 'openrouter');
+    assert.equal(notExplicitlyAllowed.routed, false);
+
     const routed = selectProviderRoute(
       { provider: 'groq', model: 'llama-3.3-70b-versatile' },
       providers,
-      { groq: { apiKey: 'test-key' } },
+      { groq: { apiKey: 'test-key', model: 'llama-3.3-70b-versatile' } },
       { name: 'openrouter', provider: fallbackProvider, model: 'openrouter/free' },
+      ['groq'],
     );
     assert.equal(routed.name, 'groq');
     assert.equal(routed.model, 'llama-3.3-70b-versatile');
     assert.equal(routed.routed, true);
+
+    const unconfiguredModel = selectProviderRoute(
+      { provider: 'groq', model: 'paid-model' },
+      providers,
+      { groq: { apiKey: 'test-key', model: 'llama-3.3-70b-versatile' } },
+      { name: 'openrouter', provider: fallbackProvider, model: 'openrouter/free' },
+      ['groq'],
+    );
+    assert.equal(unconfiguredModel.name, 'openrouter');
+    assert.equal(unconfiguredModel.routed, false);
   } finally {
     if (previousGroqKey === undefined) delete process.env.GROQ_API_KEY;
     else process.env.GROQ_API_KEY = previousGroqKey;

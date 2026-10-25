@@ -11,7 +11,7 @@ import type { TemperatureConfig, TaskCategory } from './temperature.js';
 import { stripBlinkControlMessages, type BlinkController } from './blink.js';
 import type { ContextStore } from './context-store.js';
 import { TodoManager, type TodoItem } from './todo.js';
-import { resolveExecTimeoutMs, type ToolExecuteOptions, type ToolExecutionOutput } from '../tools/types.js';
+import { resolveExecTimeoutMs, type IdempotencyClass, type ToolExecuteOptions, type ToolExecutionOutput } from '../tools/types.js';
 import { randomUUID } from 'node:crypto';
 import { getSarsiModel } from '../sarsi/index.js';
 import { EXPANDED_CAP as PULSE_EXPANDED_CAP, EXPAND_THRESHOLD as PULSE_EXPAND_THRESHOLD } from './pulse.js';
@@ -28,12 +28,16 @@ export function omitEphemeralImages(messages: Message[]): Message[] {
   });
 }
 
+function messagesForPersistence(messages: Message[]): Message[] {
+  return stripBlinkControlMessages(omitEphemeralImages(messages));
+}
+
 /** Minimal interface for tool registries (satisfied by both ToolRegistry and SandboxedToolRegistry) */
 export interface ToolExecutor {
   toProviderFormat(): ToolDef[];
   execute(name: string, input: Record<string, unknown>, options?: ToolExecuteOptions): Promise<string>;
   executeWithImages?(name: string, input: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolExecutionOutput>;
-  list(): Array<{ name: string; description: string; parameters: any }>;
+  list(): Array<{ name: string; description: string; parameters: any; idempotency?: { class: IdempotencyClass } }>;
 }
 
 export interface RunnerConfig {
@@ -87,7 +91,8 @@ const streamIdleMs = (requestTimeoutMs?: number): number =>
   envMs('SYMBIOTE_STREAM_IDLE_MS', requestTimeoutMs ?? DEFAULT_LLM_REQUEST_TIMEOUT_MS);
 
 function isTransientStreamError(err: unknown): boolean {
-  const e = err as { name?: string; message?: string; cause?: { code?: string } } | undefined;
+  const e = err as { name?: string; message?: string; code?: string; cause?: { code?: string } } | undefined;
+  if (e?.code === 'PROVIDER_FETCH_RETRIES_EXHAUSTED') return false;
   const text = `${e?.name ?? ''} ${e?.message ?? ''} ${e?.cause?.code ?? ''}`;
   return /terminated|ECONNRESET|ETIMEDOUT|EPIPE|UND_ERR|fetch failed|socket|premature|TimeoutError|network|stream idle/i.test(text);
 }
@@ -251,6 +256,7 @@ export async function runAgent(
   const temperatureHistory: Array<{ iteration: number; category: TaskCategory; temperature: number }> = [];
   let recentToolNames: string[] = [];
   let currentMessages = stripBlinkControlMessages(messages);
+  const toolIdempotency = new Map(config.toolRegistry.list().map(tool => [tool.name, tool.idempotency?.class]));
   let iterations = 0;
   let textAccum = '';
   let completionReviewPending = false;
@@ -328,7 +334,7 @@ export async function runAgent(
       const lastUserMsg = [...currentMessages].reverse().find(m => m.role === 'user');
       return {
         text: lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : '') : '',
-        messages: omitEphemeralImages(currentMessages),
+        messages: messagesForPersistence(currentMessages),
         toolCalls: allToolCalls,
         iterations,
         maxIterationsHit: false,
@@ -372,7 +378,7 @@ export async function runAgent(
       if (!iterCheck.ok) {
         return {
           text: `[${iterCheck.warning}]`,
-          messages: omitEphemeralImages(currentMessages),
+          messages: messagesForPersistence(currentMessages),
           toolCalls: allToolCalls,
           iterations,
           maxIterationsHit: true,
@@ -476,7 +482,7 @@ export async function runAgent(
         console.log(`[runner] Stream aborted at iteration ${iterations}. Returning partial result.`);
         return {
           text: textAccum || '',
-          messages: omitEphemeralImages(currentMessages),
+          messages: messagesForPersistence(currentMessages),
           toolCalls: allToolCalls,
           iterations,
           maxIterationsHit: false,
@@ -529,7 +535,9 @@ export async function runAgent(
           console.error('[runner] Could not read persisted completion-review marker:', error);
         }
       }
-      const needsReview = !completionReviewPending && !completionReviewUsedPersisted && allToolCalls.length > 0;
+      const needsReview = !completionReviewPending
+        && !completionReviewUsedPersisted
+        && allToolCalls.some(toolCall => toolIdempotency.get(toolCall.name) !== 'read');
       if (needsReview) {
         const candidate = textAccum.trim();
         if (candidate) currentMessages.push({ role: 'assistant', content: candidate });
@@ -558,7 +566,7 @@ export async function runAgent(
           }
         }
         try {
-          config.onCheckpoint?.(omitEphemeralImages(currentMessages));
+          config.onCheckpoint?.(messagesForPersistence(currentMessages));
         } catch (error) {
           console.error('[runner] Completion-review checkpoint persistence failed:', error);
         }
@@ -584,7 +592,7 @@ export async function runAgent(
           const text = `${textAccum.trim()}\n\nUnresolved checklist items:\n${checklist}`.trim();
           return {
             text,
-            messages: omitEphemeralImages(currentMessages),
+            messages: messagesForPersistence(currentMessages),
             toolCalls: allToolCalls,
             iterations,
             maxIterationsHit: false,
@@ -613,7 +621,7 @@ export async function runAgent(
         const checklist = unresolvedTodos.map(task => `- ${task.title}: ${task.description ?? 'Blocked'}`).join('\n');
         textAccum = `${textAccum.trim()}\n\nUnresolved checklist items:\n${checklist}`.trim();
       }
-      return { text: textAccum, messages: omitEphemeralImages(currentMessages), toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
+      return { text: textAccum, messages: messagesForPersistence(currentMessages), toolCalls: allToolCalls, iterations, maxIterationsHit: false, aborted: false, temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined };
     }
 
     // Append assistant message with tool calls
@@ -721,7 +729,7 @@ export async function runAgent(
     recentToolNames = pendingToolCalls.map(tc => tc.name);
     completionReviewPending = false;
     try {
-      config.onCheckpoint?.(omitEphemeralImages(currentMessages));
+      config.onCheckpoint?.(messagesForPersistence(currentMessages));
     } catch (error) {
       console.error('[runner] Checkpoint persistence failed; continuing the active turn:', error);
     }
@@ -733,7 +741,7 @@ export async function runAgent(
       const lastUserMsg = [...currentMessages].reverse().find(m => m.role === 'user');
       return {
         text: lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : '') : '',
-        messages: omitEphemeralImages(currentMessages),
+        messages: messagesForPersistence(currentMessages),
         toolCalls: allToolCalls,
         iterations,
         maxIterationsHit: false,
@@ -749,7 +757,7 @@ export async function runAgent(
   console.warn(`[runner] Max iterations (${maxIter}) reached after ${allToolCalls.length} tool calls`);
   return {
     text: textAccum.trim() || '[Max iterations reached]',
-    messages: omitEphemeralImages(currentMessages),
+    messages: messagesForPersistence(currentMessages),
     toolCalls: allToolCalls,
     iterations,
     maxIterationsHit: true,

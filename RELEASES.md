@@ -1,6 +1,9 @@
 # Symbiote Releases
 
-## Latest: v5.6.0 Apex (October 23, 2026)
+## Latest: v5.6.1 Apex (October 25, 2026)
+Fixed duplicate assistant history and completion events, hardened session persistence and process startup/output handling, and constrained SARSI routing to configured provider/model choices. Details: [Release Notes](RELEASE_NOTES_v5.6.1.md).
+
+## v5.6.0 Apex (October 23, 2026)
 HttpMcpBridge integration for remote n8n connections, WhatsApp QR support in GatewayStatus, enhanced health telemetry with provider call tracking, stabilized Electron gateway lifecycle, UI/UX refinements, and idempotency metadata for all tool definitions. Details: [Release Notes](RELEASE_NOTES_v5.6.0.md).
 
 ## v5.5.0 Apex (October 17, 2026)
@@ -10,6 +13,8 @@ Project-scoped agent operations and project memory, a redesigned workspace hiera
 
 | Version | Date | Highlights |
 |---------|------|-----------|
+| **v5.6.1 Apex** | Oct 25, 2026 | Runner and history duplication fixes, session persistence hardening, process error handling, configured SARSI routes |
+| **v5.6.0 Apex** | Oct 23, 2026 | Remote n8n integration, WhatsApp QR setup, health telemetry, Electron lifecycle and UI refinements |
 | **v5.5.0 Apex** | Oct 17, 2026 | Project operations and memory, hero hierarchy, GPU/per-core CPU metrics, shared appearance, weighted similarity, Windows telemetry and Discord streaming fixes |
 | **v5.3.0 Apex** | Oct 12, 2026 | Ops Memory, Windows shell diagnostics, Discord progress limits and redaction, persistence and retry hardening |
 | **v5.2.0 Apex** | Oct 10, 2026 | Admin tools, Windows shell, injection guard rebuild, loop reliability, Curator bug detection, Memograph |

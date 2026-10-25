@@ -17,15 +17,25 @@ export interface ProviderRouteChoice {
 export function selectProviderRoute(
   decision: { provider: string; model: string },
   registry: ReadonlyMap<string, Provider>,
-  providerConfigs: Record<string, { apiKey?: string } | undefined>,
+  providerConfigs: Record<string, { apiKey?: string; model?: string } | undefined>,
   fallback: Omit<ProviderRouteChoice, 'routed'>,
+  explicitlyAllowedProviders: readonly string[] = [],
 ): ProviderRouteChoice {
   const provider = registry.get(decision.provider);
   if (!provider) return { ...fallback, routed: false };
 
+  const isFallbackProvider = decision.provider === fallback.name;
+  const isExplicitlyAllowed = explicitlyAllowedProviders.includes(decision.provider);
+  const configuredModel = isFallbackProvider
+    ? fallback.model
+    : providerConfigs[decision.provider]?.model;
+  if ((!isFallbackProvider && !isExplicitlyAllowed) || !configuredModel || decision.model !== configuredModel) {
+    return { ...fallback, routed: false };
+  }
+
   const envKey = PROVIDER_API_KEYS[decision.provider];
   const hasApiKey = Boolean(providerConfigs[decision.provider]?.apiKey || (envKey && process.env[envKey]));
-  if (decision.provider !== fallback.name && !hasApiKey) {
+  if (!isFallbackProvider && !hasApiKey) {
     return { ...fallback, routed: false };
   }
 

@@ -100,7 +100,7 @@
                 <!-- Tooltip -->
                 <div class="absolute right-full mr-3 px-2 py-1 bg-neutral-900 border border-neutral-800 text-neutral-300 text-[11px] font-mono rounded shadow-xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-150 z-50 flex items-center gap-1.5">
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                    <span id="version-text">v5.6.0</span>
+                    <span id="version-text">latest</span>
                 </div>
             </div>
             <a href="https://github.com/artifact-opensource/symbiote" target="_blank" class="hover:text-white transition-colors" title="Repository"><i class="fa-solid fa-code-branch text-sm"></i></a>
@@ -203,7 +203,6 @@
     </footer>
 
     <script>
-        const releasePageUrl = 'https://github.com/artifact-opensource/symbiote/releases/latest';
         const releaseApiUrl = 'https://api.github.com/repos/artifact-opensource/symbiote/releases/latest';
         const installTabs = Array.from(document.querySelectorAll('[role="tab"][data-tab]'));
         const installPanels = Array.from(document.querySelectorAll('[role="tabpanel"][data-panel]'));

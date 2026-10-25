@@ -1,5 +1,24 @@
 # Changelog
 
+## v5.6.1 (2026-10-25) — Apex
+
+Full release notes: [RELEASE_NOTES_v5.6.1.md](RELEASE_NOTES_v5.6.1.md)
+
+### Fixed
+- **Repeated assistant responses:** completion review no longer runs after read-only tool calls, and internal review prompts and draft responses are excluded from persisted session history and checkpoints.
+- **Session-save races:** concurrent session writes now use unique temporary files, and persistence failures are reported with session context without exposing raw filesystem errors to Discord.
+- **Process output and startup failures:** expected broken stdout/stderr pipes no longer flood operational health reporting; shell tools validate working directories and executables before launch and return clear startup errors.
+- **OpenRouter stream completion:** repeated completion chunks no longer emit duplicate end-of-turn events. Streamed 202 responses are accepted, while asynchronous acknowledgements without a completion stream fail clearly instead of being mistaken for completed turns.
+
+### Changed
+- SARSI routing is constrained to the configured provider/model and explicitly configured fallbacks; fresh routing defaults use `openrouter/free`.
+- Provider retry behavior was hardened.
+- Added regression coverage for review-history filtering, persistence races, stream completion, provider routing, and process failures.
+
+### Upgrade notes
+- No configuration migration is required.
+- Run `npm ci` followed by `npm run build` when upgrading from a source checkout.
+
 ## v5.6.0 (2026-10-23) — Apex
 
 Full release notes: [RELEASE_NOTES_v5.6.0.md](RELEASE_NOTES_v5.6.0.md)

@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { Message } from '../providers/types.js';
 import type { SessionRoute } from '../channels/types.js';
 import type { Session, SessionSummary, SessionMetadata } from './types.js';
@@ -11,8 +12,14 @@ import { deriveConversationTitle } from './title.js';
 
 const renameRetryDelay = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
 
-// Windows-safe atomic rename with retry for EPERM/ENOENT
-// (antivirus/indexer may lock the .tmp file during rename)
+export class SessionPersistenceError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'SessionPersistenceError';
+  }
+}
+
+// Windows antivirus/indexers may temporarily lock a file during rename.
 function atomicRename(oldPath: string, newPath: string): void {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
@@ -20,14 +27,32 @@ function atomicRename(oldPath: string, newPath: string): void {
       return;
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
-      if (attempt >= 4) throw err;
-      if (err.code === 'EPERM' || err.code === 'ENOENT') {
-        // Brief pause before retry — file may be locked by antivirus/indexer
-        Atomics.wait(renameRetryDelay, 0, 0, 25 * (attempt + 1));
-        continue;
-      }
-      throw err;
+      if (attempt >= 4 || (err.code !== 'EPERM' && err.code !== 'EBUSY')) throw err;
+      Atomics.wait(renameRetryDelay, 0, 0, 25 * (attempt + 1));
     }
+  }
+}
+
+function atomicWriteFile(destination: string, content: string, label: string): void {
+  const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(temporary, content, { flag: 'wx' });
+    atomicRename(temporary, destination);
+  } catch (error) {
+    const persistenceError = new SessionPersistenceError(
+      `Failed to persist ${label} at ${destination}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+    console.error(`[sessions] ${persistenceError.message}`);
+    try {
+      fs.unlinkSync(temporary);
+    } catch (cleanupError) {
+      if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.error(`[sessions] Could not clean up temporary file ${temporary}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+      }
+    }
+    throw persistenceError;
   }
 }
 
@@ -263,9 +288,7 @@ export class SessionManager {
     else routes.push(route);
 
     const destination = this.routesFilePath();
-    const temporary = `${destination}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(routes, null, 2));
-    atomicRename(temporary, destination);
+    atomicWriteFile(destination, JSON.stringify(routes, null, 2), 'session routes');
   }
 
   private defaultMetadata(): SessionMetadata {
@@ -322,10 +345,7 @@ export class SessionManager {
     const title = deriveConversationTitle(session.messages);
     if (title) session.metadata.label = title;
     const destination = this.filePath(session.id);
-    const temporary = `${destination}.tmp`;
-    fs.mkdirSync(path.dirname(destination), { recursive: true });
-    fs.writeFileSync(temporary, JSON.stringify(session, null, 2));
-    atomicRename(temporary, destination);
+    atomicWriteFile(destination, JSON.stringify(session, null, 2), `session ${session.id}`);
   }
 
   delete(id: string): boolean {

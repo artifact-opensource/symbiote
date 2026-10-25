@@ -103,14 +103,11 @@ function convertMessages(messages: Message[]): unknown[] {
     pendingToolCallIds.clear();
     out.push({ role: msg.role, content: typeof msg.content === 'string' ? msg.content : msg.content.map(b => b.text ?? '').join('') });
   }
-  
-  // OpenRouter requires at least one message with content. 
-  // If the last message is an assistant tool call with no content, 
-  // some models may reject it. We ensure the array is not empty.
+
   if (out.length === 0) {
     out.push({ role: 'user', content: 'Hello' });
   }
-  
+
   return out;
 }
 
@@ -163,7 +160,15 @@ async function* streamOpenRouter(
     if (res.status === 402) {
       throw new Error(`OpenRouter payment required (402). This may indicate the model requires a paid tier or your OpenRouter account has insufficient credits. Check your account at https://openrouter.ai/credits. Provider response: ${text}`);
     }
+    if (res.status === 429) {
+      throw new Error(`${formatOpenRouterError(res.status, text)} Check your rate limits at https://openrouter.ai/credits.`);
+    }
     throw new Error(formatOpenRouterError(res.status, text));
+  }
+
+  if (res.status === 202 && !res.headers.get('content-type')?.toLowerCase().includes('text/event-stream')) {
+    const body = await res.text();
+    throw new Error(`OpenRouter accepted this request asynchronously (202), but this provider only supports streamed chat-completion responses and cannot poll the accepted request. Provider response: ${body}`);
   }
 
   const reader = res.body?.getReader();
@@ -171,6 +176,7 @@ async function* streamOpenRouter(
 
   const decoder = new TextDecoder();
   let buffer = '';
+  let doneSent = false;
   const activeTools = new Map<number, string>();
 
   while (true) {
@@ -187,14 +193,13 @@ async function* streamOpenRouter(
       }
       const data = line.slice(6).trim();
       if (data === '[DONE]') {
-        yield { type: 'done', stopReason: 'end_turn' };
+        if (!doneSent) yield { type: 'done', stopReason: 'end_turn' };
         return;
       }
 
       let parsed: any;
       try { parsed = JSON.parse(data); } catch { continue; }
 
-      // Handle usage (if present in chunks)
       if (parsed.usage) {
         yield {
           type: 'usage',
@@ -232,12 +237,13 @@ async function* streamOpenRouter(
         }
       }
 
-      if (choice.finish_reason) {
+      if (choice.finish_reason && !doneSent) {
         for (const [, id] of activeTools) {
           yield { type: 'tool_use_end', id };
         }
         activeTools.clear();
         if (choice.finish_reason === 'stop' || choice.finish_reason === 'length') {
+          doneSent = true;
           yield { type: 'done', stopReason: choice.finish_reason === 'stop' ? 'end_turn' : 'max_tokens' };
         }
       }

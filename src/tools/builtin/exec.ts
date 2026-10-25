@@ -3,7 +3,7 @@
 import { spawn } from 'node:child_process';
 import { getProcessManager } from './process.js';
 import { DEFAULT_EXEC_TIMEOUT_SECONDS, resolveExecTimeoutMs, type ToolDefinition } from '../types.js';
-import { describeShell, hintForFailure, isWindows, killProcessTree, shellCommand, wrapPtyCommand, type ShellKind } from '../../runtime/platform.js';
+import { describeShell, getWorkingDirectoryError, hintForFailure, isExecutableAvailable, isWindows, killProcessTree, shellCommand, wrapPtyCommand, type ShellKind } from '../../runtime/platform.js';
 
 export { DEFAULT_EXEC_TIMEOUT_SECONDS, resolveExecTimeoutMs };
 
@@ -61,6 +61,8 @@ export const execTool: ToolDefinition = {
     const requested = String(input.shell ?? 'auto') as ShellKind;
     const kind: ShellKind = SHELLS.includes(requested) ? requested : 'auto';
     const extraEnv = (input.env && typeof input.env === 'object' ? input.env : {}) as Record<string, string>;
+    const workingDirectoryError = getWorkingDirectoryError(workdir);
+    if (workingDirectoryError) return `Error: ${workingDirectoryError}`;
 
     // Background mode: delegate to process manager
     if (background) {
@@ -78,6 +80,9 @@ export const execTool: ToolDefinition = {
     // Normalize Windows paths for Git Bash if needed
     const normalizedCommand = kind === 'bash' ? normalizeCommandForBash(actualCommand) : actualCommand;
     const shell = shellCommand(normalizedCommand, false, kind);
+    if (!isExecutableAvailable(shell.file)) {
+      return `Error: Shell executable was not found: ${shell.file}. Check SYMBIOTE_SHELL, COMSPEC, and PATH.`;
+    }
 
     return new Promise<string>((resolve) => {
       const chunks: Buffer[] = [];
@@ -129,7 +134,7 @@ export const execTool: ToolDefinition = {
       });
 
       proc.on('error', (err) => {
-        finish(`Error: ${err.message}`);
+        finish(`Error: Could not start shell "${shell.file}" in "${workdir}": ${err.message}`);
       });
     });
   },

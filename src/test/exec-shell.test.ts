@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Writable } from 'node:stream';
 import { DEFAULT_EXEC_TIMEOUT_SECONDS, execTool, resolveExecTimeoutMs } from '../tools/builtin/exec.js';
 import { resolveToolTimeoutMs } from '../agent/runner.js';
 import { ProcessManager } from '../tools/builtin/process.js';
 import { classifySession, configureSandbox, createSandboxedRegistry } from '../tools/sandbox.js';
 import { hintForFailure } from '../runtime/platform.js';
+import { guardOutputStream } from '../runtime/process-stdio.js';
 
 test('exec defaults to a five-second timeout and accepts explicit longer timeouts', () => {
   assert.equal(DEFAULT_EXEC_TIMEOUT_SECONDS, 5);
@@ -40,8 +42,43 @@ test('exec runs a shell command on this host', async () => {
   assert.match(String(out), /symbiote-ok/);
 });
 
+test('exec reports a missing working directory before spawning', async () => {
+  const missingWorkdir = path.join(os.tmpdir(), `symbiote-missing-${Date.now()}`);
+  const out = String(await execTool.execute({ command: 'echo should-not-run', workdir: missingWorkdir }));
+  assert.match(out, /Working directory does not exist/);
+});
+
+test('exec reports an unavailable shell executable clearly', async () => {
+  const envKey = process.platform === 'win32' ? 'COMSPEC' : 'SYMBIOTE_SHELL';
+  const previous = process.env[envKey];
+  process.env[envKey] = path.join(os.tmpdir(), `symbiote-missing-shell-${Date.now()}`);
+  try {
+    const out = String(await execTool.execute({
+      command: 'echo should-not-run',
+      shell: process.platform === 'win32' ? 'cmd' : 'auto',
+    }));
+    assert.match(out, /Shell executable was not found/);
+  } finally {
+    if (previous === undefined) delete process.env[envKey];
+    else process.env[envKey] = previous;
+  }
+});
+
+test('EPIPE disables writes to a closed output stream without reporting an operational error', async () => {
+  const stream = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+  const reported: string[] = [];
+  guardOutputStream('stdout', stream, (name, error) => reported.push(`${name}:${error.code}`));
+  stream.emit('error', Object.assign(new Error('pipe closed'), { code: 'EPIPE' }));
+  let callbackCalled = false;
+  const accepted = stream.write('ignored', () => { callbackCalled = true; });
+  await new Promise<void>(resolve => queueMicrotask(resolve));
+  assert.equal(accepted, false);
+  assert.equal(callbackCalled, true);
+  assert.deepEqual(reported, []);
+});
+
 test('exec reports successful commands that intentionally produce no output', async () => {
-  const out = await execTool.execute({ command: 'node -e "process.exit(0)"', timeout: 30 });
+  const out = await execTool.execute({ command: 'exit 0', timeout: 30 });
   assert.equal(out, 'Command completed successfully (exit code 0; no output).');
 });
 
@@ -228,16 +265,24 @@ test('Git Bash Windows-path errors explain how to use exec correctly', () => {
   assert.match(guessedPosixPath, /\/workspace or \/tmp/);
 });
 
-test('background process spawn failures are reported as completed failures', async () => {
+test('background process rejects a missing working directory before spawning', () => {
   const manager = new ProcessManager();
-  const missingWorkdir = `${process.env.TEMP ?? process.cwd()}\\symbiote-missing-${Date.now()}`;
-  const proc = manager.start('echo should-not-run', missingWorkdir);
-  await new Promise<void>(resolve => proc.proc.once('close', () => resolve()));
+  const missingWorkdir = path.join(os.tmpdir(), `symbiote-missing-${Date.now()}`);
+  assert.throws(() => manager.start('echo should-not-run', missingWorkdir), /Working directory does not exist/);
+});
 
-  const result = manager.poll(proc.id);
-  assert.ok(result);
-  assert.equal(result.running, false);
-  assert.notEqual(result.exitCode, null);
-  assert.notEqual(result.exitCode, 0);
-  assert.match(result.output, /Error:/);
+test('background process rejects an unavailable shell executable before spawning', () => {
+  const manager = new ProcessManager();
+  const envKey = process.platform === 'win32' ? 'COMSPEC' : 'SYMBIOTE_SHELL';
+  const previous = process.env[envKey];
+  process.env[envKey] = path.join(os.tmpdir(), `symbiote-missing-shell-${Date.now()}`);
+  try {
+    assert.throws(
+      () => manager.start('echo should-not-run', undefined, undefined, process.platform === 'win32' ? 'cmd' : 'auto'),
+      /Shell executable was not found/,
+    );
+  } finally {
+    if (previous === undefined) delete process.env[envKey];
+    else process.env[envKey] = previous;
+  }
 });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { SessionManager } from '../sessions/manager.js';
+import { SessionManager, SessionPersistenceError } from '../sessions/manager.js';
 
 test('archiving keeps assistant tool calls with all their results', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-session-archive-'));
@@ -87,6 +87,57 @@ test('session save retries Windows rename locks with a real delay', () => {
     assert.ok(fs.existsSync(path.join(directory, 'rename-retry.json')));
   } finally {
     fs.renameSync = rename;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('session saves use unique temporary files for the same destination', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-session-unique-temp-'));
+  const rename = fs.renameSync;
+  const temporaryPaths: string[] = [];
+  try {
+    const manager = new SessionManager(directory);
+    const session = manager.create('unique-temp');
+    fs.renameSync = ((oldPath: fs.PathLike, newPath: fs.PathLike) => {
+      temporaryPaths.push(String(oldPath));
+      return rename(oldPath, newPath);
+    }) as typeof fs.renameSync;
+
+    manager.save(session);
+    manager.save(session);
+
+    assert.equal(temporaryPaths.length, 2);
+    assert.notEqual(temporaryPaths[0], temporaryPaths[1]);
+    assert.ok(temporaryPaths.every(file => file.endsWith('.tmp')));
+    assert.ok(fs.existsSync(path.join(directory, 'unique-temp.json')));
+  } finally {
+    fs.renameSync = rename;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('session save does not retry an ENOENT rename and logs persistence failure', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-session-enoent-'));
+  const rename = fs.renameSync;
+  const originalConsoleError = console.error;
+  const logs: string[] = [];
+  try {
+    const manager = new SessionManager(directory);
+    const session = manager.create('rename-enoent');
+    let attempts = 0;
+    fs.renameSync = (() => {
+      attempts++;
+      throw Object.assign(new Error('source file was already moved'), { code: 'ENOENT' });
+    }) as typeof fs.renameSync;
+    console.error = (...args: unknown[]) => logs.push(args.map(String).join(' '));
+
+    assert.throws(() => manager.save(session), SessionPersistenceError);
+    assert.equal(attempts, 1);
+    assert.ok(logs.some(line => line.includes('Failed to persist session rename-enoent')));
+    assert.deepEqual(fs.readdirSync(directory), ['rename-enoent.json']);
+  } finally {
+    fs.renameSync = rename;
+    console.error = originalConsoleError;
     fs.rmSync(directory, { recursive: true, force: true });
   }
 });

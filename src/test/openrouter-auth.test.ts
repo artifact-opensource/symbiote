@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { runAgent } from '../agent/runner.js';
 import { openrouterProvider } from '../providers/openrouter.js';
 import { fetchWithRetry } from '../providers/retry.js';
 
@@ -64,6 +68,150 @@ test('OpenRouter rate-limit errors report provider-supplied limit and reset meta
   }
 });
 
+test('OpenRouter accepts a 202 response when it contains a streamed completion', async () => {
+  const originalFetch = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    return new Response([
+      'data: {"choices":[{"delta":{"content":"accepted"},"finish_reason":"stop"}]}',
+      '',
+      'data: [DONE]',
+      '',
+    ].join('\n'), {
+      status: 202,
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
+  };
+
+  try {
+    const events = [];
+    for await (const event of openrouterProvider.stream(
+      [{ role: 'user', content: 'hello' }],
+      [],
+      { apiKey: 'test-key', model: 'openrouter/free' },
+    )) {
+      events.push(event);
+    }
+    assert.equal(requests, 1);
+    assert.deepEqual(events, [
+      { type: 'text_delta', text: 'accepted' },
+      { type: 'done', stopReason: 'end_turn' },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('OpenRouter emits only one completion event when the stream repeats its finish chunk', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response([
+    'data: {"choices":[{"delta":{"content":"complete"},"finish_reason":null}]}',
+    '',
+    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+    '',
+    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+    '',
+    'data: [DONE]',
+    '',
+  ].join('\n'), {
+    status: 200,
+    headers: { 'Content-Type': 'text/event-stream' },
+  });
+
+  try {
+    const events = [];
+    for await (const event of openrouterProvider.stream(
+      [{ role: 'user', content: 'hello' }],
+      [],
+      { apiKey: 'test-key', model: 'openrouter/free' },
+    )) {
+      events.push(event);
+    }
+    assert.equal(events.filter(event => event.type === 'done').length, 1);
+    assert.deepEqual(events, [
+      { type: 'text_delta', text: 'complete' },
+      { type: 'done', stopReason: 'end_turn' },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('OpenRouter fails explicitly on a 202 async acknowledgement it cannot poll', async () => {
+  const originalFetch = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    return new Response('{"id":"async-job-1"}', {
+      status: 202,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+
+  try {
+    const stream = openrouterProvider.stream(
+      [{ role: 'user', content: 'hello' }],
+      [],
+      { apiKey: 'test-key', model: 'openrouter/free' },
+    );
+    await assert.rejects(async () => {
+      for await (const _event of stream) { /* expected unsupported async acknowledgement */ }
+    }, /accepted this request asynchronously \(202\).*cannot poll.*async-job-1/);
+    assert.equal(requests, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('agent stops after one OpenRouter 429 instead of looping', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalCwd = process.cwd();
+  const testWorkspace = mkdtempSync(join(tmpdir(), 'symbiote-openrouter-test-'));
+  let requests = 0;
+  let iterations = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    return new Response(JSON.stringify({
+      error: {
+        message: 'Request limit reached',
+        metadata: {
+          headers: {
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': String(Date.now() + 60 * 60 * 1000),
+          },
+        },
+      },
+    }), { status: 429 });
+  };
+
+  try {
+    process.chdir(testWorkspace);
+    await assert.rejects(runAgent(
+      [{ role: 'user', content: 'hello' }],
+      {
+        provider: openrouterProvider,
+        providerConfig: { apiKey: 'test-key', model: 'openrouter/free' },
+        toolRegistry: {
+          toProviderFormat: () => [],
+          execute: async () => '',
+          list: () => [],
+        },
+        maxIterations: 5,
+        onProgress: event => {
+          if (event.type === 'iteration') iterations++;
+        },
+      },
+    ), /OpenRouter API error 429: Request limit reached/);
+    assert.equal(requests, 1);
+    assert.equal(iterations, 1);
+  } finally {
+    process.chdir(originalCwd);
+    globalThis.fetch = originalFetch;
+    rmSync(testWorkspace, { recursive: true, force: true });
+  }
+});
+
 test('429 retry returns immediately when provider reset is outside the bounded retry window', async () => {
   const originalFetch = globalThis.fetch;
   let requests = 0;
@@ -85,6 +233,54 @@ test('429 retry returns immediately when provider reset is outside the bounded r
   try {
     const response = await fetchWithRetry('https://provider.invalid', {});
     assert.equal(response.status, 429);
+    assert.equal(requests, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('429 retry honors Retry-After metadata and continues transient retries independently', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    if (requests === 1) return new Response('server unavailable', { status: 503 });
+    if (requests === 2) {
+      return new Response(JSON.stringify({
+        error: { metadata: { headers: { 'Retry-After': '0' } } },
+      }), { status: 429 });
+    }
+    return new Response('ok', { status: 200 });
+  };
+  globalThis.setTimeout = ((callback: TimerHandler) => originalSetTimeout(callback, 0)) as typeof setTimeout;
+
+  try {
+    const response = await fetchWithRetry('https://provider.invalid', {});
+    assert.equal(response.status, 200);
+    assert.equal(requests, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test('429 backoff is interrupted promptly when the caller aborts', async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    return new Response('rate limited', {
+      status: 429,
+      headers: { 'Retry-After': '1' },
+    });
+  };
+
+  try {
+    const request = fetchWithRetry('https://provider.invalid', { signal: controller.signal });
+    setTimeout(() => controller.abort(new DOMException('User interrupted', 'AbortError')), 10);
+    await assert.rejects(request, /User interrupted/);
     assert.equal(requests, 1);
   } finally {
     globalThis.fetch = originalFetch;

@@ -2,6 +2,10 @@
 
 The maintained, full release history and upgrade notes are in the repository [CHANGELOG.md](../../../CHANGELOG.md).
 
+## v5.6.1 — Runtime Reliability (2026-10-25)
+
+Fixed duplicate internal review history and stream completion events, hardened concurrent session persistence and process error handling, and constrained SARSI routing to configured providers and models. See the [v5.6.1 release notes](../../../RELEASE_NOTES_v5.6.1.md).
+
 ## v5.3.0 — Operational Memory and Runtime Reliability (2026-10-12)
 
 See the [v5.3.0 release notes](../../../RELEASE_NOTES_v5.3.0.md) for upgrade instructions and the full feature list. This release adds bounded, privacy-preserving operational history; makes Windows shell outcomes and path failures clearer; and keeps Discord progress updates within API limits while redacting sensitive previews.

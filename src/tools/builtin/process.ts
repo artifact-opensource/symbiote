@@ -3,7 +3,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { ToolDefinition } from '../types.js';
-import { killProcessTree, shellCommand, type ShellKind } from '../../runtime/platform.js';
+import { getWorkingDirectoryError, isExecutableAvailable, killProcessTree, shellCommand, type ShellKind } from '../../runtime/platform.js';
 
 export interface ManagedProcess {
   id: string;
@@ -27,6 +27,11 @@ export class ProcessManager {
     const cwd = workdir ?? process.cwd();
 
     const shell = shellCommand(command, false, kind);
+    const workingDirectoryError = getWorkingDirectoryError(cwd);
+    if (workingDirectoryError) throw new Error(workingDirectoryError);
+    if (!isExecutableAvailable(shell.file)) {
+      throw new Error(`Shell executable was not found: ${shell.file}. Check SYMBIOTE_SHELL, COMSPEC, and PATH.`);
+    }
     const proc = spawn(shell.file, shell.args, {
       windowsHide: true,
       cwd,
@@ -53,7 +58,7 @@ export class ProcessManager {
     proc.stderr?.on('data', (d: Buffer) => managed.output.push(d.toString('utf-8')));
     proc.on('close', (code) => { managed.exitCode = code ?? managed.exitCode ?? -1; });
     proc.on('error', (err) => {
-      managed.output.push(`Error: ${err.message}`);
+      managed.output.push(`Error: Could not start shell "${shell.file}" in "${cwd}": ${err.message}`);
       managed.exitCode = -1;
     });
 

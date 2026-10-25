@@ -62,13 +62,27 @@ function freshState(): BlinkState {
 export function isBlinkControlMessage(content: unknown): boolean {
   return typeof content === 'string'
     && (/^\s*(?:(?:\u{26A1}\s*)?BLINK APPROACHING —|(?:\u{1F516}\s*)?CHECKPOINT —|(?:\u{26A1}\s*)?BLINK COMPLETE —|(?:\u{26A0}\u{FE0F}\s*)?SYSTEM WARNING:)/u.test(content)
-      || /^\s*Internal completion review:\s*/i.test(content));
+      || /^\s*Internal completion review:\s*/i.test(content)
+      || /^\s*Checklist verification found unfinished tasks:\s*/i.test(content));
 }
 
 export function stripBlinkControlMessages<T extends { role: string; content: unknown }>(messages: T[]): T[] {
   const visible: T[] = [];
   for (const message of messages) {
-    if (message.role === 'user' && isBlinkControlMessage(message.content)) continue;
+    if ((message.role === 'user' || message.role === 'system') && isBlinkControlMessage(message.content)) {
+      if (message.role === 'system'
+        && typeof message.content === 'string'
+        && /^\s*Internal completion review:\s*/i.test(message.content)) {
+        const previous = visible[visible.length - 1];
+        const hasToolCalls = previous && 'tool_calls' in previous
+          && Array.isArray(previous.tool_calls)
+          && previous.tool_calls.length > 0;
+        if (previous?.role === 'assistant' && typeof previous.content === 'string' && !hasToolCalls) {
+          visible.pop();
+        }
+      }
+      continue;
+    }
     visible.push(message);
   }
   return visible;

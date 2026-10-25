@@ -91,7 +91,7 @@ import { createWorkspaceManagementTool } from '../tools/builtin/workspace-manage
 import { registerBuiltinTools } from '../tools/builtin/register.js';
 import { SubAgentManager } from '../sessions/sub-agent.js';
 import { createMessageTool, createTypingTool, createPresenceTool, createDeleteMessageTool, createMarkReadTool } from '../tools/builtin/message.js';
-import { createWorkspaceSessionManager, SessionManager } from '../sessions/manager.js';
+import { createWorkspaceSessionManager, SessionManager, SessionPersistenceError } from '../sessions/manager.js';
 import { acquireGatewayInstanceLock } from './instance-lock.js';
 import { WorkspaceRegistry, type WorkspaceProject } from '../agent/workspace-registry.js';
 import { ProjectTerminalManager } from '../web/project-terminal.js';
@@ -126,6 +126,7 @@ import { MetricsCollector, getMetrics } from '../metrics/collector.js';
 import { HotResumeManager } from '../sessions/hot-resume.js';
 import { ProviderHealthMonitor } from '../providers/health.js';
 import { HealthTelemetryStore } from '../health/telemetry.js';
+import { guardProcessOutputStreams } from '../runtime/process-stdio.js';
 import { APP_VERSION } from '../meta/version.js';
 import { ReleaseChecker } from '../updates/release-checker.js';
 import { ReleaseUpdater } from '../updates/release-updater.js';
@@ -273,6 +274,7 @@ export class SymbioteGateway {
   /** v2.0 — Provider health: circuit breaker, latency tracking, health states */
   private providerHealth: ProviderHealthMonitor;
   private healthTelemetry!: HealthTelemetryStore;
+  private pendingProcessOutputErrors: string[] = [];
   private whatsappQr?: { value: string; updatedAt: number };
   private healthHeartbeat: ReturnType<typeof setInterval> | null = null;
   private readonly releaseChecker = new ReleaseChecker(APP_VERSION);
@@ -281,6 +283,11 @@ export class SymbioteGateway {
   );
 
   constructor(gatewayConfig: GatewayConfig) {
+    guardProcessOutputStreams((name, error) => {
+      const message = `Standard ${name} stream error (${error.code ?? 'unknown'}): ${error.message}`;
+      if (this.healthTelemetry) this.recordGatewayIssue('process', message);
+      else this.pendingProcessOutputErrors.push(message);
+    });
     this.gatewayConfig = gatewayConfig;
     this.config = loadConfig(gatewayConfig.configPath);
     configureSandbox(this.config.sandbox);
@@ -343,6 +350,9 @@ export class SymbioteGateway {
     this.workspaceRegistry = new WorkspaceRegistry(this.config.workspace);
     console.log(`${palette.dim}  [sessions] Store: ${palette.cyan}${this.sessionManager.directory}${palette.reset}`);
     this.healthTelemetry = new HealthTelemetryStore(this.sessionManager.directory);
+    for (const message of this.pendingProcessOutputErrors.splice(0)) {
+      this.recordGatewayIssue('process', message);
+    }
 
     // v2.0 — Metrics collector
     this.metrics = getMetrics({
@@ -2048,8 +2058,9 @@ export class SymbioteGateway {
           routeChoice = selectProviderRoute(
             decision,
             PROVIDERS,
-            this.config.providers as Record<string, { apiKey?: string } | undefined>,
+            this.config.providers as Record<string, { apiKey?: string; model?: string } | undefined>,
             routeChoice,
+            this.config.fallbackProviders ?? [],
           );
           console.log(`${palette.dim}  [parc]${palette.reset} ${decision.taskType} → ${routeChoice.name}/${routeChoice.model} (conf: ${decision.confidence.toFixed(2)}${routeChoice.routed ? '' : ', using configured provider'})`);
         } catch {
@@ -2575,8 +2586,9 @@ export class SymbioteGateway {
         routeChoice = selectProviderRoute(
           parcDecision,
           PROVIDERS,
-          this.config.providers as Record<string, { apiKey?: string } | undefined>,
+          this.config.providers as Record<string, { apiKey?: string; model?: string } | undefined>,
           routeChoice,
+          this.config.fallbackProviders ?? [],
         );
         console.log(`${palette.dim}  [parc]${palette.reset} ${parcDecision.taskType} → ${routeChoice.name}/${routeChoice.model} (conf: ${parcDecision.confidence.toFixed(2)}${routeChoice.routed ? '' : ', using configured provider'})`);
       } catch {
@@ -2908,10 +2920,14 @@ export class SymbioteGateway {
       } else {
         console.error(`  ${palette.red}✗ [turn]${palette.reset} ${palette.violet}${sessionId}${palette.reset}: ${err}`);
         if (err instanceof Error && err.stack) console.error(err.stack);
+        const persistenceFailure = err instanceof SessionPersistenceError;
+        if (persistenceFailure) this.recordGatewayIssue('sessions', err.message);
         // The provider adapter formats structured response metadata into a
         // readable error; keep gateway handling provider-agnostic.
         const rawMsg = err instanceof Error ? err.message : String(err);
-        const userMsg = `Error: ${rawMsg}`;
+        const userMsg = persistenceFailure
+          ? 'I could not save this conversation because of a session-storage error. The gateway logged details for diagnosis.'
+          : `Error: ${rawMsg}`;
         try {
           await this.channelRegistry.send(
             envelope.source.adapterId,
@@ -3086,13 +3102,6 @@ export class SymbioteGateway {
     process.on('unhandledRejection', reason => {
       this.recordGatewayIssue('process', `Unhandled rejection: ${reason instanceof Error ? reason.message : String(reason)}`);
     });
-    for (const [name, stream] of [['stdout', process.stdout], ['stderr', process.stderr]] as const) {
-      stream.on('error', error => {
-        const code = (error as NodeJS.ErrnoException).code ?? 'unknown';
-        this.recordGatewayIssue('process', `Standard ${name} stream error (${code}): ${error.message}`);
-      });
-    }
-
     // Hot-reload config. SIGUSR1 works on Linux/macOS; Windows has no POSIX
     // signals, so fall back to watching the config file for changes instead.
     if (process.platform !== 'win32') {
