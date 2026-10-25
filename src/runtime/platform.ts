@@ -84,7 +84,9 @@ export function isExecutableAvailable(file: string): boolean {
       .flatMap(directory => extensions.map(extension => path.join(directory, `${file}${extension}`)));
   return candidates.some(candidate => {
     try {
-      return fs.statSync(candidate).isFile();
+      if (!fs.statSync(candidate).isFile()) return false;
+      if (!isWindows()) fs.accessSync(candidate, fs.constants.X_OK);
+      return true;
     } catch {
       return false;
     }

@@ -8,7 +8,7 @@ import { DEFAULT_EXEC_TIMEOUT_SECONDS, execTool, resolveExecTimeoutMs } from '..
 import { resolveToolTimeoutMs } from '../agent/runner.js';
 import { ProcessManager } from '../tools/builtin/process.js';
 import { classifySession, configureSandbox, createSandboxedRegistry } from '../tools/sandbox.js';
-import { hintForFailure } from '../runtime/platform.js';
+import { hintForFailure, isExecutableAvailable } from '../runtime/platform.js';
 import { guardOutputStream } from '../runtime/process-stdio.js';
 
 test('exec defaults to a five-second timeout and accepts explicit longer timeouts', () => {
@@ -48,6 +48,20 @@ test('exec reports a missing working directory before spawning', async () => {
   assert.match(out, /Working directory does not exist/);
 });
 
+test('POSIX executable availability requires execute permission', () => {
+  if (process.platform === 'win32') return;
+  const executable = path.join(os.tmpdir(), `symbiote-shell-permissions-${process.pid}-${Date.now()}`);
+  fs.writeFileSync(executable, '');
+  try {
+    fs.chmodSync(executable, 0o644);
+    assert.equal(isExecutableAvailable(executable), false);
+    fs.chmodSync(executable, 0o755);
+    assert.equal(isExecutableAvailable(executable), true);
+  } finally {
+    fs.unlinkSync(executable);
+  }
+});
+
 test('exec reports an unavailable shell executable clearly', async () => {
   const envKey = process.platform === 'win32' ? 'COMSPEC' : 'SYMBIOTE_SHELL';
   const previous = process.env[envKey];
@@ -55,7 +69,7 @@ test('exec reports an unavailable shell executable clearly', async () => {
   try {
     const out = String(await execTool.execute({
       command: 'echo should-not-run',
-      shell: process.platform === 'win32' ? 'cmd' : 'auto',
+      shell: process.platform === 'win32' ? 'cmd' : 'powershell',
     }));
     assert.match(out, /Shell executable was not found/);
   } finally {
@@ -278,7 +292,7 @@ test('background process rejects an unavailable shell executable before spawning
   process.env[envKey] = path.join(os.tmpdir(), `symbiote-missing-shell-${Date.now()}`);
   try {
     assert.throws(
-      () => manager.start('echo should-not-run', undefined, undefined, process.platform === 'win32' ? 'cmd' : 'auto'),
+      () => manager.start('echo should-not-run', undefined, undefined, process.platform === 'win32' ? 'cmd' : 'powershell'),
       /Shell executable was not found/,
     );
   } finally {
