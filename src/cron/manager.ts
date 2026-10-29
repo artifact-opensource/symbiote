@@ -29,8 +29,10 @@ export interface CronAlert {
   createdAt: number;
   status: 'pending' | 'running' | 'completed' | 'failed';
   attempts: number;
+  lastAttemptAt?: number;
   lastError?: string;
   completedAt?: number;
+  failedAt?: number;
 }
 
 export interface CreateCronJobInput {
@@ -227,8 +229,30 @@ function isCronAlert(value: unknown): value is CronAlert {
     && Number.isFinite(value.createdAt)
     && (value.status === 'pending' || value.status === 'running' || value.status === 'completed' || value.status === 'failed')
     && Number.isInteger(value.attempts)
+    && (value.lastAttemptAt === undefined || Number.isFinite(value.lastAttemptAt))
     && (value.lastError === undefined || typeof value.lastError === 'string')
-    && (value.completedAt === undefined || Number.isFinite(value.completedAt));
+    && (value.completedAt === undefined || Number.isFinite(value.completedAt))
+    && (value.failedAt === undefined || Number.isFinite(value.failedAt));
+}
+
+function describeAutomationError(error: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<object>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current) && parts.length < 4) {
+    seen.add(current);
+    const value = current as { name?: unknown; message?: unknown; code?: unknown; cause?: unknown };
+    const name = typeof value.name === 'string' ? value.name : 'Error';
+    const message = typeof value.message === 'string' ? value.message : String(current);
+    const code = typeof value.code === 'string' ? ` [${value.code}]` : '';
+    parts.push(`${name}${code}: ${message}`);
+    current = value.cause;
+  }
+  if (parts.length === 0) parts.push(String(error));
+  return parts.join(' <- ')
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,})\b/g, '[redacted]')
+    .slice(0, 1_000);
 }
 
 function writeJsonAtomic(filePath: string, value: unknown): void {
@@ -372,10 +396,11 @@ export class CronManager {
     const state = readDefaultAgent(this.defaultAgentPath);
     const alert = state.alerts.find(item => item.id === id);
     if (!alert) throw new Error(`Cron alert ${id} was not found.`);
-    if (alert.status === 'running') throw new Error('A running cron alert cannot be retried.');
+    if (alert.status !== 'failed') throw new Error('Only a failed cron alert can be retried after its effects have been inspected.');
     alert.status = 'pending';
     delete alert.lastError;
     delete alert.completedAt;
+    delete alert.failedAt;
     writeJsonAtomic(this.defaultAgentPath, state);
     void this.dispatchAlerts();
     return { ...alert };
@@ -385,7 +410,12 @@ export class CronManager {
     if (this.started) return;
     const defaultAgent = readDefaultAgent(this.defaultAgentPath);
     for (const alert of defaultAgent.alerts) {
-      if (alert.status === 'running') alert.status = 'pending';
+      if (alert.status === 'running') {
+        alert.status = 'failed';
+        alert.failedAt = Date.now();
+        alert.lastError = 'Gateway restarted during this automation attempt. Automatic replay is disabled because the task may have already caused side effects; inspect its state before manually retrying.';
+        console.warn(`[cron] Alert ${alert.id} was interrupted by Gateway restart and marked failed; inspect its effects before a manual retry.`);
+      }
     }
     writeJsonAtomic(this.defaultAgentPath, defaultAgent);
     this.onAlert = onAlert;
@@ -481,21 +511,26 @@ export class CronManager {
         if (!alert) break;
         alert.status = 'running';
         alert.attempts++;
+        alert.lastAttemptAt = Date.now();
+        delete alert.failedAt;
         writeJsonAtomic(this.defaultAgentPath, state);
+        const attemptStartedAt = Date.now();
         try {
           await this.onAlert({ ...alert });
           this.updateAlert(alert.id, item => {
             item.status = 'completed';
             item.completedAt = Date.now();
             delete item.lastError;
+            delete item.failedAt;
           });
         } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
+          const message = describeAutomationError(error);
           this.updateAlert(alert.id, item => {
             item.status = 'failed';
             item.lastError = message.slice(0, 1_000);
+            item.failedAt = Date.now();
           });
-          console.error(`[cron] Autonomous alert ${alert.id} failed: ${message}`);
+          console.error(`[cron] Alert ${alert.id} attempt ${alert.attempts} failed after ${Date.now() - attemptStartedAt}ms: ${message}. No automatic retry; task execution may have produced side effects.`);
         }
       }
     } finally {

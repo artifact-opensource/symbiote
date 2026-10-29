@@ -25,6 +25,16 @@ export function expandHome(p: string): string {
   return p;
 }
 
+/** Resolve a local path, including Git-Bash drive paths such as /c/workspace. */
+export function resolveLocalPath(p: string): string {
+  const expanded = expandHome(p);
+  const gitBashDrive = isWindows() ? /^\/([a-z])\/(.*)$/i.exec(expanded) : null;
+  const normalized = gitBashDrive
+    ? `${gitBashDrive[1].toUpperCase()}:${path.sep}${gitBashDrive[2].replace(/\//g, path.sep)}`
+    : expanded;
+  return path.resolve(normalized);
+}
+
 export function appHomeDir(): string {
   return process.env.SYMBIOTE_HOME ?? path.join(os.homedir(), APP_DIR);
 }

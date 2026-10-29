@@ -1,14 +1,10 @@
-// Symbiote — BLINK: Seamless Session Continuation
+import { EXPANDED_CAP as PULSE_EXPANDED_CAP } from './pulse.js';
+
+// Symbiote — BLINK: Bounded Session Continuation
 //
-// The wall doesn't exist.
-//
-// When an agent loop approaches its iteration budget, BLINK ensures continuity.
-// Instead of dying with "[Max iterations reached]", the agent:
-//
-// 1. Records continuation state before the iteration budget is exhausted
-// 2. Returns a blink signal to the daemon
-// 3. Daemon starts a fresh agent turn with the saved session history
-// 6. The user never sees the wall
+// BLINK can resume an agent from saved history after a per-run budget is
+// exhausted. It stops at a finite depth so a non-terminating task returns
+// control with its progress preserved.
 //
 // Ported from Singularity's cortex/blink.py — same philosophy, TypeScript runtime.
 //
@@ -19,7 +15,8 @@
 
 export interface BlinkConfig {
   enabled: boolean;
-  maxDepth: number;        // Max consecutive blinks per conversation (default: unlimited)
+  maxDepth: number;              // Maximum continuation passes per conversation (default: 5)
+  maxTotalIterations: number;    // Maximum runner iterations across one turn (default: 2 × PULSE cap)
   prepareAt: number;       // Mark continuation state at N iterations remaining (default: 3)
   cooldownMs: number;      // Delay between blink and resume (default: 1000)
   checkpointInterval: number;  // Record a runtime checkpoint every N iterations (default: 25, 0 = disabled)
@@ -27,7 +24,8 @@ export interface BlinkConfig {
 
 export const DEFAULT_BLINK_CONFIG: BlinkConfig = {
   enabled: true,
-  maxDepth: Number.POSITIVE_INFINITY,
+  maxDepth: 5,
+  maxTotalIterations: PULSE_EXPANDED_CAP * 2,
   prepareAt: 3,
   cooldownMs: 1000,
   checkpointInterval: 25,
@@ -94,23 +92,48 @@ export class BlinkController {
   private state: BlinkState;
 
   constructor(config?: Partial<BlinkConfig>) {
-    this.config = { ...DEFAULT_BLINK_CONFIG, ...config };
+    const maxDepth = config?.maxDepth;
+    const maxTotalIterations = config?.maxTotalIterations;
+    this.config = {
+      ...DEFAULT_BLINK_CONFIG,
+      ...config,
+      maxDepth: typeof maxDepth === 'number' && Number.isSafeInteger(maxDepth) && maxDepth >= 0
+        ? maxDepth
+        : DEFAULT_BLINK_CONFIG.maxDepth,
+      maxTotalIterations: typeof maxTotalIterations === 'number'
+        && Number.isSafeInteger(maxTotalIterations)
+        && maxTotalIterations > 0
+        ? maxTotalIterations
+        : DEFAULT_BLINK_CONFIG.maxTotalIterations,
+    };
     this.state = freshState();
   }
 
   /** Can we do another blink? */
   shouldContinue(): boolean {
     if (!this.config.enabled) return this.state.depth === 0;
-    return this.state.depth < this.config.maxDepth;
+    const canContinue = this.state.depth < this.config.maxDepth
+      && this.state.totalIterations < this.config.maxTotalIterations;
+    if (!canContinue) this.state.phase = 'capped';
+    return canContinue;
   }
 
   /** Does this agent result require a blink?
    *  Called by daemon after runAgent returns.
    *  maxIterationsHit = true when the agent exhausted its budget.
    */
-  needsBlink(maxIterationsHit: boolean): boolean {
+  needsBlink(maxIterationsHit: boolean, pendingIterations = 0): boolean {
     if (!this.config.enabled) return false;
     if (!maxIterationsHit) return false;
+    if (!Number.isSafeInteger(pendingIterations) || pendingIterations < 0) {
+      throw new RangeError('pendingIterations must be a non-negative safe integer.');
+    }
+    const totalIterations = this.state.totalIterations + pendingIterations;
+    if (totalIterations >= this.config.maxTotalIterations) {
+      this.state.phase = 'capped';
+      console.log(`[BLINK] Total iteration cap reached (${this.config.maxTotalIterations}). Total iterations: ${totalIterations}`);
+      return false;
+    }
     if (this.state.depth >= this.config.maxDepth) {
       this.state.phase = 'capped';
       console.log(`[BLINK] Depth capped at ${this.config.maxDepth}. Total iterations: ${this.state.totalIterations}`);
@@ -181,7 +204,10 @@ export class BlinkController {
     if (this.state.blinkTimestamps.length > 100) this.state.blinkTimestamps.shift();
     this.state.prepared = false;  // Reset for next cycle
     this.state.lastCheckpointAt = 0;  // Reset checkpoint counter for new cycle
-    this.state.phase = 'blinking';
+    this.state.phase = this.state.depth >= this.config.maxDepth
+      || this.state.totalIterations >= this.config.maxTotalIterations
+      ? 'capped'
+      : 'blinking';
 
     console.log(
       `[BLINK] #${this.state.depth} — ` +
@@ -194,7 +220,12 @@ export class BlinkController {
   recordComplete(iterations: number, toolCalls: number): void {
     this.state.totalIterations += iterations;
     this.state.totalToolCalls += toolCalls;
-    this.state.phase = 'normal';
+    if (this.state.phase !== 'capped') this.state.phase = 'normal';
+  }
+
+  /** Remaining runner iterations available across this turn's BLINK passes. */
+  getRemainingIterations(): number {
+    return Math.max(0, this.config.maxTotalIterations - this.state.totalIterations);
   }
 
   /** Get cooldown duration in ms */

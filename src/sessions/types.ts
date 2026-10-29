@@ -21,6 +21,7 @@ export interface SessionMetadata {
   depth: number; // sub-agent nesting depth (0 = root)
   archivedAt?: number;
   sessionKind?: 'conversation' | 'subagent';
+  hiddenFromList?: boolean;
   projectId?: string;
   agentId?: string;
   webRuns?: Array<{

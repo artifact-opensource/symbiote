@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import type { ToolDefinition } from '../types.js';
-import { expandHome } from '../../runtime/platform.js';
+import { resolveLocalPath } from '../../runtime/platform.js';
 
 const IN_MEMORY_LIMIT = 10 * 1024 * 1024;
 const MAX_OUTPUT_CHARS = 50_000;
@@ -70,7 +70,7 @@ export const readTool: ToolDefinition = {
     idempotencyKey: (input) => `read:${String(input.path ?? '')}:${input.offset ?? 1}:${input.limit ?? 2000}:${input.encoding ?? 'auto'}`,
   },
   async execute(input) {
-    const filePath = path.resolve(expandHome(String(input.path ?? '')));
+    const filePath = resolveLocalPath(String(input.path ?? ''));
     try {
       if (!fs.existsSync(filePath)) return `Error: File not found: ${filePath}`;
       const stat = fs.statSync(filePath);

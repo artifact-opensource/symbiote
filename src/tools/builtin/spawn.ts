@@ -20,7 +20,7 @@ export function createSpawnTool(
       type: 'object',
       properties: {
         task: { type: 'string', description: 'The task for the sub-agent to complete' },
-        maxIterations: { type: 'number', description: 'Optional iteration cap per runner pass. BLINK can continue across passes; without a cap, the sub-agent starts at 100 iterations and PULSE may expand to 1,000.' },
+        maxIterations: { type: 'number', description: 'Optional iteration cap per runner pass. PULSE may expand a pass to 1,000 iterations; BLINK caps each sub-agent turn at 2,000 total iterations across at most five passes.' },
       },
       required: ['task'],
     },

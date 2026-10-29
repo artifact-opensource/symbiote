@@ -1,6 +1,9 @@
 # Symbiote Releases
 
-## Latest: v5.6.1 Apex (October 25, 2026)
+## Latest: v5.6.2 Apex (October 29, 2026)
+Hardened Windows shortcut, wizard, and source-install flows; added on-demand update checks and MSI download progress; improved runtime, session, heartbeat, integration, and workspace reliability. Details: [Release Notes](RELEASE_NOTES_v5.6.2.md).
+
+## v5.6.1 Apex (October 25, 2026)
 Fixed duplicate assistant history and completion events, hardened session persistence and process startup/output handling, and constrained SARSI routing to configured provider/model choices. Details: [Release Notes](RELEASE_NOTES_v5.6.1.md).
 
 ## v5.6.0 Apex (October 23, 2026)
@@ -13,6 +16,7 @@ Project-scoped agent operations and project memory, a redesigned workspace hiera
 
 | Version | Date | Highlights |
 |---------|------|-----------|
+| **v5.6.2 Apex** | Oct 29, 2026 | Windows launch and setup hardening, update progress, runtime and UI reliability |
 | **v5.6.1 Apex** | Oct 25, 2026 | Runner and history duplication fixes, session persistence hardening, process error handling, configured SARSI routes |
 | **v5.6.0 Apex** | Oct 23, 2026 | Remote n8n integration, WhatsApp QR setup, health telemetry, Electron lifecycle and UI refinements |
 | **v5.5.0 Apex** | Oct 17, 2026 | Project operations and memory, hero hierarchy, GPU/per-core CPU metrics, shared appearance, weighted similarity, Windows telemetry and Discord streaming fixes |

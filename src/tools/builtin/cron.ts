@@ -21,7 +21,7 @@ function parseSchedule(value: unknown): CronSchedule {
 export function createCronManageTool(manager: CronManager): ToolDefinition {
   return {
     name: 'cron_manage',
-    description: 'Create, list, update, pause, resume, delete, or retry recurring cron jobs and one-time reminders. Jobs create autonomous agent runs at their scheduled time. Use the user’s local timezone; cron expressions have five fields (minute hour day-of-month month day-of-week).',
+    description: 'Create, list, update, pause, resume, or delete recurring cron jobs and one-time reminders. Jobs create autonomous agent runs at their scheduled time. Retry only failed alerts after inspecting whether the task already caused side effects; interrupted or failed executions are never automatically replayed. Use the user’s local timezone; cron expressions have five fields (minute hour day-of-month month day-of-week).',
     parameters: {
       type: 'object',
       properties: {

@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 import type { ToolDefinition } from '../types.js';
-import { appPath } from '../../runtime/platform.js';
+import { appPath, resolveLocalPath } from '../../runtime/platform.js';
 
 // ── Copilot token resolution (mirrors github-copilot.ts provider) ──
 
@@ -218,7 +218,7 @@ export const imageTool: ToolDefinition = {
         return `Error: Failed to fetch image: ${err instanceof Error ? err.message : String(err)}`;
       }
     } else {
-      const resolved = path.resolve(imagePath);
+      const resolved = resolveLocalPath(imagePath);
       if (!fs.existsSync(resolved)) return `Error: Image not found: ${resolved}`;
 
       const stat = fs.statSync(resolved);

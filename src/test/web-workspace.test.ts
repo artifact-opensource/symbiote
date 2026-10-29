@@ -50,10 +50,12 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   let configuredProvider = '';
   let includedArchivedProjects = false;
   let integrationTests = 0;
+  let updateCheckCalls = 0;
   let defaultAgentPrompt = 'test prompt';
   let appearanceSettings: AppearanceSettings = { brightness: 64, primaryHue: 145, secondaryHue: 13 };
   let updatePrepareCalls = 0;
   let restartRequests = 0;
+  let tailscaleEnabled = false;
   let updatedProviderModel: { provider: string; model: string } | undefined;
   let clonedRepository = '';
   let cloneRepositoryCalls = 0;
@@ -69,6 +71,23 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   const control: WebControlPlane = {
     getStatus: () => ({}),
     restartGateway: () => { restartRequests++; },
+    getTailscaleStatus: async () => ({
+      connected: true,
+      ip: '100.90.0.1',
+      enabled: tailscaleEnabled,
+      mode: tailscaleEnabled ? 'tailscale' : 'lan',
+      accessUrl: `http://${tailscaleEnabled ? '100.90.0.1' : '192.168.1.10'}:3009`,
+    }),
+    setTailscaleAccess: async enabled => {
+      tailscaleEnabled = enabled;
+      return {
+        connected: true,
+        ip: '100.90.0.1',
+        enabled,
+        mode: enabled ? 'tailscale' : 'lan',
+        accessUrl: `http://${enabled ? '100.90.0.1' : '192.168.1.10'}:3009`,
+      };
+    },
     updateProviderModel: (provider, model) => updatedProviderModel = { provider, model },
     cloneProjectRepository: async repositoryUrl => {
       cloneRepositoryCalls++;
@@ -76,6 +95,15 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
       return { id: 'project-clone', name: 'example' };
     },
     getUpdateDownload: () => updateDownload,
+    refreshUpdateStatus: async () => {
+      updateCheckCalls++;
+      return {
+        state: 'current' as const,
+        currentVersion: '5.6.2',
+        latestVersion: '5.6.2',
+        checkedAt: 123,
+      };
+    },
     prepareUpdateDownload: async () => {
       updatePrepareCalls++;
       return updateDownload;
@@ -252,6 +280,31 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
     assert.deepEqual(await restartResponse.json(), { restarting: true });
     assert.equal(restartRequests, 1);
 
+    const tailscaleStatus = await fetch(`${baseUrl}/api/integrations/tailscale`);
+    assert.equal(tailscaleStatus.status, 200);
+    assert.equal(tailscaleStatus.headers.get('cache-control'), 'no-store');
+    assert.equal((await tailscaleStatus.json()).mode, 'lan');
+    const rejectedTailscaleChange = await fetch(`${baseUrl}/api/integrations/tailscale`, {
+      method: 'PUT',
+      headers: { origin: 'https://untrusted.example', 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: true }),
+    });
+    assert.equal(rejectedTailscaleChange.status, 403);
+    const tailscaleChange = await fetch(`${baseUrl}/api/integrations/tailscale`, {
+      method: 'PUT',
+      headers: { origin: baseUrl, 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: true }),
+    });
+    assert.equal(tailscaleChange.status, 200);
+    assert.equal((await tailscaleChange.json()).mode, 'tailscale');
+    assert.equal(tailscaleEnabled, true);
+    const tailscaleRestart = await fetch(`${baseUrl}/api/integrations/tailscale/restart`, {
+      method: 'POST',
+      headers: { origin: baseUrl },
+    });
+    assert.equal(tailscaleRestart.status, 202);
+    assert.equal(restartRequests, 2);
+
     const updatedRoute = await fetch(`${baseUrl}/api/config/provider-model`, {
       method: 'POST',
       headers: { origin: baseUrl, 'content-type': 'application/json' },
@@ -288,6 +341,25 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
     });
     assert.equal(rejectedCredentialClone.status, 400);
     assert.equal(cloneRepositoryCalls, 1);
+
+    const checkedUpdate = await fetch(`${baseUrl}/api/update/check`, {
+      method: 'POST',
+      headers: { origin: baseUrl },
+    });
+    assert.equal(checkedUpdate.status, 200);
+    assert.equal(checkedUpdate.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(await checkedUpdate.json(), {
+      state: 'current',
+      currentVersion: '5.6.2',
+      latestVersion: '5.6.2',
+      checkedAt: 123,
+    });
+    assert.equal(updateCheckCalls, 1);
+    const rejectedUpdateCheckOrigin = await fetch(`${baseUrl}/api/update/check`, {
+      method: 'POST',
+      headers: { origin: 'https://untrusted.example' },
+    });
+    assert.equal(rejectedUpdateCheckOrigin.status, 403);
 
     const preparedUpdate = await fetch(`${baseUrl}/api/update/download`, {
       method: 'POST',

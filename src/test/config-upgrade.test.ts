@@ -73,3 +73,22 @@ test('the template passes validation and the env file keeps unknown keys', () =>
   assert.match(env, /CUSTOM_THING=keep-me/);
   assert.match(env, /SYMBIOTE_API_KEY=k{64}/);
 });
+
+test('heartbeat intervals and quiet-hour boundaries reject invalid values', () => {
+  const template = buildConfigTemplate({ ownerIds: ['1'] });
+  const config = { ...template, workspace: process.cwd(), heartbeat: {
+    activeIntervalMin: 0,
+    idleIntervalMin: 1.5,
+    sleepingIntervalMin: Number.POSITIVE_INFINITY,
+    quietHoursStart: 24,
+    quietHoursEnd: -1,
+  } };
+  const issues = validateConfig(config as any).filter(issue => issue.field.startsWith('heartbeat.'));
+  assert.deepEqual(issues.map(issue => issue.field).sort(), [
+    'heartbeat.activeIntervalMin',
+    'heartbeat.idleIntervalMin',
+    'heartbeat.quietHoursEnd',
+    'heartbeat.quietHoursStart',
+    'heartbeat.sleepingIntervalMin',
+  ]);
+});

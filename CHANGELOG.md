@@ -1,5 +1,27 @@
 # Changelog
 
+## v5.6.2 (2026-10-29) — Apex
+
+Full release notes: [RELEASE_NOTES_v5.6.2.md](RELEASE_NOTES_v5.6.2.md)
+
+### Added
+- A manual update check in the Control Room with visible MSI download progress.
+- Safe, same-origin installer defaults and setup submissions with bounded request bodies and clear recovery states.
+
+### Changed
+- Source installers use lockfile-based dependency installs, provision the Electron and web build runtimes, and build the Windows shortcut launcher.
+- Release publishing selects notes from the tagged version and generates version-matched Windows MSI and checksum assets.
+- Runtime, session, heartbeat, integration, and workspace UI reliability updates.
+
+### Fixed
+- Rebuilt the Windows shortcut launcher without an unconditional administrator relaunch.
+- Installer defaults no longer return existing provider or Discord secrets to the browser.
+- Installer startup recovers from an occupied preferred port; setup errors distinguish invalid requests from server failures.
+
+### Upgrade notes
+- No configuration migration is required.
+- Source checkouts should use `npm ci`, `npm --prefix webapp ci`, then `npm run build`.
+
 ## v5.6.1 (2026-10-25) — Apex
 
 Full release notes: [RELEASE_NOTES_v5.6.1.md](RELEASE_NOTES_v5.6.1.md)

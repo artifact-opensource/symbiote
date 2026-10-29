@@ -129,13 +129,22 @@ export function validateConfig(config: SymbioteConfig): ValidationError[] {
 
   if (config.heartbeat) {
     const hb = config.heartbeat;
-    if (hb.quietHoursStart !== undefined && hb.quietHoursEnd !== undefined) {
-      if (hb.quietHoursStart < 0 || hb.quietHoursStart > 23 || hb.quietHoursEnd < 0 || hb.quietHoursEnd > 23) {
-        issues.push({ field: 'heartbeat.quietHours', message: 'Quiet hours must be 0–23', severity: 'error' });
+    for (const [field, interval] of [
+      ['activeIntervalMin', hb.activeIntervalMin],
+      ['idleIntervalMin', hb.idleIntervalMin],
+      ['sleepingIntervalMin', hb.sleepingIntervalMin],
+    ] as const) {
+      if (interval !== undefined && (!Number.isInteger(interval) || interval < 1)) {
+        issues.push({ field: `heartbeat.${field}`, message: 'Heartbeat intervals must be positive whole minutes.', severity: 'error' });
       }
     }
-    if (hb.activeIntervalMin !== undefined && hb.activeIntervalMin < 1) {
-      issues.push({ field: 'heartbeat.activeIntervalMin', message: 'Active heartbeat interval must be at least 1 minute', severity: 'error' });
+    for (const [field, hour] of [
+      ['quietHoursStart', hb.quietHoursStart],
+      ['quietHoursEnd', hb.quietHoursEnd],
+    ] as const) {
+      if (hour !== undefined && (!Number.isInteger(hour) || hour < 0 || hour > 23)) {
+        issues.push({ field: `heartbeat.${field}`, message: 'Quiet hours must be whole hours from 0 through 23.', severity: 'error' });
+      }
     }
   }
 

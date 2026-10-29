@@ -1,6 +1,6 @@
 // Symbiote — Tool type definitions
 
-export const DEFAULT_EXEC_TIMEOUT_SECONDS = 5;
+export const DEFAULT_EXEC_TIMEOUT_SECONDS = 30;
 
 export function resolveExecTimeoutMs(timeout: unknown): number {
   if (timeout === undefined) return DEFAULT_EXEC_TIMEOUT_SECONDS * 1000;

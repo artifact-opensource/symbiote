@@ -7,8 +7,8 @@ interface ReasoningDisplayProps {
   compact?: boolean;
 }
 
-export default function ReasoningDisplay({ activity, toolLabel, compact = false }: ReasoningDisplayProps) {
-  const label = toolLabel ?? getActivityLabel(activity);
+export default function ReasoningDisplay({ activity, compact = false }: ReasoningDisplayProps) {
+  const label = getActivityLabel(activity);
   return (
     <div className={`message-live-activity${compact ? ' message-live-activity-compact' : ''}`} role="status" aria-live="polite">
       <ActivityOrb state={getActivityOrbState(activity)} label={label} compact />

@@ -4,11 +4,11 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Activity, ArrowRight, ArrowUpRight, Bell, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Command, Copy, Cpu,
-  Archive, Bookmark, Brain, Cloud, Database, Download, Gauge, Globe, HardDrive, History, Info, LayoutDashboard, Leaf, Maximize2, Menu, MessageSquare, Minimize2, Moon, Network,
-  Biohazard, ChevronUp, FolderOpen, MessagesSquare, Plus, Power, RefreshCw, Search, Send, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
+  Archive, Bookmark, Brain, Cloud, Database, Download, Gauge, Globe, Globe2, HardDrive, History, Info, Landmark, LayoutDashboard, Leaf, Maximize2, Menu, MessageSquare, Minimize2, Moon, Network,
+  Biohazard, ChevronUp, FolderOpen, MessagesSquare, Pause, Plus, Power, RefreshCw, Search, Send, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
 } from 'lucide-react';
 import type { AgentProfile, ChatMessage, GatewayConfig, GatewayStatus, HostResourceSnapshot, MemoryNodeContext, SessionSummary, ThreadUserHelpRequest, ToolSummary, ViewId, WorkspaceAgent, WorkspaceProject, WorkspaceRun } from './types';
-import type { CloudProviderStatus, GoogleWorkspaceGrant } from './components/IntegrationsView';
+import type { CloudProviderStatus, GoogleWorkspaceGrant, TailscaleIntegrationStatus } from './components/IntegrationsView';
 import ActivityOrb from './components/ActivityOrb';
 import BrowserLoading from './components/BrowserLoading';
 import { getActivityFromStatus, getActivityOrbState, getToolActivity, isAgentActivity, type AgentActivity } from './components/activity-orb-state';
@@ -21,6 +21,7 @@ import { AgentIcon as AgentGlyph, AgentIconPicker } from './components/AgentIcon
 declare const __SYMBIOTE_VERSION__: string;
 
 const GamesView = lazy(() => import('./components/GamesView'));
+const IntelligenceMap = lazy(() => import('./components/IntelligenceMap'));
 const MemoryMap = lazy(() => import('./components/MemoryMap'));
 const IntegrationsView = lazy(() => import('./components/IntegrationsView'));
 const ProjectIDE = lazy(() => import('./components/ProjectIDE'));
@@ -35,11 +36,13 @@ const NAVIGATION: { id: ViewId; label: string; icon: typeof LayoutDashboard; gro
   { id: 'games', label: 'Zen', icon: Leaf, group: 'Play' },
   { id: 'browser', label: 'Browser', icon: Globe, group: 'Tools' },
   { id: 'ide', label: 'IDE', icon: TerminalSquare, group: 'Tools' },
-  { id: 'tools', label: 'Tool registry', icon: Wrench, group: 'Tools' },
+  { id: 'markets', label: 'Markets', icon: Landmark, group: 'Tools' },
+  { id: 'intelligence', label: 'Intelligence', icon: Globe2, group: 'Tools' },
   { id: 'memory', label: 'Memory', icon: Brain, group: 'Runtime' },
   { id: 'integrations', label: 'Integrations', icon: Network, group: 'Runtime' },
   { id: 'settings', label: 'Configuration', icon: Settings2, group: 'Runtime' },
   { id: 'operations', label: 'Health', icon: Activity, group: 'Runtime' },
+  { id: 'tools', label: 'Tool registry', icon: Wrench, group: 'Runtime' },
 ];
 
 const REFRESH_INTERVAL_KEY = 'symbiote-telemetry-refresh-ms';
@@ -122,6 +125,8 @@ declare global {
       openMini(): Promise<void>;
       expand(): Promise<void>;
       closeMini(): Promise<void>;
+      restartApp(): Promise<void>;
+      getLanUrl(): Promise<string>;
       getOpacity(): Promise<number>;
       setOpacity(opacity: number): Promise<number>;
       setTheme(theme: Theme): Promise<Theme>;
@@ -1040,11 +1045,19 @@ export default function App() {
   const [cloudProviderStatus, setCloudProviderStatus] = useState<CloudProviderStatus>({
     azure: false, oci: false, n8n: false, kaggle: false,
   });
+  const [tailscaleStatus, setTailscaleStatus] = useState<TailscaleIntegrationStatus | null>(null);
   const [status, setStatus] = useState<GatewayStatus | null>(null);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
+  const [checkingForUpdates, setCheckingForUpdates] = useState(false);
   const [preparingUpdate, setPreparingUpdate] = useState(false);
+  const updateDownload = status?.update?.download;
+  const updateDownloadPercent = updateDownload?.state === 'downloading'
+    && updateDownload.totalBytes && updateDownload.totalBytes > 0
+    ? Math.min(100, Math.floor((updateDownload.downloadedBytes ?? 0) / updateDownload.totalBytes * 100))
+    : null;
   const [config, setConfig] = useState<GatewayConfig | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [gammaHeartbeatSession, setGammaHeartbeatSession] = useState<SessionSummary | null>(null);
   const [projects, setProjects] = useState<WorkspaceProject[]>([]);
   const [workspaceAgents, setWorkspaceAgents] = useState<AgentProfile[]>([]);
   const [workspaceProjectId, setWorkspaceProjectId] = useState('');
@@ -1108,8 +1121,11 @@ export default function App() {
   const nativeNotifiedIds = useRef(new Set<string>());
   const toolSearchRef = useRef<HTMLInputElement>(null);
   const logSearchRef = useRef<HTMLInputElement>(null);
-  const activeSession = sessions.find(session => session.id === activeSessionId);
+  const activeSession = gammaHeartbeatSession?.id === activeSessionId
+    ? gammaHeartbeatSession
+    : sessions.find(session => session.id === activeSessionId);
   const activeProfile = activeSession?.agentId ? workspaceAgents.find(profile => profile.id === activeSession.agentId) : undefined;
+  const recentThreadSessions = sessions;
   const currentNavigation = NAVIGATION.find(item => item.id === view) ?? NAVIGATION[0];
   const contextSessions = useMemo(() => sessions.filter(session => {
     if (workspaceAgentId) return session.agentId === workspaceAgentId;
@@ -1139,6 +1155,7 @@ export default function App() {
     { id: 'oci', label: 'Oracle Cloud Infrastructure', online: cloudProviderStatus.oci, view: 'integrations', icon: <Database /> },
     { id: 'n8n', label: 'n8n (local)', online: cloudProviderStatus.n8n, view: 'integrations', icon: <Workflow /> },
     { id: 'kaggle', label: 'Kaggle', online: cloudProviderStatus.kaggle, view: 'integrations', icon: <Cpu /> },
+    { id: 'tailscale', label: 'Tailscale', online: Boolean(tailscaleStatus?.enabled && tailscaleStatus.connected), view: 'integrations', icon: <Network /> },
   ];
   const sessionDraft = sessionDrafts[activeSessionId] ?? '';
 
@@ -1362,6 +1379,29 @@ export default function App() {
     }
   };
 
+  const checkForUpdates = async () => {
+    if (checkingForUpdates) return;
+    setCheckingForUpdates(true);
+    setError('');
+    try {
+      const update = await api<NonNullable<GatewayStatus['update']>>('/api/update/check', {
+        method: 'POST',
+        body: '{}',
+      });
+      setStatus(previous => previous ? { ...previous, update: { ...previous.update, ...update } } : previous);
+      if (update.state === 'current') {
+        setCommandNotice(`Symbiote ${update.currentVersion} is up to date.`);
+        window.setTimeout(() => setCommandNotice(''), 7000);
+      } else if (update.state === 'error') {
+        throw new Error(update.error ?? 'Symbiote could not check for updates.');
+      }
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Symbiote could not check for updates.');
+    } finally {
+      setCheckingForUpdates(false);
+    }
+  };
+
   const refreshWork = useCallback(async () => {
     const [freshRuns, freshAgents] = await Promise.all([
       api<WorkspaceRun[]>('/api/runs'),
@@ -1409,6 +1449,7 @@ export default function App() {
       refreshStatus(),
       api<GatewayConfig>('/api/config').then(setConfig),
       api<{ providers: CloudProviderStatus }>('/api/integrations').then(result => setCloudProviderStatus(result.providers)),
+      api<TailscaleIntegrationStatus>('/api/integrations/tailscale').then(setTailscaleStatus),
       api<WorkspaceProject[]>('/api/projects').then(data => {
         setProjects(data);
         setWorkspaceProjectId(current => current && data.some(item => item.id === current) ? current : '');
@@ -1654,6 +1695,9 @@ export default function App() {
 
   const navigate = (destination: ViewId) => {
     setView(destination);
+    if (destination === 'markets') setToolQuery('market');
+    else if (destination === 'intelligence') setToolQuery('intelligence');
+    else if (destination !== 'tools') setToolQuery('');
     setMobileNavOpen(false);
     setError('');
   };
@@ -1865,6 +1909,20 @@ export default function App() {
   const openRunSession = (sessionId: string) => {
     selectSession(sessionId);
     navigate('chat');
+  };
+
+  const openGammaHeartbeatConversation = async () => {
+    try {
+      const heartbeat = await api<SessionSummary>('/api/sessions/gamma-heartbeat/ensure', { method: 'POST', body: '{}' });
+      setGammaHeartbeatSession(heartbeat);
+      setWorkspaceProjectId(heartbeat.projectId ?? '');
+      setWorkspaceAgentId(heartbeat.agentId ?? '');
+      setActiveSessionId(heartbeat.id);
+      setRecentThreadsOpen(false);
+      navigate('chat');
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not open the Gamma heartbeat conversation.');
+    }
   };
 
   const openProfileConversation = async (profile: AgentProfile) => {
@@ -2358,17 +2416,20 @@ export default function App() {
             <button className="sidebar-thread-toggle" type="button" onClick={() => setRecentThreadsOpen(open => !open)} aria-expanded={recentThreadsOpen} aria-controls="sidebar-thread-list">
               <span>RECENT THREADS</span><ChevronUp size={14} className={recentThreadsOpen ? 'thread-toggle-open' : ''} />
             </button>
-            <button className="icon-button small" onClick={() => void createSession()} aria-label="Start a new conversation"><Plus size={15} /></button>
+            <div className="sidebar-thread-actions">
+              <button className="icon-button small" type="button" onClick={() => void openGammaHeartbeatConversation()} aria-label="Open Gamma heartbeat conversation" title="Gamma heartbeat"><Bot size={14} /></button>
+              <button className="icon-button small" onClick={() => void createSession()} aria-label="Start a new conversation"><Plus size={15} /></button>
+            </div>
           </div>
           <div id="sidebar-thread-list" className="sidebar-thread-popover" data-open={recentThreadsOpen} role="region" aria-label="Previous conversations" aria-hidden={!recentThreadsOpen} inert={!recentThreadsOpen}>
             <div className="sidebar-thread-list">
-              {sessions.map(session => (
+              {recentThreadSessions.map(session => (
                 <button key={session.id} className={`recent-thread${activeSessionId === session.id && view === 'chat' ? ' recent-thread-active' : ''}`} onClick={() => { selectSession(session.id); navigate('chat'); setRecentThreadsOpen(false); }}>
                   <span className="thread-dot" />
                   <span className="recent-thread-copy"><strong>{session.label || 'Conversation'}</strong><small>{formatRelative(session.updatedAt)}</small></span>
                 </button>
               ))}
-              {sessions.length === 0 && <p className="sidebar-empty">Your conversations will appear here.</p>}
+              {recentThreadSessions.length === 0 && <p className="sidebar-empty">Your conversations will appear here.</p>}
             </div>
           </div>
         </div>
@@ -2395,6 +2456,9 @@ export default function App() {
               <Command size={16} />
             </button>
             <AppearanceControl settings={appearance} onChange={changeAppearance} />
+            <button className={`icon-button utility-button${checkingForUpdates ? ' is-refreshing' : ''}`} onClick={() => void checkForUpdates()} aria-label={checkingForUpdates ? 'Checking for updates' : 'Check for updates'} title={checkingForUpdates ? 'Checking for updates…' : 'Check for updates'} disabled={checkingForUpdates}>
+              <Download size={16} />
+            </button>
             <button className={`icon-button refresh-button${refreshing ? ' is-refreshing' : ''}`} onClick={() => void refreshAll(true)} aria-label="Refresh runtime data" disabled={refreshing}>
               <RefreshCw size={16} />
             </button>
@@ -2431,8 +2495,10 @@ export default function App() {
               <div className="notice notice-update" role="status">
                 <span>Symbiote {status.update.latestVersion} is available.</span>
                 {isDesktopApp
-                  ? <button className="button button-secondary" onClick={() => void installUpdate()} disabled={preparingUpdate || status.update.download?.state === 'downloading'}>
-                      {preparingUpdate || status.update.download?.state === 'downloading' ? 'Preparing installer…' : 'Install update'}
+                  ? <button className="button button-secondary" onClick={() => void installUpdate()} disabled={preparingUpdate || updateDownload?.state === 'downloading'}>
+                      {preparingUpdate || updateDownload?.state === 'downloading'
+                        ? updateDownloadPercent === null ? 'Preparing installer…' : `Downloading ${updateDownloadPercent}%`
+                        : 'Install update'}
                     </button>
                   : <a className="button button-secondary" href={status.update.releaseUrl} target="_blank" rel="noreferrer">View update</a>}
                 <button className="icon-button small" onClick={() => setDismissedUpdateVersion(status.update?.latestVersion ?? null)} aria-label="Dismiss update notice"><X size={14} /></button>
@@ -2552,7 +2618,7 @@ export default function App() {
               )}
               {view === 'browser' && <BrowserView />}
               {view === 'memory' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading the memory map" loading /><span>Loading memory map…</span></div>}><MemoryMap request={api} onSendNode={sendMemoryNode} /></Suspense>}
-              {view === 'integrations' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading integrations" loading /><span>Loading integrations…</span></div>}><IntegrationsView grant={googleWorkspaceGrant} onGrantChange={setGoogleWorkspaceGrant} request={api} cloudStatus={cloudProviderStatus} onCloudStatusChange={(provider, configured) => setCloudProviderStatus(previous => ({ ...previous, [provider]: configured }))} /></Suspense>}
+              {view === 'integrations' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading integrations" loading /><span>Loading integrations…</span></div>}><IntegrationsView grant={googleWorkspaceGrant} onGrantChange={setGoogleWorkspaceGrant} request={api} cloudStatus={cloudProviderStatus} onCloudStatusChange={(provider, configured) => setCloudProviderStatus(previous => ({ ...previous, [provider]: configured }))} tailscaleStatus={tailscaleStatus} onTailscaleStatusChange={setTailscaleStatus} /></Suspense>}
               {view === 'operations' && (
                 <OperationsView
                   status={status}
@@ -2569,11 +2635,12 @@ export default function App() {
                   onClearIncidents={clearHealthIncidents}
                 />
               )}
-              {view === 'tools' && (
+              {(view === 'tools' || view === 'markets') && (
                 <ToolsView tools={filteredTools} total={tools.length} query={toolQuery} onQuery={setToolQuery} />
               )}
               {view === 'settings' && <SettingsView config={config} status={status} refreshIntervalMs={refreshIntervalMs} onRefreshIntervalChange={setRefreshIntervalMs} />}
               {view === 'games' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading games" loading /><span>Loading games…</span></div>}><GamesView request={api} /></Suspense>}
+              {view === 'intelligence' && <Suspense fallback={<div className="loading-state"><ActivityOrb label="Loading intelligence map" loading /><span>Loading intelligence map…</span></div>}><IntelligenceMap markers={[]} onSelectMarker={() => {}} /></Suspense>}
             </>
           )}
         </main>
@@ -4318,7 +4385,7 @@ function ChatView(props: {
     <div className="page page-chat">
       <PageHeading
         eyebrow="A DIRECT LINE TO YOUR AGENT"
-        title={session?.label || 'Conversations'}
+        title="Conversations"
         detail={session ? `${session.messageCount} saved messages · Updated ${formatRelative(session.updatedAt)}` : 'Choose a saved session, or start a new conversation.'}
         action={<div className="chat-session-actions">
           <label className="sr-only" htmlFor="session-picker">Select conversation</label>
@@ -4361,8 +4428,7 @@ function ChatView(props: {
                 {message.streaming && message.todoActivity?.length ? <TodoActivityBubble items={message.todoActivity} /> : null}
                 {message.streaming && (() => {
                   const activity = isAgentActivity(message.activityState) ? message.activityState : message.activeTool ? getToolActivity(message.activeTool).activity : 'thinking';
-                  const tool = message.activeTool ? getToolActivity(message.activeTool) : undefined;
-                  return <ReasoningDisplay activity={activity} toolLabel={tool ? `Executing · ${tool.label}` : undefined} />;
+                  return <ReasoningDisplay activity={activity} />;
                 })()}
               </div>
             </article>
@@ -4383,28 +4449,27 @@ function ChatView(props: {
         </div>
         <form className="composer" onSubmit={onSubmit}>
           <label className="sr-only" htmlFor="message-composer">Message your agent</label>
-          <textarea
-            id="message-composer"
-            value={draft}
-            onChange={event => onDraft(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                event.currentTarget.form?.requestSubmit();
-              }
-            }}
-            placeholder={session ? 'Message your agent…' : 'Select or create a conversation to begin…'}
-            rows={2}
-            disabled={!session}
-          />
-          <div className="composer-bottom">
-            <span><Command size={12} /> Enter to send <span className="composer-divider">·</span> Shift + Enter for a new line</span>
+          <div className="composer-input-row">
+            <textarea
+              id="message-composer"
+              value={draft}
+              onChange={event => onDraft(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              placeholder={session ? 'Message your agent…' : 'Select or create a conversation to begin…'}
+              rows={1}
+              disabled={!session}
+            />
             {sending
               ? <div className="composer-run-actions">
-                <button className="button button-secondary hold-button" type="button" onClick={onStop}><CircleAlert size={14} />Hold on</button>
-                <button className="send-button stop-button" type="button" onClick={onStop} aria-label="Stop agent turn" title="Stop agent turn"><X size={16} /><span>Stop</span></button>
+                <button className="button button-secondary hold-button" type="button" onClick={onStop} aria-label="Pause current turn" title="Pause"><Pause size={15} /></button>
+                <button className="send-button stop-button" type="button" onClick={onStop} aria-label="Interrupt agent" title="Interrupt"><X size={15} /></button>
               </div>
-              : <button className="send-button" type="submit" disabled={!draft.trim() || !session} aria-label="Send message"><Send size={16} /><span>Send</span></button>}
+              : <button className="send-button" type="submit" disabled={!draft.trim() || !session} aria-label="Send message" title="Send"><Send size={15} /></button>}
           </div>
         </form>
         <div className="chat-assurance"><ShieldCheck size={13} /> Messages stay in your local Symbiote session store.</div>
@@ -4861,6 +4926,7 @@ function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChan
   refreshIntervalMs: number;
   onRefreshIntervalChange: (value: number) => void;
 }) {
+  const [lanUrl, setLanUrl] = useState('');
   const [lanToken, setLanToken] = useState('');
   const [tokenError, setTokenError] = useState('');
   const [tokenLoading, setTokenLoading] = useState(false);
@@ -4903,6 +4969,27 @@ function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChan
     }
   };
 
+  useEffect(() => {
+    let mounted = true;
+    const refreshLanUrl = () => {
+      if (!window.symbioteDesktop) return;
+      void window.symbioteDesktop.getLanUrl()
+        .then(url => { if (mounted) setLanUrl(url); })
+        .catch(() => { if (mounted) setLanUrl(''); });
+    };
+    refreshLanUrl();
+    const timer = window.setInterval(refreshLanUrl, 30_000);
+    return () => { mounted = false; window.clearInterval(timer); };
+  }, []);
+
+  const copyLanUrl = async () => {
+    try {
+      await navigator.clipboard.writeText(lanUrl);
+    } catch (failure) {
+      setTokenError(failure instanceof Error ? failure.message : 'Could not copy the LAN URL.');
+    }
+  };
+
   const copyLanToken = async () => {
     try {
       await navigator.clipboard.writeText(lanToken);
@@ -4930,6 +5017,7 @@ function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChan
         <div className="section-heading"><div><div className="eyebrow">NETWORK BOUNDARIES</div><h2>Gateway endpoints</h2></div><span className="settings-source"><ShieldCheck size={14} />LOCAL API</span></div>
         <div className="settings-grid">
           <Setting label="Control room" value={config?.gateway ? `${config.gateway.webHost}:${config.gateway.webPort}` : undefined} />
+          <Setting label="LAN URL" value={lanUrl || 'Not available'} wide />
           <Setting label="Agent API" value={config?.gateway ? `${config.gateway.apiHost}:${config.gateway.apiPort}` : undefined} />
           <Setting label="Authenticated API" value={config?.gateway ? (config.gateway.apiEnabled ? 'Enabled' : 'Disabled') : undefined} />
           <Setting label="Process ID" value={status?.pid?.toString()} />
@@ -4955,7 +5043,12 @@ function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChan
       </section>
       <section className="surface-card settings-card">
         <div className="section-heading"><div><div className="eyebrow">NETWORK ACCESS</div><h2>Connect another device</h2></div><span className="settings-source"><ShieldCheck size={14} />LOCAL ONLY</span></div>
-        <p className="settings-access-copy">On a device on your trusted network, open the control room address above and enter this access token.</p>
+        <p className="settings-access-copy">On a device on your trusted network, open the refreshed LAN URL below and enter this access token.</p>
+        {lanUrl && <div className="settings-token-row">
+          <code>{lanUrl}</code>
+          <button className="button button-secondary" type="button" onClick={() => void copyLanUrl()}><Copy size={14} />Copy URL</button>
+          <a className="button button-secondary" href={lanUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} />Open</a>
+        </div>}
         {lanToken ? (
           <div className="settings-token-row">
             <code>{lanToken}</code>

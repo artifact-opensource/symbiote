@@ -1,4 +1,4 @@
-export type ViewId = 'workspace' | 'ide' | 'runs' | 'agents' | 'projects' | 'threads' | 'chat' | 'browser' | 'memory' | 'games' | 'integrations' | 'operations' | 'tools' | 'settings';
+export type ViewId = 'workspace' | 'ide' | 'runs' | 'agents' | 'projects' | 'threads' | 'chat' | 'browser' | 'memory' | 'games' | 'integrations' | 'operations' | 'tools' | 'markets' | 'intelligence' | 'settings';
 
 export interface MemoryGraphNode {
   id: string;
@@ -233,6 +233,8 @@ export interface GatewayStatus {
       version?: string;
       filename?: string;
       sha256?: string;
+      downloadedBytes?: number;
+      totalBytes?: number;
       error?: string;
     };
   };

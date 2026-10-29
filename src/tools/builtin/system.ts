@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import type { ToolDefinition } from '../types.js';
-import { expandHome, isWindows, shellCommand } from '../../runtime/platform.js';
+import { isWindows, resolveLocalPath, shellCommand } from '../../runtime/platform.js';
 
-const abs = (p: unknown): string => path.resolve(expandHome(String(p ?? '')));
+const abs = (p: unknown): string => resolveLocalPath(String(p ?? ''));
 const fail = (err: unknown): string => `Error: ${err instanceof Error ? err.message : String(err)}`;
 
 // ── fs ─────────────────────────────────────────────────────────────────────

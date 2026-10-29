@@ -295,7 +295,7 @@ export class SessionManager {
     return { messageCount: 0, tokenUsage: { input: 0, output: 0 }, toolsUsed: {}, depth: 0 };
   }
 
-  create(id: string, opts?: { label?: string; provider?: string; model?: string; parentSessionId?: string; depth?: number; sessionKind?: 'conversation' | 'subagent'; projectId?: string; agentId?: string }): Session {
+  create(id: string, opts?: { label?: string; provider?: string; model?: string; parentSessionId?: string; depth?: number; sessionKind?: 'conversation' | 'subagent'; hiddenFromList?: boolean; projectId?: string; agentId?: string }): Session {
     const session: Session = {
       id,
       createdAt: Date.now(),
@@ -310,6 +310,7 @@ export class SessionManager {
         projectId: opts?.projectId,
         agentId: opts?.agentId,
         sessionKind: opts?.sessionKind ?? (opts?.parentSessionId ? 'subagent' : (id.startsWith('web-') ? 'conversation' : undefined)),
+        hiddenFromList: opts?.hiddenFromList,
         depth: opts?.depth ?? 0,
       },
     };
@@ -333,7 +334,7 @@ export class SessionManager {
     const originalMessages = JSON.stringify(data.messages);
     const originalLabel = data.metadata.label;
     data.messages = sanitizeToolPairs(stripBlinkControlMessages(data.messages));
-    const title = deriveConversationTitle(data.messages);
+    const title = data.metadata.hiddenFromList ? undefined : deriveConversationTitle(data.messages);
     if (title) data.metadata.label = title;
     if (JSON.stringify(data.messages) !== originalMessages || (title && originalLabel !== title)) this.save(data);
     return data;
@@ -342,7 +343,7 @@ export class SessionManager {
   save(session: Session): void {
     session.updatedAt = Date.now();
     session.metadata.messageCount = session.messages.length;
-    const title = deriveConversationTitle(session.messages);
+    const title = session.metadata.hiddenFromList ? undefined : deriveConversationTitle(session.messages);
     if (title) session.metadata.label = title;
     const destination = this.filePath(session.id);
     atomicWriteFile(destination, JSON.stringify(session, null, 2), `session ${session.id}`);
@@ -421,6 +422,7 @@ export class SessionManager {
           try {
             const parsed = JSON.parse(fs.readFileSync(path.join(directory, file), 'utf-8')) as Session;
             const s = this.load(parsed.id) ?? parsed;
+            if (s.metadata.hiddenFromList || s.id.startsWith('heartbeat-')) continue;
             const title = deriveConversationTitle(s.messages);
             summaries.push({
               id: s.id,

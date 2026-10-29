@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { ToolDefinition } from '../types.js';
-import { isWindows } from '../../runtime/platform.js';
+import { isWindows, resolveLocalPath } from '../../runtime/platform.js';
 
 const TTS_OUTPUT_DIR = path.join(os.tmpdir(), 'symbiote-tts');
 
@@ -22,7 +22,7 @@ const EDGE_VOICES: Record<string, string> = {
 };
 
 function getWorkspace(): string {
-  return process.env.SYMBIOTE_WORKSPACE ?? process.cwd();
+  return resolveLocalPath(process.env.SYMBIOTE_WORKSPACE ?? process.cwd());
 }
 
 function resolveEdgeTtsCommand(workspace: string): string {
@@ -100,8 +100,10 @@ export const ttsTool: ToolDefinition = {
     const speed = (input.speed as number) ?? 1.0;
 
     fs.mkdirSync(TTS_OUTPUT_DIR, { recursive: true });
-    const filename = `tts-${Date.now()}.mp3`;
-    const filepath = path.join(TTS_OUTPUT_DIR, filename);
+const outputDir = resolveLocalPath(TTS_OUTPUT_DIR);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const filename = `tts-${Date.now()}.mp3`;
+  const filepath = path.join(outputDir, filename);
 
     // Try edge-tts first (free)
     const ok = await edgeTTS(text, voice, speed, filepath);

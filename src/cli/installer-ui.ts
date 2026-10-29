@@ -18,8 +18,29 @@ const installerHtmlCandidates = [
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', chunk => chunks.push(chunk as Buffer));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    let bytes = 0;
+    let rejected = false;
+    const contentLength = Number(req.headers['content-length']);
+    if (Number.isFinite(contentLength) && contentLength > 64 * 1024) {
+      reject(Object.assign(new Error('Installer request exceeds the 64 KiB limit.'), { statusCode: 413 }));
+      req.resume();
+      return;
+    }
+    req.on('data', chunk => {
+      const buffer = chunk as Buffer;
+      bytes += buffer.length;
+      if (bytes > 64 * 1024) {
+        rejected = true;
+        chunks.length = 0;
+        reject(Object.assign(new Error('Installer request exceeds the 64 KiB limit.'), { statusCode: 413 }));
+        req.resume();
+        return;
+      }
+      if (!rejected) chunks.push(buffer);
+    });
+    req.on('end', () => {
+      if (!rejected) resolve(Buffer.concat(chunks).toString('utf-8'));
+    });
     req.on('error', reject);
   });
 }
@@ -91,6 +112,7 @@ function clientErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message === 'Generated configuration failed validation') {
     return err.message;
   }
+  if (typeof err === 'object' && err !== null && 'statusCode' in err && err instanceof Error) return err.message;
   if (typeof err === 'object' && err !== null && 'code' in err) {
     const code = String((err as { code?: unknown }).code);
     if (code === 'EACCES' || code === 'EPERM') {
@@ -101,6 +123,36 @@ function clientErrorMessage(err: unknown): string {
     }
   }
   return 'Installer request failed. Check the terminal for details.';
+}
+
+function clientErrorStatus(err: unknown): number {
+  if (typeof err === 'object' && err !== null && 'statusCode' in err) {
+    const statusCode = Number((err as { statusCode?: unknown }).statusCode);
+    if (Number.isInteger(statusCode) && statusCode >= 400 && statusCode < 500) return statusCode;
+  }
+  if (err instanceof SyntaxError || (err instanceof Error && err.message === 'Generated configuration failed validation')) return 400;
+  if (typeof err === 'object' && err !== null && 'code' in err) {
+    const code = String((err as { code?: unknown }).code);
+    if (code === 'EACCES' || code === 'EPERM') return 403;
+    if (code === 'ENOENT') return 400;
+  }
+  return 500;
+}
+
+function isTrustedInstallerRequest(req: http.IncomingMessage): boolean {
+  const remoteAddress = req.socket.remoteAddress ?? '';
+  if (remoteAddress !== '127.0.0.1' && remoteAddress !== '::1' && !remoteAddress.startsWith('::ffff:127.')) return false;
+  const host = req.headers.host;
+  if (!host) return false;
+  let hostname = '';
+  try {
+    hostname = new URL(`http://${host}`).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (hostname !== '127.0.0.1' && hostname !== 'localhost' && hostname !== '[::1]') return false;
+  const origin = req.headers.origin;
+  return !origin || origin === `http://${host}`;
 }
 
 export async function startInstallerUi(
@@ -124,19 +176,30 @@ export async function startInstallerUi(
 
   const server = http.createServer(async (req, res) => {
     try {
+      if (!isTrustedInstallerRequest(req)) {
+        return json(res, { error: 'Installer requests must use its loopback origin.' }, 403);
+      }
       const method = req.method ?? 'GET';
       const pathname = new URL(req.url ?? '/', 'http://127.0.0.1').pathname;
 
       if (method === 'GET' && pathname === '/api/defaults') {
+        const { providerApiKey, discordToken, ...safeDefaults } = defaults;
         return json(res, {
           version: APP_VERSION,
           codename: RELEASE_CODENAME,
           providers: PROVIDERS,
-          defaults,
+          defaults: {
+            ...safeDefaults,
+            hasProviderApiKey: Boolean(providerApiKey),
+            hasDiscordToken: Boolean(discordToken),
+          },
         });
       }
 
       if (method === 'POST' && pathname === '/api/setup') {
+        if (req.headers['content-type']?.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+          return json(res, { error: 'Installer requests must use application/json.' }, 415);
+        }
         const payload = JSON.parse(await readBody(req) || '{}') as Record<string, unknown>;
         const result = writeSetupFiles(toSetupInput(payload, resolvedConfigDirectory), configPath, envPath);
         return json(res, {
@@ -157,14 +220,21 @@ export async function startInstallerUi(
       json(res, { error: 'Not found' }, 404);
     } catch (err) {
       console.error('[installer-ui] request failed:', err);
-      json(res, { error: clientErrorMessage(err) }, 500);
+      json(res, { error: clientErrorMessage(err) }, clientErrorStatus(err));
     }
   });
 
-  await new Promise<void>((resolve, reject) => {
+  const listen = (listenPort: number) => new Promise<void>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => resolve());
+    server.listen(listenPort, '127.0.0.1', () => resolve());
   });
+  try {
+    await listen(port);
+  } catch (error) {
+    if (port === 0 || (error as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw error;
+    console.warn(`[installer-ui] Port ${port} is already in use; selecting an available loopback port.`);
+    await listen(0);
+  }
 
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Installer UI did not bind to a TCP port.');

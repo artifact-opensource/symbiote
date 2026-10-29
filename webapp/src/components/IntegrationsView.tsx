@@ -16,6 +16,7 @@ import {
   LogOut,
   Mail,
   MessageSquare,
+  Network,
   Presentation,
   Users,
   CheckSquare,
@@ -56,6 +57,15 @@ type ServiceState =
 
 type CloudProvider = 'azure' | 'oci' | 'n8n' | 'kaggle';
 export type CloudProviderStatus = Record<CloudProvider, boolean>;
+
+export interface TailscaleIntegrationStatus {
+  enabled: boolean;
+  connected: boolean;
+  ip: string | null;
+  error?: string;
+  mode: 'lan' | 'tailscale';
+  accessUrl: string;
+}
 
 const CLOUD_PROVIDERS: Array<{
   id: CloudProvider;
@@ -155,12 +165,16 @@ export default function CloudSpacesView({
   request,
   cloudStatus = emptyCloudStatus,
   onCloudStatusChange,
+  tailscaleStatus,
+  onTailscaleStatusChange,
 }: {
   grant: GoogleWorkspaceGrant | null;
   onGrantChange: (grant: GoogleWorkspaceGrant | null) => void;
   request: <T,>(endpoint: string, options?: RequestInit) => Promise<T>;
   cloudStatus?: CloudProviderStatus;
   onCloudStatusChange: (provider: CloudProvider, configured: boolean) => void;
+  tailscaleStatus: TailscaleIntegrationStatus | null;
+  onTailscaleStatusChange: (status: TailscaleIntegrationStatus) => void;
 }) {
   const [user, setUser] = useState<User | null>(null);
   const [accountLoading, setAccountLoading] = useState(true);
@@ -242,6 +256,11 @@ export default function CloudSpacesView({
         </div>
       </header>
       <div className="integrations-grid" aria-label="Available integrations">
+        <TailscaleIntegrationCard
+          request={request}
+          status={tailscaleStatus}
+          onStatusChange={onTailscaleStatusChange}
+        />
         <article className="surface-card cloud-provider-card integration-provider-card">
           <div className="integration-card-header">
             <span className={`cloud-provider-icon${authorized ? ' cloud-provider-icon-online' : ''}`}><GoogleMark /></span>
@@ -313,6 +332,107 @@ export default function CloudSpacesView({
         ))}
       </div>
     </div>
+  );
+}
+
+function TailscaleIntegrationCard({
+  request,
+  status,
+  onStatusChange,
+}: {
+  request: <T,>(endpoint: string, options?: RequestInit) => Promise<T>;
+  status: TailscaleIntegrationStatus | null;
+  onStatusChange: (status: TailscaleIntegrationStatus) => void;
+}) {
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const connected = Boolean(status?.connected);
+  const enabled = Boolean(status?.enabled);
+
+  const refresh = async () => {
+    setWorking(true);
+    setError('');
+    setMessage('');
+    try {
+      const next = await request<TailscaleIntegrationStatus>('/api/integrations/tailscale');
+      onStatusChange(next);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Tailscale status could not be refreshed.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const setAccessMode = async () => {
+    if (!status) return;
+    const nextEnabled = !status.enabled;
+    setWorking(true);
+    setError('');
+    setMessage('');
+    try {
+      const next = await request<TailscaleIntegrationStatus>('/api/integrations/tailscale', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled: nextEnabled }),
+      });
+      onStatusChange(next);
+      setMessage(nextEnabled
+        ? 'Tailscale-only access saved. Symbiote will restart to apply the network change.'
+        : 'LAN access saved. Symbiote will restart to restore the configured LAN listener.');
+      if (window.symbioteDesktop?.restartApp) {
+        window.setTimeout(() => {
+          void window.symbioteDesktop?.restartApp().catch(failure => {
+            setError(failure instanceof Error ? failure.message : 'Symbiote could not restart to apply the network change.');
+          });
+        }, 500);
+      } else {
+        await request('/api/integrations/tailscale/restart', { method: 'POST' });
+      }
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Tailscale access settings could not be applied.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <article className="surface-card cloud-provider-card integration-provider-card">
+      <div className="integration-card-header">
+        <span className={`cloud-provider-icon${enabled && connected ? ' cloud-provider-icon-online' : ''}`}><Network size={18} /></span>
+        <div className="integration-card-title">
+          <h2>Tailscale</h2>
+          <span className={`cloud-provider-status${enabled && connected ? ' cloud-provider-status-online' : ''}`}>
+            {!status ? 'Checking status' : enabled ? 'Tailnet-only access' : connected ? 'Connected · LAN mode' : 'Not connected'}
+          </span>
+        </div>
+        <button className="integration-info" type="button" title="Tailscale provides encrypted private networking between your devices. Enabling it binds the Symbiote web listener only to this device's Tailscale IPv4 address, replacing the LAN listener. Other tailnet devices still need the Symbiote web access token." aria-label="About Tailscale access"><Info size={14} /></button>
+      </div>
+      <div className="n8n-connection-details">
+        <span>{enabled ? 'Tailnet address' : 'Current access mode'}</span>
+        <code>{status?.accessUrl || (enabled ? 'Unavailable while Tailscale is disconnected' : 'Tailscale status unavailable')}</code>
+        <p>{enabled
+          ? connected
+            ? 'The web listener is restricted to this Tailscale address; LAN access is disabled.'
+            : 'Tailscale-only mode remains enabled. The web listener is limited to this computer until Tailscale reconnects; LAN access is disabled.'
+          : 'LAN remains the default. Enabling Tailscale replaces the LAN listener after restart.'}</p>
+      </div>
+      {status?.ip && <div className="integration-provider-apps" aria-label="Tailscale connection details">
+        <span className="integration-provider-app"><Check size={12} />Tailscale IPv4 {status.ip}</span>
+        <span className="integration-provider-app"><Check size={12} />Private tailnet routing</span>
+      </div>}
+      {!connected && status?.error && <p className="cloud-provider-error" role="status"><CircleAlert size={13} />{status.error}</p>}
+      {message && <p className="cloud-provider-message" role="status">{message}</p>}
+      {error && <p className="cloud-provider-error" role="alert"><CircleAlert size={13} />{error}</p>}
+      <div className="integration-card-actions">
+        <button className="button button-secondary" type="button" onClick={() => void refresh()} disabled={working}>
+          <RefreshCw size={14} />Refresh status
+        </button>
+        <button className={enabled ? 'button button-secondary' : 'button button-primary'} type="button" onClick={() => void setAccessMode()} disabled={working || !status || (!enabled && !connected)}>
+          {working ? <ActivityOrb label="Updating Tailscale access" compact loading /> : enabled ? <LogOut size={14} /> : <Network size={14} />}
+          {enabled ? 'Return to LAN access' : 'Use Tailscale only'}
+        </button>
+      </div>
+    </article>
   );
 }
 

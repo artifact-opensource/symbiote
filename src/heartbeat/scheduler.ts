@@ -1,5 +1,6 @@
 // Symbiote — Activity-Aware Heartbeat Scheduler (fixes Pain #11)
 // Scales frequency based on user activity. Respects quiet hours.
+import { describeHeartbeatError } from './automation.js';
 
 export interface HeartbeatConfig {
   /** Minutes between heartbeats when user is active (last msg <1h). Default: 30 */
@@ -12,7 +13,7 @@ export interface HeartbeatConfig {
   quietHoursStart: number;
   /** Quiet hours end (0-23, local time). Default: 8 */
   quietHoursEnd: number;
-  /** Task list checker — return true if there's work to do */
+  /** Return true only when a concrete, explicitly authorized task is available. */
   hasWork?: () => boolean;
 }
 
@@ -32,6 +33,12 @@ export class HeartbeatScheduler {
   private lastHeartbeat = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private onHeartbeat?: () => Promise<void>;
+  private onError?: (error: unknown) => void;
+  private callbackRunning = false;
+  private consecutiveFailures = 0;
+  private retryAfter = 0;
+  private paused = false;
+  private lastError?: string;
 
   constructor(config?: Partial<HeartbeatConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -40,6 +47,15 @@ export class HeartbeatScheduler {
   /** Record that the user sent a message */
   recordUserActivity(): void {
     this.lastUserMessage = Date.now();
+    this.consecutiveFailures = 0;
+    this.retryAfter = 0;
+    this.paused = false;
+    this.lastError = undefined;
+  }
+
+  pause(reason: string): void {
+    this.paused = true;
+    this.lastError = describeHeartbeatError(reason);
   }
 
   /** Get current activity state based on last user message */
@@ -74,35 +90,58 @@ export class HeartbeatScheduler {
 
   /** Should we fire a heartbeat right now? */
   shouldFire(): boolean {
-    // During quiet hours, skip unless there's urgent work
+    if (!this.timer || !this.onHeartbeat || this.callbackRunning || this.paused) return false;
+
     if (this.isQuietHours()) return false;
 
-    // Check if enough time has passed
-    const interval = this.getCurrentInterval();
-    if (Date.now() - this.lastHeartbeat < interval) return false;
+    if (this.consecutiveFailures > 0) {
+      if (Date.now() < this.retryAfter) return false;
+    } else if (Date.now() - this.lastHeartbeat < this.getCurrentInterval()) {
+      return false;
+    }
 
-    // Skip if no work to do
-    if (this.config.hasWork && !this.config.hasWork()) return false;
-
-    return true;
+    return this.config.hasWork?.() === true;
   }
 
   /** Start the scheduler with a callback */
-  start(callback: () => Promise<void>): void {
+  start(callback: () => Promise<void>, onError?: (error: unknown) => void): void {
+    if (this.timer) return;
     this.onHeartbeat = callback;
+    this.onError = onError;
     this.lastUserMessage = Date.now(); // Assume active on start
 
-    // Check every minute
-    this.timer = setInterval(async () => {
-      if (this.shouldFire()) {
-        this.lastHeartbeat = Date.now();
-        try {
-          await this.onHeartbeat?.();
-        } catch (err) {
-          console.error('Heartbeat error:', err);
-        }
+    this.timer = setInterval(() => { void this.tick(); }, 60_000);
+    this.timer.unref?.();
+  }
+
+  private async tick(): Promise<void> {
+    if (this.callbackRunning) return;
+    try {
+      if (!this.shouldFire()) return;
+      this.callbackRunning = true;
+      this.lastHeartbeat = Date.now();
+      await this.onHeartbeat?.();
+      this.consecutiveFailures = 0;
+      this.retryAfter = 0;
+      if (!this.paused) this.lastError = undefined;
+    } catch (error) {
+      this.consecutiveFailures++;
+      this.lastError = describeHeartbeatError(error);
+      if (this.consecutiveFailures >= 3) {
+        this.paused = true;
+      } else {
+        const retryDelayMs = this.consecutiveFailures === 1 ? 5 * 60_000 : 15 * 60_000;
+        this.retryAfter = Date.now() + retryDelayMs;
       }
-    }, 60_000);
+      console.error(`[heartbeat] ${this.paused ? 'Paused after three consecutive failures' : 'Attempt failed'}: ${this.lastError}`);
+      try {
+        this.onError?.(error);
+      } catch (reportingError) {
+        console.error('[heartbeat] Could not report scheduler failure:', reportingError);
+      }
+    } finally {
+      this.callbackRunning = false;
+    }
   }
 
   /** Stop the scheduler */
@@ -111,17 +150,33 @@ export class HeartbeatScheduler {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.onHeartbeat = undefined;
+    this.onError = undefined;
   }
 
   /** Get scheduler status */
-  status(): { activity: ActivityState; quietHours: boolean; nextHeartbeatIn: number; lastUserMsg: number } {
+  status(): {
+    activity: ActivityState;
+    quietHours: boolean;
+    nextHeartbeatIn: number;
+    lastUserMsg: number;
+    running: boolean;
+    paused: boolean;
+    consecutiveFailures: number;
+    lastError?: string;
+  } {
     const interval = this.getCurrentInterval();
     const elapsed = Date.now() - this.lastHeartbeat;
+    const retryDelay = this.consecutiveFailures > 0 ? Math.max(0, this.retryAfter - Date.now()) : 0;
     return {
       activity: this.getActivityState(),
       quietHours: this.isQuietHours(),
-      nextHeartbeatIn: Math.max(0, interval - elapsed),
+      nextHeartbeatIn: this.paused ? 0 : this.consecutiveFailures > 0 ? retryDelay : Math.max(0, interval - elapsed),
       lastUserMsg: this.lastUserMessage,
+      running: this.callbackRunning,
+      paused: this.paused,
+      consecutiveFailures: this.consecutiveFailures,
+      ...(this.lastError ? { lastError: this.lastError } : {}),
     };
   }
 }

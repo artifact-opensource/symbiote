@@ -51,6 +51,8 @@ test('Windows updater stages only a correctly hashed stable MSI and cleans it wh
     assert.equal(result.state, 'ready');
     assert.equal(result.filename, filename);
     assert.equal(result.sha256, installerHash);
+    assert.equal(result.downloadedBytes, installerBytes.length);
+    assert.equal(result.totalBytes, installerBytes.length);
     assert.ok(installerPath);
     assert.deepEqual(fs.readFileSync(installerPath), installerBytes);
     updater.disposeStagedInstaller();

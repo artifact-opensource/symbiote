@@ -2,6 +2,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveLocalPath } from '../../runtime/platform.js';
 import { validateSvg as validateSafeSvg } from '../../security/safe-svg.js';
 import type { ToolDefinition } from '../types.js';
 
@@ -123,7 +124,7 @@ export function createImageGenTool(outputDirectory?: string): ToolDefinition {
       const markup = validateSvg(customSvg
         ? String(input.svg)
         : composePromptSvg(prompt, String(input.style ?? ''), size));
-      const destination = path.resolve(outputDirectory ?? path.join(process.cwd(), 'generated-images'));
+      const destination = resolveLocalPath(outputDirectory ?? path.join(process.cwd(), 'generated-images'));
       fs.mkdirSync(destination, { recursive: true });
       const filePath = path.join(destination, safeFilename(prompt, String(input.filename ?? '')));
       fs.writeFileSync(filePath, markup, { encoding: 'utf8', flag: 'wx', mode: 0o600 });

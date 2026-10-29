@@ -40,6 +40,44 @@ test('runner retries a stream that drops mid-response', async () => {
   assert.equal(result.text, 'recovered');
 });
 
+test('runner clamps PULSE expansion to the remaining per-turn budget', async () => {
+  const originalCwd = process.cwd();
+  const workspace = mkdtempSync(join(tmpdir(), 'symbiote-turn-budget-'));
+  let providerCalls = 0;
+  let toolExecutions = 0;
+  const provider = fakeProvider([async function* () {
+    providerCalls++;
+    const id = `budget-${providerCalls}`;
+    yield { type: 'tool_use_start', id, name: 'exec' };
+    yield { type: 'tool_use_delta', id, input: '{"command":"inspect"}' };
+    yield { type: 'tool_use_end', id };
+    yield { type: 'done', stopReason: 'tool_use' };
+  }]);
+
+  try {
+    process.chdir(workspace);
+    const result = await runAgent([{ role: 'user', content: 'Inspect the workspace.' }], {
+      ...base,
+      maxIterations: 2,
+      turnIterationBudget: 3,
+      provider,
+      toolRegistry: registry(async () => {
+        toolExecutions++;
+        return 'ok';
+      }),
+      todoScope: 'turn-budget-test',
+    });
+
+    assert.equal(providerCalls, 3);
+    assert.equal(toolExecutions, 3);
+    assert.equal(result.iterations, 3);
+    assert.equal(result.maxIterationsHit, true);
+  } finally {
+    process.chdir(originalCwd);
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('runner does not repeat a provider request after its fetch retry budget is exhausted', async () => {
   const originalFetch = globalThis.fetch;
   const originalSetTimeout = globalThis.setTimeout;
@@ -76,6 +114,42 @@ test('runner does not repeat a provider request after its fetch retry budget is 
     process.chdir(originalCwd);
     globalThis.fetch = originalFetch;
     globalThis.setTimeout = originalSetTimeout;
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('runner stops after repeated identical tool failures', async () => {
+  const originalCwd = process.cwd();
+  const workspace = mkdtempSync(join(tmpdir(), 'symbiote-repeat-failure-'));
+  let providerCalls = 0;
+  let toolExecutions = 0;
+  const provider = fakeProvider([async function* () {
+    providerCalls++;
+    const id = `exec-${providerCalls}`;
+    yield { type: 'tool_use_start', id, name: 'exec' };
+    yield { type: 'tool_use_delta', id, input: '{"command":"read missing file"}' };
+    yield { type: 'tool_use_end', id };
+    yield { type: 'done', stopReason: 'tool_use' };
+  }]);
+
+  try {
+    process.chdir(workspace);
+    const result = await runAgent([{ role: 'user', content: 'Inspect the file.' }], {
+      ...base,
+      provider,
+      toolRegistry: registry(async () => {
+        toolExecutions++;
+        return 'Error: file not found';
+      }),
+    });
+
+    assert.equal(providerCalls, 3);
+    assert.equal(toolExecutions, 3);
+    assert.equal(result.iterations, 3);
+    assert.equal(result.maxIterationsHit, false);
+    assert.match(result.text, /same exec tool call failed 3 consecutive times/);
+  } finally {
+    process.chdir(originalCwd);
     rmSync(workspace, { recursive: true, force: true });
   }
 });

@@ -1,9 +1,8 @@
 // Symbiote — Builtin tool: STT (Speech-to-Text)
 
 import fs from 'node:fs';
-import path from 'node:path';
 import type { ToolDefinition } from '../types.js';
-import { expandHome } from '../../runtime/platform.js';
+import { resolveLocalPath } from '../../runtime/platform.js';
 import { transcribeAudio } from '../../voice/voice-middleware.js';
 
 export const sttTool: ToolDefinition = {
@@ -26,7 +25,7 @@ export const sttTool: ToolDefinition = {
     const audioPath = typeof input.audio_path === 'string' ? input.audio_path.trim() : '';
     if (!audioPath) return 'Error: audio_path must be a non-empty file path.';
 
-    const resolvedPath = path.resolve(expandHome(audioPath));
+    const resolvedPath = resolveLocalPath(audioPath);
     let stat: fs.Stats;
     try {
       stat = fs.statSync(resolvedPath);

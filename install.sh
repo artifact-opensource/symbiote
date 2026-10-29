@@ -38,8 +38,8 @@ BRANCH="main"
 
 echo ""
 echo -e "${MAGENTA}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║${NC}  ${BOLD}Symbiote v5.5.0${NC} — Desktop Installer         ${MAGENTA}║${NC}"
-echo -e "${MAGENTA}║${NC}  ${CYAN}Apex${NC} · cross-platform setup              ${MAGENTA}║${NC}"
+echo -e "${MAGENTA}║${NC}  ${BOLD}Symbiote Desktop Installer${NC}                ${MAGENTA}║${NC}"
+echo -e "${MAGENTA}║${NC}  ${CYAN}Guided source setup${NC}                       ${MAGENTA}║${NC}"
 echo -e "${MAGENTA}╚══════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -64,11 +64,15 @@ else
   info "Cloning repository"
   git clone --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
 fi
-ok "Source ready"
+APP_VERSION="$(cd "$INSTALL_DIR" && node -p "require('./package.json').version")"
+ok "Source ready (Symbiote v$APP_VERSION)"
 
 echo ""
 echo -e "${BOLD}[3/4] Installing and building${NC}"
-npm install --prefix "$INSTALL_DIR"
+npm ci --prefix "$INSTALL_DIR"
+npm ci --prefix "$INSTALL_DIR/webapp"
+node "$INSTALL_DIR/node_modules/electron/install.js"
+node "$INSTALL_DIR/webapp/node_modules/esbuild/install.js"
 npm run build --prefix "$INSTALL_DIR"
 ok "Build complete"
 

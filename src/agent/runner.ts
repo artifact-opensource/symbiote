@@ -45,6 +45,8 @@ export interface RunnerConfig {
   providerConfig: ProviderConfig;
   toolRegistry: ToolExecutor;
   maxIterations?: number;
+  /** Remaining iteration allowance across this turn's BLINK passes. */
+  turnIterationBudget?: number;
   maxContextTokens?: number;
   sessionId?: string;
   googleWorkspaceAccessToken?: string;
@@ -248,7 +250,12 @@ export async function runAgent(
   messages: Message[],
   config: RunnerConfig,
 ): Promise<RunResult> {
-  const initialMaxIter = config.maxIterations ?? 100;
+  const turnIterationBudget = config.turnIterationBudget ?? Number.MAX_SAFE_INTEGER;
+  if (!Number.isSafeInteger(turnIterationBudget) || turnIterationBudget < 0) {
+    throw new RangeError('turnIterationBudget must be a non-negative safe integer.');
+  }
+  const initialMaxIter = Math.min(config.maxIterations ?? 100, turnIterationBudget);
+  const pulseMaxIter = Math.min(PULSE_EXPANDED_CAP, turnIterationBudget);
   let maxIter = initialMaxIter;
   const pulseExpandAt = Math.min(PULSE_EXPAND_THRESHOLD, Math.max(1, Math.ceil(initialMaxIter * 0.8)));
   const maxCtx = config.maxContextTokens ?? DEFAULT_MAX_CONTEXT_TOKENS;
@@ -269,6 +276,7 @@ export async function runAgent(
   const todoScope = config.todoScope ?? `run-${randomUUID()}`;
   const completionReviewId = config.turnId ?? randomUUID();
   const todoManager = new TodoManager({ scope: todoScope, workspace: process.cwd() });
+  let repeatedToolFailure: { name: string; failures: number } | undefined;
 
   const ensureTodoPlan = () => {
     const userSummary = [...currentMessages].reverse().find(msg => msg.role === 'user');
@@ -315,10 +323,10 @@ export async function runAgent(
     iterations++;
 
     // PULSE dynamic expansion: if approaching cap, expand to full budget
-    if (iterations >= pulseExpandAt && maxIter === initialMaxIter && initialMaxIter < PULSE_EXPANDED_CAP) {
+    if (iterations >= pulseExpandAt && maxIter === initialMaxIter && initialMaxIter < pulseMaxIter) {
       const oldCap = maxIter;
-      maxIter = PULSE_EXPANDED_CAP;
-      console.log(`[PULSE] Expanding iteration cap ${initialMaxIter} → ${PULSE_EXPANDED_CAP} at iteration ${iterations}`);
+      maxIter = pulseMaxIter;
+      console.log(`[PULSE] Expanding iteration cap ${initialMaxIter} → ${maxIter} at iteration ${iterations}`);
 
       // Notify BLINK that the wall moved — re-arm prepare for the new cap
       if (config.blinkController) {
@@ -543,7 +551,7 @@ export async function runAgent(
         if (candidate) currentMessages.push({ role: 'assistant', content: candidate });
         currentMessages.push({
           role: 'system',
-          content: 'Internal completion review: compare the original request with the work completed so far. If any requested work remains, continue it now using tools. If it is complete, provide the final user-facing response. If genuinely blocked, state the blocker and what remains. Do not mention this review.',
+          content: 'Internal completion review: compare the original request with the work completed so far. If the task used write or edit, verify each exact resolved destination with read and confirm the expected content is present before completion. If any requested work remains, continue it now using tools. If it is complete, provide the final user-facing response. If genuinely blocked, state the blocker and what remains. Do not mention this review.',
         });
         textAccum = '';
         completionReviewPending = true;
@@ -702,12 +710,14 @@ export async function runAgent(
     for (const entry of toolResults) {
       const { tc, input, isError } = entry;
       let result = entry.result;
-      // Break repeat-failure loops: the same call failing again will not succeed on its own
       const key = `${tc.name}:${JSON.stringify(input)}`;
-      const seen = (callCounts.get(key) ?? 0) + 1;
-      callCounts.set(key, seen);
-      if (seen >= REPEAT_CALL_THRESHOLD && (isError || looksFailed(result))) {
-        result += `\n\n[runner: this exact ${tc.name} call has now failed ${seen} times. Change the approach or arguments instead of repeating it, or report the blocker.]`;
+      const failed = isError || looksFailed(result);
+      const failures = failed ? (callCounts.get(key) ?? 0) + 1 : 0;
+      if (failures > 0) callCounts.set(key, failures);
+      else callCounts.delete(key);
+      if (failures >= REPEAT_CALL_THRESHOLD) {
+        result += `\n\n[runner: this exact ${tc.name} call has failed ${failures} consecutive times. This turn is stopping; change the approach or correct the underlying error before retrying.]`;
+        repeatedToolFailure ??= { name: tc.name, failures };
       }
       allToolCalls.push({ name: tc.name, input, result });
 
@@ -746,6 +756,21 @@ export async function runAgent(
         iterations,
         maxIterationsHit: false,
         aborted: true,
+        temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined,
+      };
+    }
+
+    if (repeatedToolFailure) {
+      const { name, failures } = repeatedToolFailure;
+      const text = `I stopped this turn after the same ${name} tool call failed ${failures} consecutive times. Progress is saved. Correct the underlying error or change the call before retrying.`;
+      console.warn(`[runner] Stopping turn after ${failures} consecutive failures of the same ${name} call`);
+      return {
+        text,
+        messages: messagesForPersistence(currentMessages),
+        toolCalls: allToolCalls,
+        iterations,
+        maxIterationsHit: false,
+        aborted: false,
         temperatureHistory: temperatureHistory.length > 0 ? temperatureHistory : undefined,
       };
     }

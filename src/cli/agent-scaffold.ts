@@ -229,18 +229,14 @@ This is a starting point. Add your own conventions, style, and rules as you figu
 function generateHeartbeat(a: AgentIdentity): string {
   return `# HEARTBEAT.md — Periodic Checks
 
-When you receive a heartbeat poll, check if anything needs attention.
-If nothing needs doing, reply HEARTBEAT_OK.
+Heartbeat execution is inactive unless you add a concrete task under **Authorized Tasks**.
+Each unchecked task is one bounded execution authorization. Keep its scope and completion condition specific.
 
-## Things to Check
-- [ ] Any files changed since last check?
-- [ ] Anything pending from recent conversations?
-- [ ] System health (if applicable)
+## Authorized Tasks
 
-## Quiet Hours
-- Late night: just reply HEARTBEAT_OK unless urgent
+<!-- Add tasks as "- [ ] A specific, authorized task with a clear completion condition." -->
 
-## The Goal
-Be helpful without being annoying. Check in periodically, do useful background work, but respect quiet time.
+Completed or failed task text is not automatically replayed. Edit the task text to authorize a new attempt.
+Use a Cron schedule for recurring work; heartbeat does not create schedules or invent tasks.
 `;
 }

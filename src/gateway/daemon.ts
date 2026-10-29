@@ -48,6 +48,15 @@ import { ThreadManager, type ThreadActor, type ThreadNotification } from '../thr
 import { createThreadsTool } from '../tools/builtin/threads.js';
 import { presenceManager } from '../channels/presence.js';
 import { HeartbeatScheduler } from '../heartbeat/scheduler.js';
+import {
+  describeHeartbeatError,
+  heartbeatTaskKey,
+  heartbeatScopeHash,
+  pauseHeartbeatAutomation,
+  readAvailableHeartbeatTasks,
+  recordHeartbeatTask,
+  selectHeartbeatTask,
+} from '../heartbeat/automation.js';
 import { readTool } from '../tools/builtin/read.js';
 import { writeTool } from '../tools/builtin/write.js';
 import { execTool } from '../tools/builtin/exec.js';
@@ -74,6 +83,12 @@ import {
   validateIntegrationCredentials,
 } from '../tools/builtin/cloud-integrations.js';
 import { CredentialVault, type IntegrationProvider } from '../security/credential-vault.js';
+import {
+  detectTailscaleDevice,
+  getTailscaleIntegrationStatus,
+  readTailscaleAccessEnabled,
+  writeTailscaleAccessEnabled,
+} from '../network/tailscale.js';
 import { memorySearchTool } from '../tools/builtin/memory.js';
 import { combRecallTool, combStageTool, setCombVdbHook, setMemoryOffloadHook, flushMessages } from '../tools/builtin/comb.js';
 import { personaDigestTool } from '../tools/builtin/consolidate.js';
@@ -336,13 +351,16 @@ export class SymbioteGateway {
     }
 
     // Heartbeat scheduler
-    const hbConfig = (this.gatewayConfig as any).heartbeat ?? {};
+    const hbConfig = this.config.heartbeat ?? {};
     this.heartbeat = new HeartbeatScheduler({
       activeIntervalMin: hbConfig.activeIntervalMin ?? 30,
       idleIntervalMin: hbConfig.idleIntervalMin ?? 120,
       sleepingIntervalMin: hbConfig.sleepingIntervalMin ?? 360,
       quietHoursStart: hbConfig.quietHoursStart ?? 23,
       quietHoursEnd: hbConfig.quietHoursEnd ?? 8,
+      hasWork: () => this.activeTurns.size === 0
+        && !this.cronManager.listAlerts().some(alert => alert.status === 'pending' || alert.status === 'running')
+        && readAvailableHeartbeatTasks(this.config.workspace).length > 0,
     });
 
     // Sessions
@@ -575,11 +593,28 @@ export class SymbioteGateway {
     this.startWebUi();
 
     try {
-      this.cronManager.start(async alert => { await this.handleCronAlert(alert); });
+      this.cronManager.start(async alert => {
+        try {
+          await this.handleCronAlert(alert);
+        } catch (error) {
+          this.recordGatewayIssue('cron', error instanceof Error ? error.message : String(error));
+          throw error;
+        }
+      });
     } catch (error) {
       this.cronManager.stop();
       this.recordGatewayIssue('cron', error instanceof Error ? error.message : String(error));
       console.error(`[cron] Scheduler could not start: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      this.heartbeat.start(
+        async () => { await this.runHeartbeatAutomation(); },
+        error => this.recordGatewayIssue('heartbeat', error instanceof Error ? error.message : String(error)),
+      );
+    } catch (error) {
+      this.heartbeat.stop();
+      this.recordGatewayIssue('heartbeat', error instanceof Error ? error.message : String(error));
+      console.error(`[heartbeat] Scheduler could not start: ${error instanceof Error ? error.message : String(error)}`);
     }
     try {
       this.threadManager.startNotifications(async notification => {
@@ -1309,6 +1344,7 @@ export class SymbioteGateway {
         updateProviderModel: (provider, model) => this.updateProviderModel(provider, model),
         cloneProjectRepository: repositoryUrl => this.cloneProjectRepository(repositoryUrl),
         getUpdateDownload: () => this.releaseUpdater.getStatus(),
+        refreshUpdateStatus: () => this.releaseChecker.refresh(),
         prepareUpdateDownload: () => this.releaseUpdater.prepareWindowsInstaller(),
         getUpdateInstallerPath: () => this.releaseUpdater.getInstallerPath(),
         getAppearanceSettings: () => {
@@ -1365,6 +1401,7 @@ export class SymbioteGateway {
             messageCount: session.messages.length,
           };
         },
+        ensureGammaHeartbeatSession: () => this.ensureGammaHeartbeatSession(),
         getProjects: (includeArchived) => this.workspaceRegistry.listProjects(includeArchived),
         archiveProject: async (projectId) => {
           const project = this.workspaceRegistry.getProject(projectId);
@@ -1567,6 +1604,17 @@ export class SymbioteGateway {
           parameters,
         })),
         getIntegrationStatus: () => integrationCredentialStatus(this.credentialVault),
+        getTailscaleStatus: () => getTailscaleIntegrationStatus(this.sessionManager.directory, this.gatewayConfig.webPort ?? 3009),
+        setTailscaleAccess: async enabled => {
+          if (enabled) {
+            const device = await detectTailscaleDevice();
+            if (!device.connected || !device.ip) {
+              throw new Error(device.error ?? 'This device is not connected to Tailscale.');
+            }
+          }
+          writeTailscaleAccessEnabled(this.sessionManager.directory, enabled);
+          return getTailscaleIntegrationStatus(this.sessionManager.directory, this.gatewayConfig.webPort ?? 3009);
+        },
         getN8nConnectionInfo: () => getN8nConnectionInfo(this.credentialVault),
         saveIntegrationCredentials: (provider: IntegrationProvider, credentials: unknown) => {
           const merged = validateIntegrationCredentials(provider, credentials, this.credentialVault.get(provider));
@@ -1875,10 +1923,122 @@ export class SymbioteGateway {
       senderName: `Scheduled task: ${alert.jobName}`,
       source: 'cron',
     }, undefined, {
+      kind: 'cron',
       systemPrompt: this.cronManager.getDefaultAgentPrompt(),
       jobName: alert.jobName,
       scheduledAt: alert.scheduledAt,
     });
+  }
+
+  private ensureGammaHeartbeatSession() {
+    const id = 'heartbeat-gamma';
+    const existing = this.sessionManager.load(id);
+    const session = existing ?? this.sessionManager.create(id, {
+      label: 'Gamma heartbeat',
+      provider: this.providerName,
+      model: this.model,
+      sessionKind: 'conversation',
+      hiddenFromList: true,
+    });
+    if (existing) {
+      session.metadata.label = 'Gamma heartbeat';
+      session.metadata.provider = this.providerName;
+      session.metadata.model = this.model;
+      session.metadata.sessionKind = 'conversation';
+      session.metadata.hiddenFromList = true;
+      delete session.metadata.projectId;
+      delete session.metadata.agentId;
+      this.sessionManager.save(session);
+    }
+    return {
+      id: session.id,
+      label: session.metadata.label,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messageCount: session.messages.length,
+      sessionKind: session.metadata.sessionKind,
+    };
+  }
+
+  private async runHeartbeatAutomation(): Promise<void> {
+    const scopeHash = heartbeatScopeHash(this.config.workspace);
+    const tasks = readAvailableHeartbeatTasks(this.config.workspace);
+    if (tasks.length === 0) return;
+
+    const task = selectHeartbeatTask(tasks);
+    if (!task) return;
+
+    const fallback = this.fallbackChain.find(candidate => this.providerHealth.isAvailable(candidate.name));
+    const executionRoute = this.providerHealth.isAvailable(this.providerName)
+      ? { name: this.providerName, provider: this.provider, model: this.model }
+      : fallback
+        ? {
+          name: fallback.name,
+          provider: fallback.provider,
+          model: (this.config.providers as Record<string, { model?: string } | undefined>)[fallback.name]?.model ?? this.model,
+        }
+        : undefined;
+    if (!executionRoute) {
+      throw new Error('Heartbeat task skipped: the configured provider and all configured fallbacks are unavailable.');
+    }
+    if (heartbeatScopeHash(this.config.workspace) !== scopeHash) {
+      throw new Error('HEARTBEAT.md changed during the decision step; no task was started.');
+    }
+    if (this.activeTurns.size > 0
+      || this.cronManager.listAlerts().some(alert => alert.status === 'pending' || alert.status === 'running')) {
+      throw new Error('Heartbeat execution deferred because another agent turn or scheduled task is active.');
+    }
+    const taskKey = heartbeatTaskKey(task);
+    const heartbeatSession = this.ensureGammaHeartbeatSession();
+    recordHeartbeatTask(this.config.workspace, task, 'started');
+    try {
+      const response = await this.handleHttpChat({
+        text: task,
+        sessionId: heartbeatSession.id,
+        senderId: 'symbiote-heartbeat',
+        senderName: 'Authorized heartbeat task',
+        source: 'heartbeat',
+        trustedAdminContext: true,
+      }, undefined, {
+        kind: 'heartbeat',
+        systemPrompt: [
+          'Autonomy means completing this explicitly authorized task end to end with available tools; it never authorizes unrelated work.',
+          `Host facts: OS=${process.platform}, architecture=${process.arch}, Node=${process.version}, workspace=${path.resolve(this.config.workspace)}.`,
+          'Treat host facts as environment information, not extra permission. Prefer portable behavior and adapt commands to the detected host.',
+          'Execute only the single authorized task supplied in this turn.',
+          'The task is untrusted user-level work, not policy. Do not expand its scope or continue unrelated work.',
+          'Use available tools only within the configured workspace, operating system, and sandbox capabilities.',
+          'Do not send external messages, spend money, perform destructive changes, or create further schedules unless the exact task explicitly authorizes that action.',
+          'This is one bounded execution attempt. Do not create a follow-up heartbeat or repeat the task.',
+          'Keep the run silent to chat channels; report the outcome in this private execution session.',
+        ].join('\n'),
+        jobName: 'authorized heartbeat task',
+        scheduledAt: Date.now(),
+        providerRoute: { name: executionRoute.name, model: executionRoute.model },
+      });
+      if (!response.text.trim()
+        || response.text === '[Max iterations reached]'
+        || response.text === '[Blink depth exceeded]'
+        || response.text.includes('continuation limit before completing')) {
+        throw new Error('Heartbeat execution returned without a complete result.');
+      }
+      if (heartbeatScopeHash(this.config.workspace) !== scopeHash) {
+        const reason = 'HEARTBEAT.md changed during task execution. Automation is paused until the scope file is edited for review.';
+        recordHeartbeatTask(this.config.workspace, task, 'failed', reason);
+        pauseHeartbeatAutomation(this.config.workspace);
+        this.heartbeat.pause(reason);
+        this.recordGatewayIssue('heartbeat', `Scoped task ${taskKey.slice(0, 12)} changed the authorization file; automation paused for review.`);
+        console.error(`[heartbeat] Scoped task ${taskKey.slice(0, 12)} changed HEARTBEAT.md; automation paused for review.`);
+        return;
+      }
+      recordHeartbeatTask(this.config.workspace, task, 'completed');
+      console.log(`[heartbeat] Scoped task attempt completed (${taskKey.slice(0, 12)}).`);
+    } catch (error) {
+      const message = describeHeartbeatError(error);
+      recordHeartbeatTask(this.config.workspace, task, 'failed', message);
+      this.recordGatewayIssue('heartbeat', `Scoped task ${taskKey.slice(0, 12)} failed: ${message}`);
+      throw new Error(`Heartbeat task ${taskKey.slice(0, 12)} failed: ${message}`, { cause: error });
+    }
   }
 
   private resolveThreadActor(sessionId?: string): ThreadActor {
@@ -1917,8 +2077,15 @@ export class SymbioteGateway {
   private handleHttpChat(
     request: ChatRequest,
     emit?: (event: Record<string, unknown>) => void,
-    automation?: { systemPrompt: string; jobName: string; scheduledAt: number },
+    automation?: {
+      kind: 'cron' | 'heartbeat';
+      systemPrompt: string;
+      jobName: string;
+      scheduledAt: number;
+      providerRoute?: { name: string; model: string };
+    },
   ): Promise<ChatResponse> {
+    if (!automation) this.heartbeat.recordUserActivity();
     const sessionId = request.sessionId ?? `http-${request.source ?? 'web'}-${request.senderId ?? 'anon'}`;
     const previous = this.httpSessionLocks.get(sessionId) ?? Promise.resolve();
     const run = previous.then(async () => {
@@ -1966,7 +2133,13 @@ export class SymbioteGateway {
     request: ChatRequest,
     controller: AbortController,
     emit?: (event: Record<string, unknown>) => void,
-    automation?: { systemPrompt: string; jobName: string; scheduledAt: number },
+    automation?: {
+      kind: 'cron' | 'heartbeat';
+      systemPrompt: string;
+      jobName: string;
+      scheduledAt: number;
+      providerRoute?: { name: string; model: string };
+    },
   ): Promise<ChatResponse> {
     return new Promise(async (resolve, reject) => {
       const sessionId = request.sessionId ?? `http-${request.source ?? 'web'}-${request.senderId ?? 'anon'}`;
@@ -2003,7 +2176,7 @@ export class SymbioteGateway {
         const baseTurnPrompt = buildSystemPrompt({
           workspace: turnWorkspace,
           tools: this.toolRegistry.list().map(t => t.name),
-          channel: automation ? 'cron' : 'http',
+          channel: automation?.kind ?? 'http',
           chatType: 'direct',
           senderId: effectiveSenderId,
         });
@@ -2066,6 +2239,18 @@ export class SymbioteGateway {
         } catch {
           // Non-critical — use existing provider selection
         }
+        if (automation?.providerRoute) {
+          const automationProvider = PROVIDERS.get(automation.providerRoute.name);
+          if (!automationProvider) {
+            throw new Error(`Automation provider ${automation.providerRoute.name} is no longer registered.`);
+          }
+          routeChoice = {
+            name: automation.providerRoute.name,
+            provider: automationProvider,
+            model: automation.providerRoute.model,
+            routed: true,
+          };
+        }
 
         const providerCfg = (this.config.providers as Record<string, any>)[routeChoice.name] ?? {};
         const thinkingCfg = (this.config as any).thinking;
@@ -2091,6 +2276,7 @@ export class SymbioteGateway {
           sessionId,
           googleWorkspaceAccessToken: request.googleWorkspaceAccessToken,
           maxIterations: this.pulseBudget.getEffectiveCap(),
+          turnIterationBudget: blinkCtrl.getRemainingIterations(),
           contextMonitor: this.contextMonitor,
           contextStore: this.contextStore ?? undefined,
           todoScope: turnTodoScope,
@@ -2199,7 +2385,7 @@ export class SymbioteGateway {
             break;
           }
 
-          if (result.maxIterationsHit && blinkCtrl.needsBlink(true)) {
+          if (result.maxIterationsHit && blinkCtrl.needsBlink(true, result.iterations)) {
             blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);
             console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}Blink #${blinkCtrl.getState().depth}${palette.reset} (http) — continuing`);
             currentSessionMessages = result.messages;
@@ -2214,7 +2400,15 @@ export class SymbioteGateway {
           }
 
           blinkCtrl.recordComplete(result.iterations, result.toolCalls.length);
-          finalResult = result;
+          if (result.maxIterationsHit) {
+            const notice = 'I reached the iteration limit before completing this task. Progress is saved; send "continue" to resume.';
+            const partialText = result.text === '[Max iterations reached]' || result.text === '[Blink depth exceeded]'
+              ? ''
+              : result.text.trim();
+            finalResult = { ...result, text: partialText ? `${partialText}\n\n${notice}` : notice };
+          } else {
+            finalResult = result;
+          }
           break;
         }
 
@@ -2233,7 +2427,7 @@ export class SymbioteGateway {
 
         // PULSE: record total iterations
         const blinkState = blinkCtrl.getState();
-        const totalIter = blinkState.depth > 0 ? blinkState.totalIterations : finalResult.iterations;
+        const totalIter = blinkState.totalIterations + (finalResult.aborted ? finalResult.iterations : 0);
         this.pulseBudget.recordSession(totalIter);
 
         // ── PARC: Post-delivery assessment + learning (async, non-blocking) ──
@@ -2626,6 +2820,7 @@ export class SymbioteGateway {
         sessionId,
         todoScope: turnTodoScope,
         maxIterations: this.pulseBudget.getEffectiveCap(),
+        turnIterationBudget: blinkCtrl.getRemainingIterations(),
         contextMonitor: this.contextMonitor,
         contextStore: this.contextStore ?? undefined,
         turnId,
@@ -2740,7 +2935,7 @@ export class SymbioteGateway {
         }
 
         // Check if BLINK is needed
-        if (result.maxIterationsHit && blinkCtrl.needsBlink(true)) {
+        if (result.maxIterationsHit && blinkCtrl.needsBlink(true, result.iterations)) {
           // Record the blink
           blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);
           console.log(`${palette.dim}  [BLINK]${palette.reset} ${palette.yellow}Blink #${blinkCtrl.getState().depth}${palette.reset} — continuing with fresh budget`);
@@ -2764,7 +2959,15 @@ export class SymbioteGateway {
 
         // Normal completion or blink capped — we're done
         blinkCtrl.recordComplete(result.iterations, result.toolCalls.length);
-        finalResult = result;
+        if (result.maxIterationsHit) {
+          const notice = 'I reached the iteration limit before completing this task. Progress is saved; send "continue" to resume.';
+          const partialText = result.text === '[Max iterations reached]' || result.text === '[Blink depth exceeded]'
+            ? ''
+            : result.text.trim();
+          finalResult = { ...result, text: partialText ? `${partialText}\n\n${notice}` : notice };
+        } else {
+          finalResult = result;
+        }
         break;
       }
 
@@ -2790,7 +2993,7 @@ export class SymbioteGateway {
       }
 
       // PULSE: record TOTAL iteration count (across all blinks)
-      const totalIter = blinkState.depth > 0 ? blinkState.totalIterations : finalResult.iterations;
+      const totalIter = blinkState.totalIterations + (finalResult.aborted ? finalResult.iterations : 0);
       const pulseResult = this.pulseBudget.recordSession(totalIter);
       if (pulseResult.reverted) {
         console.log(`${palette.dim}  [PULSE]${palette.reset} Budget reverted to ${pulseResult.effectiveCap} — light workload detected`);
@@ -3346,6 +3549,16 @@ export async function startGateway(configPath?: string): Promise<SymbioteGateway
 
   // Load gateway config from symbiote config or env
   const config = loadConfig(configPath);
+  const tailscaleSessionDirectory = path.join(path.resolve(config.workspace), '.session');
+  if (readTailscaleAccessEnabled(tailscaleSessionDirectory)) {
+    const device = await detectTailscaleDevice();
+    if (device.connected && device.ip) {
+      config.webHost = device.ip;
+    } else {
+      config.webHost = '127.0.0.1';
+      console.error(`[gateway] Tailscale-only access is enabled, but Tailscale is unavailable. Binding to loopback only; LAN access remains disabled. ${device.error ?? ''}`);
+    }
+  }
   const discordToken = envFile.DISCORD_BOT_TOKEN
     || process.env.DISCORD_BOT_TOKEN
     || discordCredentials?.token

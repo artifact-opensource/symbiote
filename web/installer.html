@@ -15,7 +15,9 @@
   --accent: #4f46e5;
   --accent-2: #2563eb;
   --ok: #38d39f;
+  --ok-ink: #16764f;
   --danger: #ff6b6b;
+  --danger-ink: #a52626;
   --border: #e2e7ef;
   --shadow: 0 10px 30px rgba(22, 34, 51, .06);
 }
@@ -29,6 +31,8 @@
   --accent: #8b83ff;
   --accent-2: #56b8f5;
   --border: #303a4b;
+  --ok-ink: #c6f8e5;
+  --danger-ink: #ffd3d3;
   --shadow: 0 12px 32px rgba(0, 0, 0, .2);
 }
 * { box-sizing: border-box; }
@@ -73,8 +77,8 @@ button:active { transform: translateY(1px); }
 button.secondary { background: var(--panel); border: 1px solid var(--border); color: var(--text); }
 button.secondary:hover { background: var(--panel-2); }
 .status { margin-top: 18px; padding: 14px 16px; border-radius: 14px; display: none; }
-.status.ok { display: block; background: rgba(56,211,159,.12); color: #c6f8e5; border: 1px solid rgba(56,211,159,.25); }
-.status.error { display: block; background: rgba(255,107,107,.12); color: #ffd3d3; border: 1px solid rgba(255,107,107,.25); }
+.status.ok { display: block; background: rgba(56,211,159,.12); color: var(--ok-ink); border: 1px solid rgba(56,211,159,.25); }
+.status.error { display: block; background: rgba(255,107,107,.12); color: var(--danger-ink); border: 1px solid rgba(255,107,107,.25); }
 .kpi { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .kpi div { background: var(--panel-2); border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
 .kpi strong { display: block; font-size: 28px; margin-bottom: 6px; }
@@ -180,7 +184,7 @@ small.note { display: block; color: var(--muted); margin-top: 10px; line-height:
       <button type="submit">Save installer configuration</button>
       <button class="secondary" type="button" id="reloadBtn">Reload defaults</button>
     </div>
-    <div id="status" class="status"></div>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
   </form>
 </main>
 <script>
@@ -198,26 +202,38 @@ function setTheme(theme) {
   toggle.setAttribute('aria-label', `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`);
 }
 
-const savedTheme = localStorage.getItem('symbiote-installer-theme');
+let savedTheme = '';
+try { savedTheme = localStorage.getItem('symbiote-installer-theme') || ''; } catch { /* Theme persistence is optional. */ }
 setTheme(savedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
 document.getElementById('themeToggle').addEventListener('click', () => {
   const theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  localStorage.setItem('symbiote-installer-theme', theme);
+  try { localStorage.setItem('symbiote-installer-theme', theme); } catch { /* Theme persistence is optional. */ }
   setTheme(theme);
 });
 
 async function loadDefaults() {
-  const res = await fetch('/api/defaults');
-  const data = await res.json();
-  providers = data.providers;
+  const reloadButton = document.getElementById('reloadBtn');
+  reloadButton.disabled = true;
+  try {
+  const res = await fetch('/api/defaults', { cache: 'no-store', headers: { Accept: 'application/json' } });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Could not load installer defaults (${res.status}).`);
+  providers = Array.isArray(data.providers) ? data.providers : [];
   document.getElementById('version').textContent = data.version;
   document.getElementById('codename').textContent = data.codename;
   const providerSelect = document.getElementById('provider');
-  providerSelect.innerHTML = providers.map(p => `<option value="${p.id}">${p.name} (${p.id})</option>`).join('');
+  providerSelect.replaceChildren(...providers.map(provider => {
+    const option = document.createElement('option');
+    option.value = provider.id;
+    option.textContent = `${provider.name} (${provider.id})`;
+    return option;
+  }));
 
   const d = data.defaults;
   providerSelect.value = d.provider;
   document.getElementById('model').value = d.model;
+  document.getElementById('providerApiKey').value = '';
+  document.getElementById('providerApiKey').placeholder = d.hasProviderApiKey ? 'Already configured; leave blank to keep' : '';
   document.getElementById('workspace').value = d.workspace;
   document.getElementById('apiPort').value = d.apiPort;
   document.getElementById('apiHost').value = d.apiHost;
@@ -225,7 +241,8 @@ async function loadDefaults() {
   document.getElementById('webHost').value = d.webHost;
   document.getElementById('ownerIds').value = (d.ownerIds || []).join(', ');
   document.getElementById('discordEnabled').checked = d.discordEnabled;
-  document.getElementById('discordToken').value = d.discordToken || '';
+  document.getElementById('discordToken').value = '';
+  document.getElementById('discordToken').placeholder = d.hasDiscordToken ? 'Already configured; leave blank to keep' : '';
   document.getElementById('discordBotId').value = d.discordBotId || '';
   document.getElementById('whatsappEnabled').checked = d.whatsappEnabled;
   document.getElementById('whatsappPhoneNumber').value = d.whatsappPhoneNumber || '';
@@ -235,6 +252,9 @@ async function loadDefaults() {
   document.getElementById('agentEmoji').value = d.agent.emoji;
   document.getElementById('creatorName').value = d.agent.creatorName;
   document.getElementById('agentPersonality').value = d.agent.personality;
+  } finally {
+    reloadButton.disabled = false;
+  }
 }
 
 function syncProviderModel() {
@@ -274,29 +294,47 @@ function showSuccess(data) {
   const note = document.createElement('div');
   note.style.marginTop = '8px';
   note.textContent = data.whatsappEnabled
-    ? 'WhatsApp is enabled. Finish with symbiote install in a terminal to scan the QR code.'
-    : 'You can now start Symbiote with symbiote start.';
+    ? 'Configuration saved. Restart Symbiote to load it, then finish WhatsApp pairing from the Control Room.'
+    : 'Configuration saved. Restart Symbiote to load the new settings.';
   el.append(note);
 }
 
 document.getElementById('provider').addEventListener('change', syncProviderModel);
-document.getElementById('reloadBtn').addEventListener('click', loadDefaults);
+document.getElementById('reloadBtn').addEventListener('click', () => loadDefaults().catch(err => showError(err.message || String(err))));
 document.getElementById('setupForm').addEventListener('submit', async (event) => {
   event.preventDefault();
+  const form = document.getElementById('setupForm');
+  if (form.dataset.saving === 'true') return;
+  form.dataset.saving = 'true';
+  const submitButton = form.querySelector('button[type="submit"]');
+  const reloadButton = document.getElementById('reloadBtn');
+  const submitLabel = submitButton.textContent;
+  submitButton.disabled = true;
+  submitButton.textContent = 'Saving…';
+  reloadButton.disabled = true;
   const payload = {};
   for (const id of fields) payload[id] = document.getElementById(id).value;
   for (const id of checks) payload[id] = document.getElementById(id).checked;
-  const res = await fetch('/api/setup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const data = await res.json();
-  if (!res.ok || !data.ok) {
-    showError(data.error || 'Failed to save configuration.');
-    return;
+  try {
+    const res = await fetch('/api/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
+      showError(data.error || `Failed to save configuration (${res.status}).`);
+      return;
+    }
+    showSuccess(data);
+  } catch (err) {
+    showError(err.message || 'The installer could not reach Symbiote. Check that the installer window is still open and try again.');
+  } finally {
+    form.dataset.saving = 'false';
+    submitButton.disabled = false;
+    submitButton.textContent = submitLabel;
+    reloadButton.disabled = false;
   }
-  showSuccess(data);
 });
 loadDefaults().catch(err => showError(err.message || String(err)));
 </script>

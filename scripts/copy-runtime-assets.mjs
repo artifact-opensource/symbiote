@@ -29,9 +29,9 @@ if (process.platform === 'win32') {
   try {
     await rcedit(electronExecutable, { icon: sourceIcon });
   } catch (error) {
-    throw new Error(
-      `Could not apply the Symbiote icon to ${electronExecutable}. Close Symbiote and retry the build.`,
-      { cause: error },
+    console.warn(
+      `Desktop icon update skipped: ${electronExecutable} is locked or cannot be modified. `
+      + 'The desktop build remains usable; retry the build after Electron exits.',
     );
   }
 }

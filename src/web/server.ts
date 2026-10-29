@@ -18,7 +18,9 @@ import type { CronAlert, CronJob, CreateCronJobInput, UpdateCronJobInput } from 
 import type { AgentThread, CreateThreadInput, ThreadContact } from '../threads/manager.js';
 import { isSupportedAgentIcon, type ProjectTask, type ProjectTaskPatch } from '../agent/workspace-registry.js';
 import type { AppearanceSettings } from '../appearance/settings.js';
+import type { ReleaseUpdateStatus } from '../updates/release-checker.js';
 import type { ReleaseDownloadStatus } from '../updates/release-updater.js';
+import type { TailscaleIntegrationStatus } from '../network/tailscale.js';
 import { createSseTextFilter } from './sse-text-filter.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -77,6 +79,7 @@ export interface WebControlPlane {
   updateProviderModel?: (provider: string, model: string) => { provider: string; model: string };
   cloneProjectRepository?: (repositoryUrl: string) => Promise<unknown>;
   getUpdateDownload?: () => ReleaseDownloadStatus;
+  refreshUpdateStatus?: () => Promise<ReleaseUpdateStatus>;
   prepareUpdateDownload?: () => Promise<ReleaseDownloadStatus>;
   getUpdateInstallerPath?: () => string | undefined;
   getConfig: () => Record<string, unknown>;
@@ -84,6 +87,7 @@ export interface WebControlPlane {
   updateAppearanceSettings: (settings: unknown) => AppearanceSettings;
   getSessions: () => unknown[];
   ensureMemorySession?: () => unknown;
+  ensureGammaHeartbeatSession?: () => unknown;
   getSessionMessages: (id: string) => unknown[] | null;
   createSession: (name?: string, options?: { projectId?: string; agentId?: string }) => unknown;
   getProjects: (includeArchived?: boolean) => unknown[];
@@ -116,6 +120,8 @@ export interface WebControlPlane {
   archiveSession: (id: string) => boolean;
   getTools: () => unknown[];
   getIntegrationStatus: () => Record<IntegrationProvider, boolean>;
+  getTailscaleStatus?: () => Promise<TailscaleIntegrationStatus>;
+  setTailscaleAccess?: (enabled: boolean) => Promise<TailscaleIntegrationStatus>;
   getN8nConnectionInfo?: () => N8nConnectionInfo;
   saveIntegrationCredentials: (provider: IntegrationProvider, credentials: unknown) => void;
   deleteIntegrationCredentials: (provider: IntegrationProvider) => void;
@@ -651,6 +657,46 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         return json(res, { error: failure instanceof Error ? failure.message : 'Gateway restart could not be requested.' }, 500);
       }
     }
+    if (pathname === '/api/integrations/tailscale') {
+      if (method === 'GET') {
+        if (!control.getTailscaleStatus) return json(res, { error: 'Tailscale integration is unavailable in this runtime.' }, 501);
+        res.setHeader('Cache-Control', 'no-store');
+        try {
+          return json(res, await control.getTailscaleStatus());
+        } catch (failure) {
+          return json(res, { error: failure instanceof Error ? failure.message : 'Tailscale status could not be read.' }, 500);
+        }
+      }
+      if (method === 'PUT') {
+        if (!isSameOriginRequest(req)) return json(res, { error: 'Tailscale access can only be changed from the Symbiote Control Room.' }, 403);
+        if (!control.setTailscaleAccess) return json(res, { error: 'Tailscale integration is unavailable in this runtime.' }, 501);
+        let body: unknown;
+        try {
+          body = JSON.parse(await readBody(req, 1_024) || '{}');
+        } catch (failure) {
+          return json(res, { error: failure instanceof Error ? failure.message : 'Tailscale settings must be valid JSON.' }, 400);
+        }
+        if (!body || typeof body !== 'object' || Array.isArray(body) || typeof (body as { enabled?: unknown }).enabled !== 'boolean') {
+          return json(res, { error: 'Tailscale settings require an enabled boolean.' }, 400);
+        }
+        try {
+          res.setHeader('Cache-Control', 'no-store');
+          return json(res, await control.setTailscaleAccess((body as { enabled: boolean }).enabled));
+        } catch (failure) {
+          return json(res, { error: failure instanceof Error ? failure.message : 'Tailscale access settings could not be saved.' }, 400);
+        }
+      }
+    }
+    if (method === 'POST' && pathname === '/api/integrations/tailscale/restart') {
+      if (!isSameOriginRequest(req)) return json(res, { error: 'Gateway restarts must be requested from the Symbiote Control Room.' }, 403);
+      if (!control.restartGateway) return json(res, { error: 'Gateway restart is unavailable in this runtime.' }, 501);
+      try {
+        control.restartGateway();
+        return json(res, { restarting: true }, 202);
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Gateway restart could not be requested.' }, 500);
+      }
+    }
     if (method === 'POST' && pathname === '/api/config/provider-model') {
       if (!isSameOriginRequest(req)) return json(res, { error: 'Provider changes must be requested from the Symbiote Control Room.' }, 403);
       if (!control.updateProviderModel) return json(res, { error: 'Provider changes are unavailable in this runtime.' }, 501);
@@ -670,6 +716,16 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         return json(res, control.updateProviderModel(value.provider.trim(), value.model.trim()));
       } catch (failure) {
         return json(res, { error: failure instanceof Error ? failure.message : 'Provider settings could not be saved.' }, 400);
+      }
+    }
+    if (pathname === '/api/update/check' && method === 'POST') {
+      if (!isSameOriginRequest(req)) return json(res, { error: 'Update checks must be requested from the Symbiote Control Room.' }, 403);
+      if (!control.refreshUpdateStatus) return json(res, { error: 'Update checks are unavailable in this runtime.' }, 501);
+      try {
+        res.setHeader('Cache-Control', 'no-store');
+        return json(res, await control.refreshUpdateStatus());
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Updates could not be checked.' }, 502);
       }
     }
     if (pathname === '/api/update/download' && method === 'POST') {
@@ -1040,6 +1096,14 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
         return json(res, control.ensureMemorySession());
       } catch (failure) {
         return json(res, { error: failure instanceof Error ? failure.message : 'Memory conversation could not be initialized.' }, 500);
+      }
+    }
+    if (method === 'POST' && pathname === '/api/sessions/gamma-heartbeat/ensure') {
+      if (!control.ensureGammaHeartbeatSession) return json(res, { error: 'Gamma heartbeat conversation initialization is unavailable.' }, 501);
+      try {
+        return json(res, control.ensureGammaHeartbeatSession());
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Gamma heartbeat conversation could not be initialized.' }, 400);
       }
     }
     if (method === 'GET' && pathname === '/api/memory/graph') {

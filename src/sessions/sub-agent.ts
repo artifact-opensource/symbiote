@@ -10,7 +10,7 @@ import { runAgent } from '../agent/runner.js';
 import { buildSystemPrompt } from '../agent/system-prompt.js';
 import { createSandboxedRegistry, type SessionContext } from '../tools/sandbox.js';
 import { PolicyEngine } from '../tools/policy.js';
-import { BlinkController } from '../agent/blink.js';
+import { BlinkController, DEFAULT_BLINK_CONFIG } from '../agent/blink.js';
 import { EXPANDED_CAP as PULSE_EXPANDED_CAP } from '../agent/pulse.js';
 
 const MAX_DEPTH = 3;
@@ -101,7 +101,7 @@ export class SubAgentManager {
       tools: sandboxedTools.list().map(t => t.name),
       extraContext: `You are a sub-agent spawned for a specific task. Complete it and provide a concise result.
 
-IMPORTANT: Your iteration cap per runner pass is ${config.maxIterations ?? 100}.${config.maxIterations === undefined ? ` PULSE may expand it up to ${PULSE_EXPANDED_CAP}; BLINK continues across budget boundaries until you finish.` : ' BLINK continues across passes unless the run is stopped or cancelled.'} Do not stop early solely because the current pass is approaching its limit. Continue the task, validate the work, and report only genuine blockers.
+IMPORTANT: Your iteration cap per runner pass is ${config.maxIterations ?? 100}.${config.maxIterations === undefined ? ` PULSE may expand it up to ${PULSE_EXPANDED_CAP}.` : ''} BLINK allows at most ${DEFAULT_BLINK_CONFIG.maxDepth} passes and ${DEFAULT_BLINK_CONFIG.maxTotalIterations} total iterations for this turn. If either limit is reached, preserve progress and report that the task is incomplete. Do not stop early solely because the current pass is approaching its limit. Continue within the allowed budget, validate the work, and report only genuine blockers.
 
 Task: ${config.task}`,
     });
@@ -133,7 +133,7 @@ Task: ${config.task}`,
     });
 
     try {
-      while (true) {
+      while (blinkCtrl.shouldContinue()) {
         if (this.runtimes.get(session.id)?.killed) {
           handle.status = 'killed';
           handle.completedAt = Date.now();
@@ -155,6 +155,7 @@ Task: ${config.task}`,
           providerConfig: { ...providerConfig, systemPrompt: session.messages[0]?.content as string },
           toolRegistry,
           maxIterations: maxIter,
+          turnIterationBudget: blinkCtrl.getRemainingIterations(),
           sessionId: session.id,
           googleWorkspaceAccessToken: config.googleWorkspaceAccessToken,
           contextStore: this.getContextStore?.(),
@@ -217,6 +218,7 @@ Task: ${config.task}`,
         }
 
         if (runtime.pendingSteering.length > 0) {
+          blinkCtrl.recordComplete(result.iterations, result.toolCalls.length);
           session.messages.push(...runtime.pendingSteering);
           this.sessionManager.save(session);
           continue;
@@ -232,14 +234,14 @@ Task: ${config.task}`,
         }
 
         if (result.maxIterationsHit) {
-          if (blinkCtrl.needsBlink(true)) {
+          if (blinkCtrl.needsBlink(true, result.iterations)) {
             blinkCtrl.recordBlink(result.iterations, result.toolCalls.length);
             this.sessionManager.save(session);
             await new Promise(resolve => setTimeout(resolve, blinkCtrl.getCooldownMs()));
             continue;
           }
           handle.status = 'failed';
-          handle.error = 'Sub-agent reached its continuation limit before completing the task';
+          handle.error = 'Sub-agent reached its iteration or continuation limit before completing the task';
           handle.completedAt = Date.now();
           this.sessionManager.save(session);
           this.onComplete?.(config.parentSessionId, handle);
@@ -258,6 +260,12 @@ Task: ${config.task}`,
         this.onComplete?.(config.parentSessionId, handle);
         return;
       }
+
+      handle.status = 'failed';
+      handle.error = 'Sub-agent reached its iteration or continuation limit before completing the task';
+      handle.completedAt = Date.now();
+      this.sessionManager.save(session);
+      this.onComplete?.(config.parentSessionId, handle);
     } catch (err) {
       if (this.runtimes.get(session.id)?.killed) {
         handle.status = 'killed';

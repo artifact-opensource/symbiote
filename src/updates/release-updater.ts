@@ -25,6 +25,8 @@ export interface ReleaseDownloadStatus {
   version?: string;
   filename?: string;
   sha256?: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
   error?: string;
 }
 
@@ -105,6 +107,12 @@ export class ReleaseUpdater {
         throw new Error(`The stable release does not contain a valid Windows installer for ${releaseStatus.latestVersion}.`);
       }
       const installerSize = installer.size;
+      this.download = {
+        state: 'downloading',
+        version: releaseStatus.latestVersion,
+        downloadedBytes: 0,
+        totalBytes: installerSize,
+      };
       const expectedUrlPrefix = `${RELEASE_ASSET_PREFIX}v${releaseStatus.latestVersion}/`;
       for (const url of [installer.browser_download_url, checksums.browser_download_url]) {
         const parsed = new URL(url);
@@ -155,12 +163,18 @@ export class ReleaseUpdater {
       }
       let bytesReceived = 0;
       const enforceSize = new Transform({
-        transform(chunk: Buffer, _encoding, callback) {
+        transform: (chunk: Buffer, _encoding, callback) => {
           bytesReceived += chunk.length;
           if (bytesReceived > installerSize || bytesReceived > MAX_INSTALLER_BYTES) {
             callback(new Error('The Windows installer exceeds its declared release size.'));
             return;
           }
+          this.download = {
+            state: 'downloading',
+            version: releaseStatus.latestVersion,
+            downloadedBytes: bytesReceived,
+            totalBytes: installerSize,
+          };
           callback(null, chunk);
         },
       });
@@ -177,7 +191,14 @@ export class ReleaseUpdater {
       if (actualHash !== expectedHash) throw new Error('The Windows installer checksum does not match the published SHA-256 manifest.');
 
       this.stagingDirectory = directory;
-      this.download = { state: 'ready', version: releaseStatus.latestVersion, filename, sha256: actualHash };
+      this.download = {
+        state: 'ready',
+        version: releaseStatus.latestVersion,
+        filename,
+        sha256: actualHash,
+        downloadedBytes: downloadedSize,
+        totalBytes: installerSize,
+      };
       return this.getStatus();
     } catch (error) {
       if (directory) rmSync(directory, { recursive: true, force: true });

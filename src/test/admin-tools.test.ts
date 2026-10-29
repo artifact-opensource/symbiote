@@ -6,6 +6,7 @@ import path from 'node:path';
 import { sanitizeToolResult } from '../security/sanitizer.js';
 import { readTool } from '../tools/builtin/read.js';
 import { writeTool } from '../tools/builtin/write.js';
+import { resolveLocalPath } from '../runtime/platform.js';
 import { fsTool, hardwareTool } from '../tools/builtin/system.js';
 
 test('sanitizer marks ordinary source and docs as untrusted data without flagging them', () => {
@@ -56,12 +57,20 @@ test('unknown (MCP) tools are treated as external', () => {
   assert.match(r.text, /UNTRUSTED TOOL OUTPUT/);
 });
 
+test('resolves Git-Bash drive paths on Windows', () => {
+  if (process.platform !== 'win32') return;
+  assert.equal(resolveLocalPath('/c/workspace/resource_aggregator'), 'C:\\workspace\\resource_aggregator');
+  assert.equal(resolveLocalPath('/d/data'), 'D:\\data');
+});
+
 test('read handles directories, binary data and ~ paths; write appends', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-tools-'));
   try {
     const file = path.join(dir, 'a.txt');
-    await writeTool.execute({ path: file, content: 'one\n' });
-    await writeTool.execute({ path: file, content: 'two\n', append: true });
+    const firstWrite = await writeTool.execute({ path: file, content: 'one\n' });
+    const appendWrite = await writeTool.execute({ path: file, content: 'two\n', append: true });
+    assert.match(firstWrite, /Wrote and verified/);
+    assert.match(appendWrite, /Appended to and verified/);
     assert.equal(await readTool.execute({ path: file }), 'one\ntwo\n');
     assert.match(String(await readTool.execute({ path: dir })), /a\.txt/);
 

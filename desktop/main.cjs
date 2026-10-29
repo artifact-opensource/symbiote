@@ -6,6 +6,7 @@ const http = require('node:http');
 const net = require('node:net');
 const { promisify } = require('node:util');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 if (process.platform === 'win32') app.setAppUserModelId('com.artifactvirtual.symbiote');
@@ -129,14 +130,73 @@ function readGatewayConfig() {
       if (error.code !== 'ENOENT') throw error;
     }
     const configuredHost = process.env.SYMBIOTE_WEB_HOST || environmentHost || config.webHost || '127.0.0.1';
-    const host = configuredHost === '0.0.0.0' || configuredHost === '::' ? '127.0.0.1' : configuredHost;
+    const workspace = path.resolve(path.dirname(configPath), config.workspace || '.');
+    const tailscaleSettingsPath = path.join(workspace, '.session', 'tailscale-access.json');
+    let tailscaleEnabled = false;
+    try {
+      const settings = JSON.parse(fs.readFileSync(tailscaleSettingsPath, 'utf8'));
+      if (settings?.version !== 1 || typeof settings.enabled !== 'boolean') {
+        throw new Error(`Tailscale access settings at ${tailscaleSettingsPath} have an unsupported format.`);
+      }
+      tailscaleEnabled = settings.enabled;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    let bindHost = configuredHost;
+    let tailscaleError;
+    if (tailscaleEnabled) {
+      let tailscaleStatus;
+      const executables = process.platform === 'win32'
+        ? [
+          'tailscale.exe',
+          path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Tailscale', 'tailscale.exe'),
+          path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Tailscale', 'tailscale.exe'),
+        ]
+        : ['tailscale'];
+      let lastError;
+      for (const executable of executables) {
+        try {
+          const output = execFileSync(executable, ['status', '--json'], {
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            timeout: 5_000,
+            windowsHide: true,
+            maxBuffer: 128 * 1024,
+          });
+          const parsed = JSON.parse(output);
+          if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            throw new Error('Tailscale returned invalid status JSON.');
+          }
+          tailscaleStatus = parsed;
+          break;
+        } catch (error) {
+          lastError = error;
+          if (error.code !== 'ENOENT') break;
+        }
+      }
+      if (!tailscaleStatus) tailscaleError = `Tailscale status could not be read: ${lastError?.message || 'Tailscale CLI was not found.'}`;
+      const addresses = Array.isArray(tailscaleStatus?.Self?.TailscaleIPs) ? tailscaleStatus.Self.TailscaleIPs : [];
+      const ip = addresses.find(value => {
+        if (typeof value !== 'string') return false;
+        const octets = value.split('.').map(Number);
+        return octets.length === 4 && octets.every(octet => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+          && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127;
+      });
+      if (!tailscaleError && (tailscaleStatus?.BackendState !== 'Running' || !ip)) {
+        tailscaleError = 'This device is not connected to the tailnet.';
+      }
+      bindHost = tailscaleError ? '127.0.0.1' : ip;
+    }
+    const host = bindHost === '0.0.0.0' || bindHost === '::' ? '127.0.0.1' : bindHost;
     const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
     return {
       configPath,
       configDirectory: path.dirname(configPath),
-      workspace: path.resolve(config.workspace || path.dirname(configPath)),
+      workspace,
       daemonPath: path.join(__dirname, '..', 'dist', 'gateway', 'daemon.js'),
-      bindHost: configuredHost,
+      bindHost,
+      tailscaleEnabled,
+      ...(tailscaleError ? { tailscaleError } : {}),
       port,
       url: `http://${formattedHost}:${port}`,
     };
@@ -443,6 +503,7 @@ function launchGateway(gateway) {
     stdio: ['ignore', logHandle, logHandle],
     env: {
       ...process.env,
+      SYMBIOTE_WEB_HOST: gateway.bindHost,
       ...(executable === process.execPath && !process.env.SYMBIOTE_NODE ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
     },
   });
@@ -505,6 +566,9 @@ async function ensureGateway() {
   gatewayStartup = (async () => {
     if (electronQuitting) throw new Error('Electron is closing and will not start another Gateway process.');
     const gateway = readGatewayConfig();
+    if (gateway.tailscaleError) {
+      console.error(`[desktop] Tailscale-only access is enabled but unavailable: ${gateway.tailscaleError} The Gateway will remain loopback-only; LAN access is disabled.`);
+    }
     const installedServiceState = serviceState();
     serviceManagedGateway = installedServiceState !== undefined;
     if (serviceManagedGateway) {
@@ -646,6 +710,7 @@ function startGatewayMonitor() {
       if (await gatewayHealthCheck(gateway, details => {
         failureDetails = details;
       })) {
+        syncWindowGatewayOrigin(gateway);
         if (gatewayHealthFailures > 0) {
           logGatewaySupervisor(`Gateway health recovered after ${gatewayHealthFailures} failed checks.`);
           gatewayHealthFailures = 0;
@@ -708,6 +773,9 @@ function saveDesktopPreferences() {
 }
 
 async function configureLanAccess(forcePrompt = false) {
+  if (readGatewayConfig().tailscaleEnabled) {
+    return { status: 'tailscale-only' };
+  }
   if (process.platform !== 'win32') return { status: 'unsupported' };
   const { host, port } = readGatewaySettings();
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new RangeError(`Invalid configured web port: ${port}`);
@@ -764,11 +832,39 @@ function getGatewayUrl() {
   return readGatewayConfig().url;
 }
 
+function getLanUrl() {
+  const gateway = readGatewayConfig();
+  if (gateway.tailscaleEnabled && !gateway.tailscaleError) {
+    return gateway.url;
+  }
+  const addresses = Object.values(os.networkInterfaces()).flat().filter(address =>
+    address?.family === 'IPv4' && !address.internal && address.address !== '127.0.0.1'
+  );
+  const address = addresses[0]?.address;
+  return `http://${address || '127.0.0.1'}:${gateway.port}`;
+}
+
 function rendererUrl(minimal) {
   const url = new URL(getGatewayUrl());
   url.searchParams.set('desktop', '1');
   if (minimal) url.searchParams.set('minimal', '1');
   return url.toString();
+}
+
+function syncWindowGatewayOrigin(gateway) {
+  for (const target of [mainWindow, miniWindow]) {
+    if (!target || target.isDestroyed()) continue;
+    let currentOrigin = '';
+    try {
+      currentOrigin = new URL(target.webContents.getURL()).origin;
+    } catch {
+      // A not-yet-loaded window will use the current Gateway URL on first load.
+    }
+    if (currentOrigin === new URL(gateway.url).origin) continue;
+    void target.loadURL(rendererUrl(target === miniWindow)).catch(error => {
+      console.error('Could not move the desktop window to the active Gateway address:', error);
+    });
+  }
 }
 
 function loadGatewayWithRetry(target, minimal) {
@@ -833,7 +929,7 @@ function createMainWindow() {
   if (process.platform === 'win32') mainWindow.setIcon(icon);
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    if (process.platform === 'win32') void configureLanAccess();
+    if (process.platform === 'win32' && !readGatewayConfig().tailscaleEnabled) void configureLanAccess();
   });
   mainWindow.on('close', event => {
     if (electronQuitting) return;
@@ -1132,6 +1228,12 @@ ipcMain.handle('desktop:set-theme', (_event, theme) => {
   return desktopTheme;
 });
 ipcMain.handle('desktop:request-lan-access', () => configureLanAccess(true));
+ipcMain.handle('desktop:get-lan-url', () => getLanUrl());
+ipcMain.handle('desktop:restart-app', async () => {
+  if (serviceManagedGateway) await restartManagedGateway();
+  restartDesktop();
+  return { accepted: true };
+});
 ipcMain.handle('desktop:request-reboot', async () => {
   if (process.platform !== 'win32') throw new Error('A confirmed system restart is currently available only in the Windows desktop app.');
   const script = 'Start-Process -FilePath "$env:SystemRoot\\System32\\shutdown.exe" -ArgumentList \'/r /t 15 /c "Restart requested from Symbiote"\' -Verb RunAs -ErrorAction Stop';

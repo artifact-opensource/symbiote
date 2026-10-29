@@ -5,6 +5,23 @@ import os from 'node:os';
 import path from 'node:path';
 import { SessionManager, SessionPersistenceError } from '../sessions/manager.js';
 
+test('hidden and heartbeat sessions stay out of normal session listings', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-session-list-'));
+  try {
+    const manager = new SessionManager(directory);
+    manager.create('ordinary-conversation', { label: 'Ordinary conversation', sessionKind: 'conversation' });
+    const gamma = manager.create('heartbeat-gamma', { label: 'Gamma heartbeat', sessionKind: 'conversation', hiddenFromList: true });
+    manager.create('heartbeat-old-task', { label: 'Old heartbeat', sessionKind: 'conversation' });
+    gamma.messages = [{ role: 'user', content: 'Authorized heartbeat task' }];
+    manager.save(gamma);
+
+    assert.equal(manager.load('heartbeat-gamma')?.metadata.label, 'Gamma heartbeat');
+    assert.deepEqual(manager.list().map(session => session.id), ['ordinary-conversation']);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('archiving keeps assistant tool calls with all their results', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-session-archive-'));
   try {

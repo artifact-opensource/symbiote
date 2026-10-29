@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SYMBIOTE — The Thesis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0806;
+    --bg-2:#100c08;
+    --panel:#140f0a;
+    --line:rgba(236,230,218,.14);
+    --line-soft:rgba(236,230,218,.08);
+    --text:#ece6da;
+    --muted:#a79d8b;
+    --steel:#8f887c;
+    --forge:#c6ff00;
+    --forge-hi:#e0ff7a;
+    --copper:#c97b4a;
+    --font-display:'Archivo Black','Arial Black',sans-serif;
+    --font-body:'Space Grotesk','Segoe UI',sans-serif;
+    --font-mono:'JetBrains Mono','Courier New',monospace;
+    --font-serif:'Instrument Serif',Georgia,serif;
+    --ease:cubic-bezier(.16,1,.3,1);
+  }
+  *,*::before,*::after{ margin:0; padding:0; box-sizing:border-box; }
+  html{ scroll-behavior:smooth; }
+  body{
+    background:
+      radial-gradient(1100px 700px at 78% -12%, rgba(198,255,0,.13), transparent 62%),
+      radial-gradient(900px 700px at -12% 108%, rgba(201,123,74,.10), transparent 58%),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--font-body);
+    font-weight:300;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    overflow-x:hidden;
+    min-height:100vh;
+  }
+  ::selection{ background:var(--forge); color:#160a02; }
+  ::selection a{ color:#160a02; }
+  :focus-visible{ outline:2px solid var(--forge); outline-offset:3px; }
+
+  .mono{ font-family:var(--font-mono); }
+  .container{ width:min(1240px, 92vw); margin-inline:auto; position:relative; z-index:3; }
+
+  /* ---------- typography helpers ---------- */
+  .eyebrow{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:.34em;
+    text-transform:uppercase;
+    color:var(--forge);
+    display:flex; align-items:center; gap:14px;
+  }
+  .eyebrow::before{ content:''; width:42px; height:1px; background:var(--forge); display:inline-block; }
+
+  .display{
+    font-family:var(--font-display);
+    text-transform:uppercase;
+    line-height:.96;
+    letter-spacing:-.012em;
+  }
+  .outline{
+    color:transparent;
+    -webkit-text-stroke:2px var(--text);
+  }
+
+  /* ---------- reveal ---------- */
+  .reveal{ opacity:0; transform:translateY(30px); transition:opacity 1s ease, transform 1s var(--ease); }
+  .reveal.in{ opacity:1; transform:translateY(0); }
+
+  /* ---------- hero ---------- */
+  .hero{ position:relative; min-height:100svh; display:flex; flex-direction:column; justify-content:center; padding:150px 0 110px; overflow:hidden; }
+  .lever{ position:absolute; top:50%; right:-9vw; width:min(54vw,640px); transform:translateY(-50%); transform-box:fill-box; transform-origin:center; animation:spin 150s linear infinite; opacity:.5; pointer-events:none; z-index:1; }
+  @keyframes spin{ to{ transform:translateY(-50%) rotate(360deg); } }
+  .hero-fade{ position:absolute; left:0; right:0; bottom:0; height:170px; background:linear-gradient(transparent, var(--bg)); z-index:2; pointer-events:none; }
+  .topnav{ position:absolute; top:0; left:0; right:0; z-index:6; display:flex; justify-content:space-between; align-items:center; padding:30px var(--pad,34px); }
+  .topnav .mono{ font-size:10.5px; letter-spacing:.3em; text-transform:uppercase; color:var(--steel); }
+  .topnav .nav-manifest{ padding:14px 24px; }
+  :root{ --pad:34px; }
+  @media (max-width:700px){ :root{ --pad:22px; } }
+
+  .hero-title{
+    font-family:var(--font-display);
+    text-transform:uppercase;
+    font-size:clamp(3.3rem, 10.2vw, 8.6rem);
+    line-height:.94;
+    letter-spacing:-.015em;
+    margin:30px 0 36px;
+  }
+  .hero-title .solid{ color:var(--text); display:block; }
+  .hero-title .outline{ display:block; }
+
+  .hero-sub{ max-width:620px; color:var(--muted); font-size:clamp(1rem,1.35vw,1.14rem); line-height:1.8; font-weight:300; }
+  .hero-sub em{ font-family:var(--font-serif); font-style:italic; color:var(--text); font-size:1.08em; }
+  .hero-sub mark{ background:linear-gradient(transparent 62%, rgba(255,106,26,.38) 62%); }
+
+  .hero-cta{ display:flex; gap:16px; margin-top:46px; flex-wrap:wrap; }
+
+  .btn{
+    position:relative;
+    display:inline-flex; align-items:center; gap:12px;
+    font-family:var(--font-mono); text-transform:uppercase; text-decoration:none;
+    font-size:11px; letter-spacing:.22em;
+    padding:19px 30px;
+    border:1px solid var(--forge);
+    color:var(--forge);
+    background:transparent;
+    cursor:pointer;
+    clip-path:polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+    transition:color .35s ease, background .35s ease, box-shadow .35s ease, transform .35s var(--ease);
+    overflow:hidden;
+  }
+  .btn::after{
+    content:''; position:absolute; inset:0;
+    background:var(--forge); transform:scaleX(0); transform-origin:left;
+    transition:transform .45s var(--ease); z-index:-1;
+  }
+  .btn:hover{ color:#160a02; background:var(--forge); box-shadow:0 18px 50px -18px rgba(198,255,0,.7); }
+  .btn:hover::after{ transform:scaleX(1); }
+  .btn .arr{ font-size:13px; transition:transform .35s var(--ease); }
+  .btn:hover .arr{ transform:translateX(6px); }
+
+  .btn-ghost{ border-color:var(--line); color:var(--text); background:transparent; }
+  .btn-ghost:hover{ border-color:var(--text); background:var(--text); color:#0a0806; box-shadow:none; }
+
+  .hero-meta{ margin-top:96px; border-top:1px solid var(--line); padding-top:24px; display:flex; justify-content:space-between; align-items:center; gap:26px; flex-wrap:wrap; }
+  .h-meta{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.28em; text-transform:uppercase; color:var(--steel); }
+  .h-meta b{ color:var(--text); font-weight:500; }
+  .h-meta-right{ color:var(--muted); }
+
+  /* hero entrance */
+  .rise{ opacity:0; animation:rise 1.1s var(--ease) forwards; }
+  @keyframes rise{ from{ opacity:0; transform:translateY(48px); } to{ opacity:1; transform:translateY(0); } }
+
+  /* ---------- ticker ---------- */
+  .ticker{ border-block:1px solid var(--line); background:rgba(18,14,10,.55); overflow:hidden; position:relative; }
+  .ticker::before,.ticker::after{ content:''; position:absolute; top:0; bottom:0; width:140px; z-index:2; pointer-events:none; }
+  .ticker::before{ left:0; background:linear-gradient(90deg, var(--bg), transparent); }
+  .ticker::after{ right:0; background:linear-gradient(-90deg, var(--bg), transparent); }
+  .ticker-track{ display:flex; width:max-content; animation:marquee 46s linear infinite; }
+  .ticker:hover .ticker-track{ animation-play-state:paused; }
+  .ticker-group{ display:flex; align-items:center; flex-shrink:0; }
+  .ticker-item{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.3em; text-transform:uppercase; color:var(--muted); white-space:nowrap; padding-right:58px; }
+  .ticker-item i{ font-style:normal; color:var(--forge); font-size:8px; }
+  @keyframes marquee{ from{ transform:translateX(0); } to{ transform:translateX(-50%); } }
+
+  /* ---------- sections common ---------- */
+  section{ position:relative; }
+  .section{ padding:clamp(90px,12vw,170px) 0; }
+  .sec-head{ display:flex; justify-content:space-between; align-items:flex-end; gap:30px; flex-wrap:wrap; margin-bottom:70px; }
+  .sec-title{ font-family:var(--font-display); text-transform:uppercase; font-size:clamp(2.5rem, 6.6vw, 5.4rem); line-height:.98; margin-top:22px; }
+  .sec-title .outline{ display:block; }
+
+  /* ---------- quote ---------- */
+  .quote-sec{ border-block:1px solid var(--line); background:rgba(16,12,8,.5); padding:clamp(90px,11vw,160px) 0; }
+  .quote-mark{ font-family:var(--font-serif); font-style:italic; font-size:clamp(4.4rem,9vw,8.4rem); line-height:.5; color:var(--forge); display:block; margin-bottom:40px; }
+  .quote-text{ font-family:var(--font-serif); font-style:italic; font-size:clamp(1.9rem,4.2vw,3.4rem); line-height:1.32; max-width:920px; color:var(--text); }
+  .quote-text em{ font-style:italic; }
+  .quote-attr{ margin-top:44px; font-family:var(--font-mono); font-size:10.5px; letter-spacing:.3em; text-transform:uppercase; color:var(--steel); }
+
+  /* ---------- bespoke ---------- */
+  .bespoke-head{ display:flex; justify-content:space-between; align-items:flex-end; gap:40px; flex-wrap:wrap; }
+  .bespoke-grid{ display:grid; grid-template-columns:1.15fr .85fr; gap:70px; margin-top:64px; align-items:start; }
+  .bespoke-copy p{ color:var(--muted); line-height:1.85; font-size:clamp(1rem,1.25vw,1.13rem); font-weight:300; margin-bottom:26px; }
+  .bespoke-copy p strong{ color:var(--text); font-weight:500; }
+  .fleets-list{ border-top:1px solid var(--line); }
+  .fleets-item{ display:flex; justify-content:space-between; align-items:baseline; gap:20px; padding:22px 4px; border-bottom:1px solid var(--line); transition:padding .4s var(--ease); }
+  .fleets-item:hover{ padding-left:14px; }
+  .fleets-item .mono{ font-size:10.5px; letter-spacing:.28em; text-transform:uppercase; color:var(--forge); }
+  .fleets-item h4{ font-family:var(--font-display); text-transform:uppercase; font-size:clamp(1.2rem,2vw,1.6rem); letter-spacing:0; }
+
+  /* ---------- stats ---------- */
+  .stats{ border-block:1px solid var(--line); background:linear-gradient(180deg, rgba(198,255,0,.05), transparent 65%); }
+  .stats-grid{ display:grid; grid-template-columns:repeat(3,1fr); }
+  .stat{ padding:clamp(44px,6vw,84px); border-left:1px solid var(--line); }
+  .stat:first-child{ border-left:none; }
+  .stat-num{ font-family:var(--font-display); font-size:clamp(3.4rem,7vw,5.6rem); line-height:1; color:var(--text); }
+  .stat-sup{ color:var(--forge); font-size:.42em; vertical-align:super; }
+  .stat-label{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.3em; text-transform:uppercase; color:var(--muted); margin-top:20px; }
+  .stat-desc{ margin-top:16px; color:var(--muted); font-size:14px; line-height:1.7; max-width:36ch; }
+
+  /* ---------- deconstruction ---------- */
+  .grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:22px; }
+  .card{
+    position:relative; overflow:hidden;
+    padding:36px 34px;
+    background:linear-gradient(180deg, #16110c, #100c08);
+    border:1px solid rgba(236,230,218,.12);
+    transition:transform .5s var(--ease), border-color .4s ease, box-shadow .5s ease, background .4s ease;
+  }
+  .card::before{
+    content:''; position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .45s ease;
+    background:radial-gradient(420px circle at var(--mx,50%) var(--my,0%), rgba(198,255,0,.13), transparent 62%);
+  }
+  .card:hover{ transform:translateY(-6px); border-color:rgba(198,255,0,.55); box-shadow:0 34px 70px -34px rgba(198,255,0,.4); }
+  .card:hover::before{ opacity:1; }
+  .card-top{ display:flex; justify-content:space-between; align-items:center; }
+  .card-num{ font-family:var(--font-mono); font-size:11px; letter-spacing:.3em; color:var(--forge); text-transform:uppercase; }
+  .card-tag{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.26em; text-transform:uppercase; color:var(--steel); border:1px solid var(--line); padding:8px 12px; }
+  .card h3{ font-family:var(--font-display); text-transform:uppercase; font-size:clamp(1.45rem,2.4vw,1.95rem); line-height:1.04; margin:28px 0 18px; letter-spacing:0; }
+  .card p{ color:var(--muted); line-height:1.78; font-size:14.5px; font-weight:300; }
+  .card .idx{ position:absolute; top:30px; right:30px; font-family:var(--font-display); font-size:4.2rem; line-height:1; color:transparent; -webkit-text-stroke:1px rgba(236,230,218,.22); }
+
+  /* ---------- final ---------- */
+  .final{ padding:clamp(110px,14vw,200px) 0 120px; overflow:hidden; }
+  .final-title{ font-family:var(--font-display); text-transform:uppercase; font-size:clamp(2.7rem, 7.8vw, 7.6rem); line-height:.97; margin:28px 0 40px; max-width:1050px; }
+  .final-quote{ color:var(--muted); font-size:clamp(1.05rem,1.4vw,1.2rem); line-height:1.8; max-width:640px; }
+  .final-quote em{ font-family:var(--font-serif); font-style:italic; color:var(--text); font-size:1.1em; }
+  .final-attr{ margin-top:70px; display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
+  .final-attr .mono{ font-size:10.5px; letter-spacing:.3em; text-transform:uppercase; color:var(--steel); }
+  .final-line{ flex:1; min-width:60px; height:1px; background:var(--line); }
+
+  /* ---------- footer ---------- */
+  footer{ border-top:1px solid var(--line); padding:34px 0; }
+  footer .container{ display:flex; justify-content:space-between; align-items:center; gap:20px; flex-wrap:wrap; }
+  footer .mono{ font-size:10px; letter-spacing:.3em; text-transform:uppercase; color:var(--steel); }
+
+  /* ---------- responsive ---------- */
+  @media (max-width:960px){
+    .bespoke-grid{ grid-template-columns:1fr; gap:50px; }
+    .grid{ grid-template-columns:1fr; }
+    .stats-grid{ grid-template-columns:1fr; }
+    .stat{ border-left:none; border-top:1px solid var(--line); }
+    .stat:first-child{ border-top:none; }
+    .stat:nth-child(2){ border-top:none; } /* careful */
+  }
+  @media (max-width:640px){
+    .topnav .nav-right{ display:none; }
+    .hero{ padding-top:120px; }
+    .hero-meta{ flex-direction:column; align-items:flex-start; gap:14px; }
+    .sec-head{ flex-direction:column; align-items:flex-start; }
+    .stats-grid{ grid-template-columns:1fr; }
+    .stat{ border-left:none !important; border-top:1px solid var(--line); }
+    .stat:first-child{ border-top:none; }
+  }
+</style>
+</head>
+<body>
+
+<header class="hero" id="top">
+  <svg class="lever" viewBox="0 0 900 900" fill="none" aria-hidden="true">
+    <defs>
+      <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#e0ff7a"/>
+        <stop offset="1" stop-color="#c6ff00"/>
+      </linearGradient>
+    </defs>
+    <g class="rotor">
+      <circle cx="450" cy="450" r="70" stroke="rgba(236,230,218,0.08)" stroke-width="1"/>
+      <circle cx="450" cy="450" r="160" stroke="rgba(236,230,218,0.08)" stroke-width="1"/>
+      <circle cx="450" cy="450" r="250" stroke="rgba(236,230,218,0.08)" stroke-width="1"/>
+      <circle cx="450" cy="450" r="340" stroke="rgba(236,230,218,0.08)" stroke-width="1"/>
+      <circle cx="450" cy="450" r="70" stroke="rgba(236,230,218,0.16)" stroke-width="1.5"/>
+      <circle cx="450" cy="450" r="160" stroke="rgba(236,230,218,0.16)" stroke-width="1.5"/>
+      <circle cx="450" cy="450" r="250" stroke="rgba(236,230,218,0.16)" stroke-width="1.5"/>
+      <circle cx="450" cy="450" r="340" stroke="rgba(236,230,218,0.16)" stroke-width="1.5"/>
+      <path d="M450 80 A70 70 0 0 1 520 150 M450 160 A160 160 0 0 1 610 250 M450 260 A250 250 0 0 1 700 350 M450 360 A340 340 0 0 1 790 450" stroke="rgba(236,230,218,0.2)" stroke-width="1.5" stroke-dasharray="3 12"/>
+      <line x1="450" y1="730" x2="450" y2="150" stroke="url(#lg)" stroke-width="5"/>
+      <line x1="450" y1="150" x2="545" y2="55" stroke="url(#lg)" stroke-width="5"/>
+      <circle cx="450" cy="138" r="20" stroke="#c6ff00" stroke-width="3"/>
+      <circle cx="558" cy="34" r="12" stroke="#c6ff00" stroke-width="3"/>
+      <path d="M424 730 H476 M418 736 H482" stroke="#8f887c" stroke-width="3"/>
+    </g>
+  </svg>
+
+  <nav class="topnav mono">
+    <span>SYMBIOTE / THE THESIS</span>
+    <a class="btn nav-manifest" href="manifest.html">Manifesto</a>
+  </nav>
+
+  <div class="container">
+    <p class="eyebrow rise" style="animation-delay:.05s">The Symbiote Thesis</p>
+    <h1 class="hero-title">
+      <span class="solid rise" style="animation-delay:.15s">Symbiote,</span>
+      <span class="outline rise" style="animation-delay:.28s">At Its Core.</span>
+    </h1>
+    <p class="hero-sub rise" style="animation-delay:.42s">
+      In a world where personal ownership has become increasingly elusive, artificial intelligence may prove to be the achievement that prevents humanity from descending into a fully disowned, dystopian future. <em>Its highest human value</em> does not lie in acting as a generic, off-the-shelf substitute for labor, but in enabling a new model of ownership:
+    </p>
+    <div class="hero-meta rise" style="animation-delay:.7s">
+      <span class="h-meta">01 <b>— The Thesis</b></span>
+      <span class="h-meta">02 <b>— The Fleet</b></span>
+      <span class="h-meta">03 <b>— The Sovereignty</b></span>
+      <span class="h-meta-right mono">Scroll to Descend ↓</span>
+    </div>
+  </div>
+  <div class="hero-fade" aria-hidden="true"></div>
+</header>
+
+<div class="ticker" aria-hidden="true">
+  <div class="ticker-track">
+    <div class="ticker-group">
+      <span class="ticker-item">Bespoke Ownership <i>◆</i></span>
+      <span class="ticker-item">Local-First Runtime <i>◆</i></span>
+      <span class="ticker-item">Sub-Agents Orchestrated <i>◆</i></span>
+      <span class="ticker-item">Human × N <i>◆</i></span>
+    </div>
+    <div class="ticker-group">
+      <span class="ticker-item">Sovereign Fleet <i>◆</i></span>
+      <span class="ticker-item">Cognitive Alignment <i>◆</i></span>
+      <span class="ticker-item">Forge AI <i>◆</i></span>
+      <span class="ticker-item">Total Autonomy <i>◆</i></span>
+    </div>
+  </div>
+</div>
+
+<section class="quote-sec">
+  <div class="container">
+    <span class="quote-mark reveal">&ldquo;</span>
+    <p class="quote-text reveal">Its highest human value does not lie in acting as a generic, off-the-shelf substitute for labor, but in enabling a new model of ownership:</p>
+    <p class="quote-attr reveal">The Symbiote Thesis — Core Statement</p>
+  </div>
+</section>
+
+<section class="section" id="fleet">
+  <div class="container">
+    <div class="sec-head">
+      <div>
+        <p class="eyebrow reveal">The Fleet</p>
+        <h2 class="sec-title reveal">Bespoke<br><span class="outline">Agent Fleets.</span></h2>
+      </div>
+      <p class="mono reveal" style="font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:var(--steel); padding-bottom:20px;">Vol.01 — Ownership Series</p>
+    </div>
+    <div class="bespoke-grid">
+      <div class="bespoke-copy">
+        <p class="reveal">Personally owned, uniquely architecture-aligned to each individual, and designed to multiply human leverage, autonomy, and nonlinear productivity by the number of agents each individual can conjure, powered by the number of sub-agents each can deploy and orchestrate.</p>
+        <p class="reveal">A new model of ownership is not leased. It is <strong>forged</strong>.</p>
+        <div class="fleets-list">
+          <div class="fleets-item reveal"><span class="mono">01</span><h4>Sovereign Fleet</h4></div>
+          <div class="fleets-item reveal" style="transition-delay:.05s"><span class="mono">02</span><h4>Bespoke Runtime</h4></div>
+          <div class="fleets-item reveal" style="transition-delay:.1s"><span class="mono">03</span><h4>Cognitive Alignment</h4></div>
+          <div class="fleets-item reveal" style="transition-delay:.15s"><span class="mono">04</span><h4>Sub-Agent Forge</h4></div>
+        </div>
+      </div>
+      <div class="bespoke-side reveal">
+        <p class="mono" style="font-size:11px; letter-spacing:.3em; text-transform:uppercase; color:var(--forge); margin-bottom:30px;">The Multiplier</p>
+        <p style="font-family:var(--font-display); text-transform:uppercase; font-size:clamp(2rem,3.6vw,3rem); line-height:1.05;">Human <span style="color:var(--forge);">×</span> N</p>
+        <p style="margin-top:26px; color:var(--muted); line-height:1.8; font-size:15px;">Every individual becomes a fleet. Every fleet becomes a sub-llm constellation. Leverage becomes nonlinear.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="stats" id="autonomy">
+  <div class="container stats-grid">
+    <div class="stat reveal">
+      <div class="stat-num">1</div>
+      <div class="stat-label">Human — The Sovereign Individual</div>
+      <p class="stat-desc">The single point of personal ownership at the core of the architecture.</p>
+    </div>
+    <div class="stat reveal" style="transition-delay:.1s">
+      <div class="stat-num">×<span class="stat-sup">N</span></div>
+      <div class="stat-label">Agents — Personally Owned Fleets</div>
+      <p class="stat-desc">Bespoke agent fleets multiply leverage, autonomy, and output per agent.</p>
+    </div>
+    <div class="stat reveal" style="transition-delay:.2s">
+      <div class="stat-num">∞</div>
+      <div class="stat-label">Sub-Agents — Orchestrated</div>
+      <p class="stat-desc">Sub-agents deploy and orchestrate, compounding nonlinear productivity.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="deconstruction">
+  <div class="container">
+    <div class="sec-head">
+      <div>
+        <p class="eyebrow reveal">Deconstruction</p>
+        <h2 class="sec-title reveal">Core<br>Elements</h2>
+      </div>
+      <p class="mono reveal" style="font-size:11px; letter-spacing:.28em; text-transform:uppercase; color:var(--steel); padding-bottom:22px;">04 Pillars of the Thesis</p>
+    </div>
+    <div class="grid">
+      <article class="card reveal">
+        <span class="idx">01</span>
+        <div class="card-top">
+          <span class="card-num">Pillar — 01</span>
+          <span class="card-tag">Sovereignty</span>
+        </div>
+        <h3>Sovereign, Bespoke Agent Fleets</h3>
+        <p>Emphasizes local-first ownership, custom engineering, and independence from off-the-shelf, multi-tenant corporate platforms.</p>
+      </article>
+      <article class="card reveal" style="transition-delay:.08s">
+        <span class="idx">02</span>
+        <div class="card-top">
+          <span class="card-num">Pillar — 02</span>
+          <span class="card-tag">Ownership</span>
+        </div>
+        <h3>Personally Owned</h3>
+        <p>Captures the crucial distinction between merely using leased software and owning the actual runtime, weights, and memory states.</p>
+      </article>
+      <article class="card reveal">
+        <span class="idx">03</span>
+        <div class="card-top">
+          <span class="card-num">Pillar — 03</span>
+          <span class="card-tag">Alignment</span>
+        </div>
+        <h3>Uniquely Architecture-Aligned</h3>
+        <p>Validates the no-two-shoes-fit-the-same principle: every agent is tailored to the individual's cognitive patterns, execution habits, and domain requirements.</p>
+      </article>
+      <article class="card reveal" style="transition-delay:.08s">
+        <span class="idx">04</span>
+        <div class="card-top">
+          <span class="card-num">Pillar — 04</span>
+          <span class="card-tag">Leverage</span>
+        </div>
+        <h3>Multiply Human Leverage</h3>
+        <p>Focuses directly on the <span style="color:var(--text);">Human × N</span> multiplier concept, framing AI strictly as an empowering force multiplier rather than a replacement mechanism.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section class="final" id="conclusion">
+  <div class="container">
+    <p class="eyebrow reveal">The Conclusion</p>
+    <h2 class="final-title reveal">Welcome to the Age of <span class="outline">Total Autonomy.</span></h2>
+    <p class="final-quote reveal">In a world where little can truly be owned, AGI may be the one thing humanity can still possess.</p>
+    <div class="final-attr reveal">
+      <span class="mono">Ali A. Shakil</span>
+      <span class="final-line" aria-hidden="true"></span>
+      <span class="mono">Thesis — Vol.01</span>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <span class="mono">Symbiote — The Ownership Thesis</span>
+    <span class="mono">Forged in Leverage</span>
+  </div>
+</footer>
+
+<script>
+  const io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); }
+    });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach(function(el){ io.observe(el); });
+
+  document.querySelectorAll('.card').forEach(function(card){
+    card.addEventListener('mousemove', function(e){
+      var r = card.getBoundingClientRect();
+      card.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+      card.style.setProperty('--my', (e.clientY - r.top) + 'px');
+    });
+  });
+</script>
+
+</body>
+</html>

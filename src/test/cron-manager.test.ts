@@ -107,16 +107,26 @@ test('due reminders persist as alerts, recover interrupted work, and can be retr
     let attempts = 0;
     manager.start(async () => {
       attempts++;
-      if (attempts === 1) throw new Error('temporary provider failure');
+      if (attempts === 1) {
+        throw new Error('temporary provider failure', {
+          cause: Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }),
+        });
+      }
     });
     await waitFor(() => manager.listAlerts().some(alert => alert.status === 'failed'));
     const failedAlert = manager.listAlerts().find(alert => alert.status === 'failed')!;
-    assert.equal(failedAlert.lastError, 'temporary provider failure');
+    assert.match(failedAlert.lastError ?? '', /temporary provider failure/);
+    assert.match(failedAlert.lastError ?? '', /ECONNRESET/);
+    assert.ok(failedAlert.failedAt);
+    assert.ok(failedAlert.lastAttemptAt);
 
     manager.retryAlert(failedAlert.id);
     await waitFor(() => manager.listAlerts().find(alert => alert.id === failedAlert.id)?.status === 'completed');
-    assert.equal(attempts, 3);
-    assert.equal(manager.listAlerts().find(alert => alert.id === 'previously-running')?.status, 'completed');
+    assert.equal(attempts, 2);
+    const interruptedAlert = manager.listAlerts().find(alert => alert.id === 'previously-running')!;
+    assert.equal(interruptedAlert.status, 'failed');
+    assert.match(interruptedAlert.lastError ?? '', /Automatic replay is disabled/);
+    assert.equal(interruptedAlert.attempts, 1);
     assert.equal(manager.listJobs().find(item => item.id === job.id)?.enabled, false);
   } finally {
     manager.stop();

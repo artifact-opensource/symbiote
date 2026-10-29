@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { BlinkController } from '../agent/blink.js';
-import { PulseBudgetManager } from '../agent/pulse.js';
+import { EXPANDED_CAP as PULSE_EXPANDED_CAP, PulseBudgetManager } from '../agent/pulse.js';
 
 test('PULSE expands to 1000 and restores the configured baseline after sustained light use', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-pulse-'));
@@ -34,14 +34,38 @@ test('PULSE respects a configured baseline below its expansion threshold', () =>
   }
 });
 
-test('BLINK continues beyond the former five-continuation ceiling', () => {
+test('BLINK defaults to five passes and stops after the depth cap', () => {
   const blink = new BlinkController();
-  for (let depth = 0; depth < 6; depth++) {
+  for (let depth = 0; depth < 5; depth++) {
     assert.equal(blink.needsBlink(true), true);
-    blink.recordBlink(1000, 10);
+    blink.recordBlink(100, 10);
   }
-  assert.equal(blink.getState().depth, 6);
-  assert.equal(blink.shouldContinue(), true);
+  assert.equal(blink.getState().depth, 5);
+  assert.equal(blink.needsBlink(true), false);
+  assert.equal(blink.getState().phase, 'capped');
+  assert.equal(blink.shouldContinue(), false);
+});
+
+test('BLINK caps total iterations across PULSE-expanded passes', () => {
+  const blink = new BlinkController();
+  const turnLimit = PULSE_EXPANDED_CAP * 2;
+  assert.equal(blink.getConfig().maxTotalIterations, turnLimit);
+  assert.equal(blink.getRemainingIterations(), turnLimit);
+
+  assert.equal(blink.needsBlink(true, PULSE_EXPANDED_CAP), true);
+  blink.recordBlink(PULSE_EXPANDED_CAP, 10);
+  assert.equal(blink.getRemainingIterations(), PULSE_EXPANDED_CAP);
+
+  assert.equal(blink.needsBlink(true, PULSE_EXPANDED_CAP), false);
+  blink.recordComplete(PULSE_EXPANDED_CAP, 10);
+  assert.equal(blink.getState().totalIterations, turnLimit);
+  assert.equal(blink.getState().phase, 'capped');
+  assert.equal(blink.shouldContinue(), false);
+});
+
+test('BLINK replaces a non-finite depth with its safe default', () => {
+  const blink = new BlinkController({ maxDepth: Number.POSITIVE_INFINITY });
+  assert.equal(blink.getConfig().maxDepth, 5);
 });
 
 test('BLINK still honors an explicitly configured depth ceiling', () => {

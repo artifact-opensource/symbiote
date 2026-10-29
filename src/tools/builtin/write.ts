@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolDefinition } from '../types.js';
-import { expandHome } from '../../runtime/platform.js';
+import { resolveLocalPath } from '../../runtime/platform.js';
 
 export const writeTool: ToolDefinition = {
   name: 'write',
@@ -24,14 +24,24 @@ export const writeTool: ToolDefinition = {
     idempotencyKey: (input) => `write:${String(input.path ?? '')}:${input.append === true}:${String(input.encoding ?? 'utf8')}:${String(input.content ?? '')}`,
   },
   async execute(input) {
-    const filePath = path.resolve(expandHome(String(input.path ?? '')));
+    const filePath = resolveLocalPath(String(input.path ?? ''));
     const content = String(input.content ?? '');
-    const data = input.encoding === 'base64' ? Buffer.from(content, 'base64') : content;
+    const data = input.encoding === 'base64'
+      ? Buffer.from(content, 'base64')
+      : Buffer.from(content, 'utf8');
     try {
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
       if (input.append === true) fs.appendFileSync(filePath, data);
       else fs.writeFileSync(filePath, data);
-      return `${input.append === true ? 'Appended to' : 'Wrote'} ${fs.statSync(filePath).size} bytes: ${filePath}`;
+
+      const verified = fs.readFileSync(filePath);
+      const expected = input.append === true
+        ? verified.subarray(verified.length - data.length)
+        : verified;
+      if (!expected.equals(data)) {
+        throw new Error(`Post-write verification failed for ${filePath}`);
+      }
+      return `${input.append === true ? 'Appended to' : 'Wrote'} and verified ${verified.length} bytes: ${filePath}`;
     } catch (err) {
       return `Error: ${err instanceof Error ? err.message : String(err)}`;
     }

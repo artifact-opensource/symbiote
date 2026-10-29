@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ToolDefinition } from '../types.js';
-import { expandHome } from '../../runtime/platform.js';
+import { resolveLocalPath } from '../../runtime/platform.js';
 
 export const editTool: ToolDefinition = {
   name: 'edit',
@@ -23,7 +23,7 @@ export const editTool: ToolDefinition = {
     idempotencyKey: (input) => `edit:${String(input.path ?? '')}:${String(input.oldText ?? '')}:${String(input.newText ?? '')}`,
   },
   async execute(input) {
-    const filePath = path.resolve(expandHome(String(input.path ?? '')));
+    const filePath = resolveLocalPath(String(input.path ?? ''));
     const oldText = input.oldText as string;
     const newText = input.newText as string;
 

@@ -4,7 +4,7 @@
 
 **Persistent AI agent runtime for any type of workspace.**
 
-[![Version](https://img.shields.io/badge/version-5.6.1-blue?style=flat-square)](https://github.com/Artifact-Virtual/symbiote/releases)
+[![Version](https://img.shields.io/badge/version-5.6.2-blue?style=flat-square)](https://github.com/Artifact-Virtual/symbiote/releases)
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-project-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MIT License](https://img.shields.io/badge/license-MIT-yellow?style=flat-square)](LICENSE) <br>

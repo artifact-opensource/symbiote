@@ -11,9 +11,9 @@ import { classifySession, configureSandbox, createSandboxedRegistry } from '../t
 import { hintForFailure, isExecutableAvailable } from '../runtime/platform.js';
 import { guardOutputStream } from '../runtime/process-stdio.js';
 
-test('exec defaults to a five-second timeout and accepts explicit longer timeouts', () => {
-  assert.equal(DEFAULT_EXEC_TIMEOUT_SECONDS, 5);
-  assert.equal(resolveExecTimeoutMs(undefined), 5000);
+test('exec defaults to a thirty-second timeout and accepts explicit longer timeouts', () => {
+  assert.equal(DEFAULT_EXEC_TIMEOUT_SECONDS, 30);
+  assert.equal(resolveExecTimeoutMs(undefined), 30_000);
   assert.equal(resolveExecTimeoutMs(60), 60_000);
   assert.throws(() => resolveExecTimeoutMs(0), /positive number/);
   assert.throws(() => resolveExecTimeoutMs(Number.NaN), /positive number/);
@@ -23,7 +23,7 @@ test('runner applies the intended hard timeout to exec and other routed tools', 
   const previous = process.env.SYMBIOTE_TOOL_TIMEOUT_MS;
   delete process.env.SYMBIOTE_TOOL_TIMEOUT_MS;
   try {
-    assert.equal(resolveToolTimeoutMs('exec'), 5_000);
+    assert.equal(resolveToolTimeoutMs('exec'), 30_000);
     assert.equal(resolveToolTimeoutMs('exec', { timeout: 45 }), 45_000);
     assert.equal(resolveToolTimeoutMs('read'), 5_000);
     assert.equal(resolveToolTimeoutMs('web_fetch'), 15_000);

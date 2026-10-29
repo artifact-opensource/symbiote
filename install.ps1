@@ -29,8 +29,8 @@ $Branch = 'main'
 
 Write-Host ""
 Write-Host "+----------------------------------------------+" -ForegroundColor Magenta
-Write-Host "|  Symbiote v5.5.0 - Desktop Installer         |" -ForegroundColor Magenta
-Write-Host "|  Apex - cross-platform setup                 |" -ForegroundColor Magenta
+Write-Host "|  Symbiote Desktop Installer                  |" -ForegroundColor Magenta
+Write-Host "|  Guided source setup                         |" -ForegroundColor Magenta
 Write-Host "+----------------------------------------------+" -ForegroundColor Magenta
 Write-Host ""
 
@@ -54,12 +54,19 @@ if (Test-Path (Join-Path $Dir '.git')) {
   Write-Info "Cloning repository"
   Invoke-Step 'git clone' { git clone --branch $Branch $RepoUrl $Dir }
 }
-Write-Ok 'Source ready'
+$package = Get-Content (Join-Path $Dir 'package.json') -Raw | ConvertFrom-Json
+Write-Ok "Source ready (Symbiote v$($package.version))"
 
 Write-Host ""
 Write-Host "[3/4] Installing and building"
-Invoke-Step 'npm install' { npm install --prefix $Dir }
+Invoke-Step 'npm ci' { npm ci --prefix $Dir }
+Invoke-Step 'Web UI npm ci' { npm ci --prefix (Join-Path $Dir 'webapp') }
+Invoke-Step 'Electron runtime' { node (Join-Path $Dir 'node_modules\electron\install.js') }
+Invoke-Step 'Web UI build runtime' { node (Join-Path $Dir 'webapp\node_modules\esbuild\install.js') }
 Invoke-Step 'npm run build' { npm run build --prefix $Dir }
+if ($env:OS -eq 'Windows_NT') {
+  Invoke-Step 'Windows shortcut launcher' { & (Join-Path $Dir 'scripts\windows\build-launcher.ps1') }
+}
 Write-Ok 'Build complete'
 
 Write-Host ""

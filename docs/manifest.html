@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SYMBIOTIX — Symbiosis Manifest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0806;
+    --bg-alt:#100c08;
+    --panel:#140f0a;
+    --panel-glow:rgba(198,255,0,.06);
+    --line:rgba(236,230,218,.14);
+    --line-bright:rgba(198,255,0,.4);
+    --text:#ece6da;
+    --muted:#a79d8b;
+    --steel:#8f887c;
+    --forge:#c6ff00;
+    --forge-glow:rgba(198,255,0,.25);
+    --forge-hi:#e0ff7a;
+    --feudal:#38404a;
+    --feudal-dim:rgba(56,64,74,0.3);
+    --sovereign:#c6ff00;
+    --cyan-subtle:#c97b4a;
+    --font-display:'Archivo Black','Arial Black',sans-serif;
+    --font-body:'Space Grotesk','Segoe UI',sans-serif;
+    --font-mono:'JetBrains Mono','Courier New',monospace;
+    --font-serif:'Instrument Serif',Georgia,serif;
+    --ease:cubic-bezier(.16,1,.3,1);
+  }
+
+  *,*::before,*::after{ margin:0; padding:0; box-sizing:border-box; }
+  html{ scroll-behavior:smooth; }
+  body{
+    background:
+      radial-gradient(1100px 700px at 78% -12%, rgba(198,255,0,.13), transparent 62%),
+      radial-gradient(900px 700px at -12% 108%, rgba(201,123,74,.10), transparent 58%),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--font-body);
+    font-weight:300;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    overflow-x:hidden;
+    min-height:100vh;
+  }
+
+  ::selection{ background:var(--forge); color:#160a02; }
+  :focus-visible{ outline:2px solid var(--forge); outline-offset:3px; }
+
+  .mono{ font-family:var(--font-mono); }
+  .serif{ font-family:var(--font-serif); }
+  .container{ width:min(1240px, 92vw); margin-inline:auto; position:relative; z-index:3; }
+
+  /* ---------- Typography & Utility ---------- */
+  .eyebrow{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:.36em;
+    text-transform:uppercase;
+    color:var(--forge);
+    display:inline-flex; align-items:center; gap:14px;
+  }
+  .eyebrow::before{ content:''; width:32px; height:1px; background:var(--forge); display:inline-block; }
+
+  .outline{
+    color:transparent;
+    -webkit-text-stroke:1.8px var(--text);
+    text-stroke:1.8px var(--text);
+  }
+  .outline-forge{
+    color:transparent;
+    -webkit-text-stroke:1.8px var(--forge);
+    text-stroke:1.8px var(--forge);
+  }
+
+  /* Reveal animations */
+  .reveal{ opacity:0; transform:translateY(28px); transition:opacity .9s ease, transform .9s var(--ease); }
+  .reveal.in{ opacity:1; transform:translateY(0); }
+
+  /* ---------- Top Navigation ---------- */
+  .topnav{
+    position:absolute; top:0; left:0; right:0; z-index:20;
+    display:flex; justify-content:space-between; align-items:center;
+    padding:28px clamp(20px, 4vw, 44px);
+    border-bottom:1px solid rgba(236,230,218,0.06);
+    backdrop-filter:blur(8px);
+  }
+  .brand-group{ display:flex; align-items:center; gap:14px; }
+  .brand-dot{ width:8px; height:8px; background:var(--forge); box-shadow:0 0 10px var(--forge); border-radius:50%; }
+  .nav-tag{ font-family:var(--font-mono); font-size:10.5px; letter-spacing:.32em; text-transform:uppercase; color:var(--text); font-weight:600; }
+  .nav-sub{ font-family:var(--font-mono); font-size:10px; letter-spacing:.26em; text-transform:uppercase; color:var(--steel); }
+
+  /* ---------- Hero ---------- */
+  .hero{
+    position:relative; min-height:100svh;
+    display:flex; flex-direction:column; justify-content:center;
+    padding:160px 0 110px; overflow:hidden;
+  }
+  .hero-dial{
+    position:absolute; top:48%; right:-8vw; width:min(58vw, 680px);
+    transform:translateY(-50%); opacity:.42; pointer-events:none; z-index:1;
+    animation:slowSpin 180s linear infinite;
+  }
+  @keyframes slowSpin{ to{ transform:translateY(-50%) rotate(360deg); } }
+
+  .hero-badge{
+    display:inline-flex; align-items:center; gap:10px;
+    padding:6px 14px;
+    border:1px solid rgba(198,255,0,.3);
+    background:rgba(198,255,0,.06);
+    margin-bottom:28px;
+  }
+  .hero-badge span{ font-family:var(--font-mono); font-size:10px; letter-spacing:.28em; text-transform:uppercase; color:var(--forge); }
+
+  .hero-title{
+    font-family:var(--font-display);
+    text-transform:uppercase;
+    font-size:clamp(3.4rem, 9.4vw, 8.4rem);
+    line-height:.93;
+    letter-spacing:-.02em;
+    margin-bottom:34px;
+  }
+  .hero-title span{ display:block; }
+
+  .hero-grid{
+    display:grid; grid-template-columns:1.2fr .8fr; gap:50px;
+    align-items:end; margin-top:20px;
+  }
+  .hero-lead{
+    font-size:clamp(1.05rem, 1.4vw, 1.25rem);
+    line-height:1.75; color:var(--muted); font-weight:300;
+  }
+  .hero-lead strong{ color:var(--text); font-weight:600; }
+
+  .statement-box{
+    border-left:2px solid var(--forge);
+    background:linear-gradient(90deg, rgba(198,255,0,0.08), transparent);
+    padding:24px 28px;
+  }
+  .statement-box p{
+    font-family:var(--font-mono);
+    font-size:12px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--forge-hi);
+    line-height:1.6;
+  }
+
+  .hero-actions{ display:flex; gap:18px; margin-top:46px; flex-wrap:wrap; }
+
+  /* Buttons */
+  .btn{
+    position:relative;
+    display:inline-flex; align-items:center; gap:12px;
+    font-family:var(--font-mono); text-transform:uppercase; text-decoration:none;
+    font-size:11px; letter-spacing:.22em;
+    padding:18px 32px;
+    border:1px solid var(--forge);
+    color:var(--forge);
+    background:transparent;
+    cursor:pointer;
+    clip-path:polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+    transition:color .35s ease, background .35s ease, box-shadow .35s ease, transform .35s var(--ease);
+    overflow:hidden;
+  }
+  .btn::after{
+    content:''; position:absolute; inset:0;
+    background:var(--forge); transform:scaleX(0); transform-origin:left;
+    transition:transform .45s var(--ease); z-index:-1;
+  }
+  .btn:hover{ color:#160a02; background:var(--forge); box-shadow:0 18px 50px -18px rgba(198,255,0,.7); }
+  .btn:hover::after{ transform:scaleX(1); }
+  .btn .arr{ font-size:13px; transition:transform .35s var(--ease); }
+  .btn:hover .arr{ transform:translateX(6px); }
+  .btn-ghost{ border-color:var(--line); color:var(--text); }
+  .btn-ghost:hover{ border-color:var(--text); background:var(--text); color:#0a0806; box-shadow:none; }
+
+  /* ---------- Ticker Strip ---------- */
+  .ticker{
+    border-block:1px solid var(--line);
+    background:rgba(7,11,5,0.7);
+    overflow:hidden; position:relative; z-index:5;
+  }
+  .ticker-track{ display:flex; width:max-content; animation:marquee 48s linear infinite; }
+  .ticker:hover .ticker-track{ animation-play-state:paused; }
+  .ticker-cell{ display:flex; align-items:center; flex-shrink:0; }
+  .ticker-cell span{
+    font-family:var(--font-mono); font-size:11px; letter-spacing:.3em;
+    text-transform:uppercase; color:var(--muted); padding:16px 42px;
+    display:inline-flex; align-items:center; gap:14px;
+  }
+  .ticker-cell i{ font-style:normal; color:var(--forge); font-size:9px; }
+  @keyframes marquee{ from{ transform:translateX(0); } to{ transform:translateX(-50%); } }
+
+  /* ---------- General Sections ---------- */
+  .section{ padding:clamp(85px, 11vw, 150px) 0; position:relative; }
+  .sec-header{
+    display:flex; justify-content:space-between; align-items:flex-end;
+    gap:30px; margin-bottom:60px; flex-wrap:wrap;
+  }
+  .sec-heading{
+    font-family:var(--font-display); text-transform:uppercase;
+    font-size:clamp(2.3rem, 5.8vw, 4.8rem); line-height:1; margin-top:20px;
+  }
+
+  /* ---------- Antidote Callout (Thesis Core) ---------- */
+  .callout-strip{
+    border-block:1px solid var(--line);
+    background:linear-gradient(180deg, rgba(198,255,0,0.05), transparent 80%);
+    padding:clamp(60px, 8vw, 100px) 0;
+  }
+  .antidote-grid{
+    display:grid; grid-template-columns:1fr 1fr; gap:60px; align-items:center;
+  }
+  .thesis-quote{
+    font-family:var(--font-serif); font-style:italic;
+    font-size:clamp(2rem, 3.8vw, 3.4rem); line-height:1.24; color:var(--text);
+  }
+  .thesis-quote em{ color:var(--forge); font-style:normal; }
+  .thesis-detail{
+    display:flex; flex-direction:column; gap:22px; color:var(--muted);
+    font-size:clamp(1rem, 1.25vw, 1.15rem); line-height:1.8;
+  }
+  .thesis-detail p strong{ color:var(--text); font-weight:500; }
+
+  /* ---------- Flowchart & Paradigm Comparison ---------- */
+  .diagram-wrapper{
+    border:1px solid var(--line);
+    background:rgba(20,15,10,.7);
+    padding:clamp(24px, 4vw, 48px);
+    position:relative;
+    box-shadow:0 30px 60px -30px rgba(0,0,0,0.8);
+  }
+  .diagram-tabs{
+    display:flex; gap:16px; margin-bottom:34px; border-bottom:1px solid var(--line);
+    padding-bottom:16px; flex-wrap:wrap;
+  }
+  .d-tab{
+    background:none; border:none; color:var(--steel);
+    font-family:var(--font-mono); font-size:11px; letter-spacing:.25em;
+    text-transform:uppercase; padding:8px 14px; cursor:pointer;
+    border-bottom:2px solid transparent; transition:all .25s ease;
+  }
+  .d-tab.active{ color:var(--forge); border-bottom-color:var(--forge); }
+
+  .diagram-board{
+    display:grid; grid-template-columns:1fr 1fr; gap:36px;
+  }
+  .arch-col{
+    background:rgba(16,12,8,.7);
+    border:1px solid var(--line);
+    padding:28px 24px;
+    position:relative;
+    display:flex; flex-direction:column; gap:20px;
+  }
+  .arch-col.sovereign{
+    border-color:rgba(198,255,0,0.35);
+    background:linear-gradient(180deg, rgba(198,255,0,0.06), rgba(16,12,8,.8));
+  }
+  .arch-badge{
+    font-family:var(--font-mono); font-size:10px; letter-spacing:.3em;
+    text-transform:uppercase; padding:6px 12px; width:fit-content;
+  }
+  .arch-col.traditional .arch-badge{ background:rgba(255,255,255,0.05); color:var(--muted); }
+  .arch-col.sovereign .arch-badge{ background:rgba(198,255,0,0.18); color:var(--forge); border:1px solid var(--forge-glow); }
+
+  .flow-nodes{ display:flex; flex-direction:column; gap:14px; position:relative; }
+  .node-box{
+    padding:16px 20px; border:1px solid var(--line);
+    background:rgba(20,15,10,.9);
+    position:relative;
+  }
+  .node-box h5{ font-family:var(--font-mono); font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--text); }
+  .node-box p{ font-size:12.5px; color:var(--muted); margin-top:4px; line-height:1.5; }
+  .node-arrow{
+    text-align:center; color:var(--steel); font-size:14px; line-height:1; margin:-6px 0;
+  }
+  .arch-col.sovereign .node-arrow{ color:var(--forge); }
+  .arch-col.sovereign .node-box{ border-color:rgba(198,255,0,0.25); }
+
+  .cluster-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-top:6px; }
+  .cluster-item{
+    padding:12px; border:1px dashed rgba(198,255,0,0.3);
+    background:rgba(198,255,0,0.03); text-align:center;
+  }
+  .cluster-item span{ font-family:var(--font-mono); font-size:9.5px; letter-spacing:.15em; text-transform:uppercase; color:var(--forge-hi); display:block; }
+  .cluster-item small{ font-size:10.5px; color:var(--muted); display:block; margin-top:4px; }
+
+  /* ---------- Case Studies (Medical vs Legal) ---------- */
+  .case-grid{ display:grid; grid-template-columns:1fr 1fr; gap:26px; margin-top:44px; }
+  .case-card{
+    border:1px solid var(--line);
+    background:linear-gradient(180deg, #140f0a, #100c08);
+    padding:38px 34px;
+    position:relative;
+    overflow:hidden;
+    transition:transform .4s var(--ease), border-color .35s ease, box-shadow .35s ease;
+  }
+  .case-card:hover{
+    transform:translateY(-6px);
+    border-color:rgba(198,255,0,0.5);
+    box-shadow:0 30px 60px -25px rgba(198,255,0,0.25);
+  }
+  .case-tag{
+    font-family:var(--font-mono); font-size:10.5px; letter-spacing:.28em;
+    text-transform:uppercase; color:var(--forge); margin-bottom:18px; display:block;
+  }
+  .case-card h3{
+    font-family:var(--font-display); text-transform:uppercase;
+    font-size:clamp(1.5rem, 2.2vw, 2.1rem); line-height:1.05; margin-bottom:20px;
+  }
+  .case-spec-list{ list-style:none; display:flex; flex-direction:column; gap:12px; margin-top:20px; }
+  .case-spec-list li{
+    display:flex; gap:12px; font-size:13.5px; line-height:1.65; color:var(--muted);
+  }
+  .case-spec-list li::before{
+    content:'◆'; color:var(--forge); font-size:8px; margin-top:6px; flex-shrink:0;
+  }
+  .case-spec-list strong{ color:var(--text); font-weight:500; }
+
+  /* ---------- Math & Nonlinearity Formula ---------- */
+  .formula-banner{
+    border:1px solid var(--line-bright);
+    background:radial-gradient(ellipse at 50% 0%, rgba(198,255,0,0.18), transparent 75%), #100c08;
+    padding:clamp(40px, 6vw, 70px) 30px;
+    text-align:center;
+    position:relative;
+    margin:60px 0;
+  }
+  .math-expression{
+    font-family:var(--font-mono);
+    font-size:clamp(1.2rem, 3.2vw, 2.4rem);
+    letter-spacing:.04em;
+    color:var(--text);
+    margin:22px 0 16px;
+    display:inline-block;
+  }
+  .math-expression .fn{ color:var(--forge-hi); }
+  .math-expression .op{ color:var(--forge); }
+  .math-subtext{
+    font-family:var(--font-mono); font-size:11.5px; letter-spacing:.28em;
+    text-transform:uppercase; color:var(--steel);
+  }
+
+  /* ---------- Tree Diagram (Non-Linear Architecture) ---------- */
+  .tree-container{
+    border:1px solid var(--line);
+    background:rgba(20,15,10,.85);
+    padding:40px 24px;
+    margin-top:30px;
+    overflow-x:auto;
+  }
+  .tree-root{
+    display:flex; flex-direction:column; align-items:center;
+    min-width:760px;
+  }
+  .t-node{
+    background:#0f170b; border:1px solid var(--line);
+    padding:12px 24px; text-align:center;
+    position:relative;
+  }
+  .t-node.human{
+    border-color:var(--forge); background:linear-gradient(180deg, #140f0a, #100c08);
+    box-shadow:0 0 25px rgba(198,255,0,0.3);
+  }
+  .t-node h6{ font-family:var(--font-mono); font-size:11.5px; letter-spacing:.22em; text-transform:uppercase; color:var(--text); }
+  .t-node span{ font-size:11px; color:var(--muted); display:block; margin-top:2px; font-family:var(--font-mono); }
+  .t-stem{ width:2px; height:24px; background:var(--forge); }
+  .t-branch-h{ width:68%; height:2px; background:var(--forge); position:relative; }
+  .t-branch-row{ display:flex; justify-content:space-around; width:100%; margin-top:20px; gap:20px; }
+  .t-branch-col{ display:flex; flex-direction:column; align-items:center; flex:1; }
+  .sub-grid{ display:flex; gap:12px; margin-top:16px; width:100%; justify-content:center; }
+  .nano-grid{ display:flex; flex-direction:column; gap:6px; margin-top:12px; }
+  .nano-pill{
+    background:rgba(198,255,0,0.06); border:1px solid rgba(198,255,0,0.25);
+    padding:5px 12px; font-family:var(--font-mono); font-size:9.5px;
+    letter-spacing:.15em; color:var(--forge-hi); text-align:center;
+  }
+
+  /* ---------- Triple Threat Capabilities ---------- */
+  .exec-grid{ display:grid; grid-template-columns:repeat(3, 1fr); gap:24px; margin-top:50px; }
+  .exec-card{
+    border:1px solid var(--line);
+    background:linear-gradient(180deg, #140f0a, #100c08);
+    padding:34px 28px;
+    display:flex; flex-direction:column; justify-content:space-between;
+  }
+  .exec-card .mono-num{ font-family:var(--font-mono); font-size:11px; color:var(--forge); letter-spacing:.3em; }
+  .exec-card h4{ font-family:var(--font-display); text-transform:uppercase; font-size:1.45rem; line-height:1.15; margin:20px 0 16px; }
+  .exec-card p{ color:var(--muted); font-size:14px; line-height:1.75; }
+  .exec-card ul{ list-style:none; margin-top:20px; display:flex; flex-direction:column; gap:10px; border-top:1px solid var(--line); padding-top:18px; }
+  .exec-card ul li{ font-size:12.5px; color:var(--muted); line-height:1.6; }
+  .exec-card ul li strong{ color:var(--text); }
+
+  /* ---------- Paradigm Matrix: Feudalism vs Sovereignty ---------- */
+  .paradigm-matrix{
+    display:grid; grid-template-columns:1fr 1fr; gap:0;
+    border:1px solid var(--line); margin-top:50px;
+  }
+  .p-pane{ padding:clamp(36px, 5vw, 64px); position:relative; }
+  .p-pane.feudal{
+    background:#100c08;
+    border-right:1px solid var(--line);
+  }
+  .p-pane.sovereign{
+    background:linear-gradient(180deg, rgba(198,255,0,0.07), rgba(20,15,10,.95));
+  }
+  .p-status{ font-family:var(--font-mono); font-size:10px; letter-spacing:.32em; text-transform:uppercase; margin-bottom:14px; display:block; }
+  .p-pane.feudal .p-status{ color:var(--steel); }
+  .p-pane.sovereign .p-status{ color:var(--forge); }
+
+  .p-title{ font-family:var(--font-display); font-size:clamp(1.8rem, 3.2vw, 2.8rem); text-transform:uppercase; line-height:1.02; margin-bottom:24px; }
+  .p-lead{ color:var(--muted); font-size:14.5px; line-height:1.8; margin-bottom:30px; }
+  .p-traits{ list-style:none; display:flex; flex-direction:column; gap:14px; }
+  .p-traits li{
+    display:flex; gap:14px; font-size:13.5px; line-height:1.65; color:var(--muted);
+  }
+  .p-traits li span{ font-family:var(--font-mono); font-size:11px; color:var(--steel); flex-shrink:0; }
+  .p-pane.sovereign .p-traits li span{ color:var(--forge); }
+
+  /* ---------- Question in Motion Section ---------- */
+  .question-sec{
+    border-block:1px solid var(--line-bright);
+    background:radial-gradient(circle at 80% 20%, rgba(198,255,0,0.12), transparent 70%), #100c08;
+    padding:clamp(90px, 12vw, 160px) 0;
+    position:relative;
+  }
+  .q-badge{
+    display:inline-flex; align-items:center; gap:10px;
+    padding:8px 18px; border:1px solid var(--forge);
+    background:rgba(198,255,0,0.12); margin-bottom:30px;
+  }
+  .q-badge span{ font-family:var(--font-mono); font-size:11px; letter-spacing:.32em; text-transform:uppercase; color:var(--forge); }
+  .question-text{
+    font-family:var(--font-serif); font-style:italic;
+    font-size:clamp(2.1rem, 4.4vw, 4.1rem);
+    line-height:1.2; color:var(--text); max-width:1050px;
+  }
+  .question-text mark{
+    background:transparent; color:var(--forge-hi);
+  }
+
+  .inquiry-meta{
+    margin-top:54px; display:flex; justify-content:space-between; align-items:center;
+    flex-wrap:wrap; gap:20px; border-top:1px solid var(--line); padding-top:28px;
+  }
+  .meta-tag{ font-family:var(--font-mono); font-size:11px; letter-spacing:.26em; text-transform:uppercase; color:var(--steel); }
+  .meta-tag b{ color:var(--text); }
+
+  /* ---------- Footer ---------- */
+  footer{
+    border-top:1px solid var(--line);
+    padding:40px 0; background:#0a0806;
+  }
+  .footer-content{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:20px; }
+  .footer-sub{ font-family:var(--font-mono); font-size:10px; letter-spacing:.3em; text-transform:uppercase; color:var(--steel); }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width:980px){
+    .hero-grid{ grid-template-columns:1fr; }
+    .antidote-grid{ grid-template-columns:1fr; gap:36px; }
+    .diagram-board{ grid-template-columns:1fr; }
+    .case-grid{ grid-template-columns:1fr; }
+    .exec-grid{ grid-template-columns:1fr; }
+    .paradigm-matrix{ grid-template-columns:1fr; }
+    .p-pane.feudal{ border-right:none; border-bottom:1px solid var(--line); }
+  }
+
+  @media (max-width:640px){
+    .nav-sub{ display:none; }
+    .hero{ padding-top:130px; }
+    .cluster-grid{ grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- TOP NAV -->
+<nav class="topnav">
+  <div class="brand-group">
+    <div class="brand-dot" aria-hidden="true"></div>
+    <span class="nav-tag">SYMBIOTIX // SYSTEMIC EVOLUTION</span>
+  </div>
+  <div class="nav-sub">ARTIFACT VIRTUAL &gt; RESEARCH DIVISION</div>
+</nav>
+
+<!-- HERO SECTION -->
+<header class="hero" id="top">
+  <!-- Rotary Dial Decorative Vector -->
+  <svg class="hero-dial" viewBox="0 0 900 900" fill="none" aria-hidden="true">
+    <circle cx="450" cy="450" r="420" stroke="rgba(236,230,218,0.06)" stroke-width="1"/>
+    <circle cx="450" cy="450" r="320" stroke="rgba(236,230,218,0.1)" stroke-width="1.5" stroke-dasharray="4 14"/>
+    <circle cx="450" cy="450" r="220" stroke="rgba(198,255,0,0.3)" stroke-width="2"/>
+    <circle cx="450" cy="450" r="120" stroke="rgba(236,230,218,0.12)" stroke-width="1.5"/>
+    <line x1="450" y1="30" x2="450" y2="870" stroke="rgba(198,255,0,0.4)" stroke-width="2"/>
+    <line x1="30" y1="450" x2="870" y2="450" stroke="rgba(236,230,218,0.12)" stroke-width="1"/>
+    <circle cx="450" cy="130" r="16" fill="var(--forge)" fill-opacity="0.8"/>
+    <circle cx="450" cy="770" r="10" stroke="var(--forge)" stroke-width="2"/>
+    <circle cx="670" cy="450" r="8" fill="var(--forge)"/>
+  </svg>
+
+  <div class="container">
+    <div class="hero-badge">
+      <span>Manifest :: Vol 01.4</span>
+    </div>
+    <h1 class="hero-title">
+      <span>Evolution</span>
+      <span class="outline">Via Mastery.</span>
+    </h1>
+
+    <div class="hero-grid">
+      <p class="hero-lead">
+        The prevailing cultural anxiety surrounding artificial intelligence rests on a false dichotomy: either humanity is erased by a runaway superintelligence, or it is rendered economic collateral damage by centralized automated capital. Both outcomes stem from the exact same failure:
+      </p>
+
+      <div class="statement-box">
+        <p>&gt; The Surrender of Technical Agency</p>
+      </div>
+    </div>
+
+    <div class="hero-actions">
+      <a href="#mastery" class="btn">Explore the Thesis &rarr;</a>
+      <a href="#diagram" class="btn btn-ghost">Architecture Blueprint</a>
+      <a href="#inquiry" class="btn btn-ghost">Question in Motion</a>
+    </div>
+  </div>
+</header>
+
+<!-- RUNNING TICKER -->
+<div class="ticker" aria-hidden="true">
+  <div class="ticker-track">
+    <div class="ticker-cell">
+      <span>Deterministic Matrix Operations <i>◆</i></span>
+      <span>Conditional Logic <i>◆</i></span>
+      <span>State Transitions <i>◆</i></span>
+      <span>Sovereign Agent Fleets <i>◆</i></span>
+      <span>Universal Technical Literacy <i>◆</i></span>
+      <span>Zero-Dependency Runtimes <i>◆</i></span>
+      <span>Recursive Swarms <i>◆</i></span>
+    </div>
+    <div class="ticker-cell">
+      <span>Deterministic Matrix Operations <i>◆</i></span>
+      <span>Conditional Logic <i>◆</i></span>
+      <span>State Transitions <i>◆</i></span>
+      <span>Sovereign Agent Fleets <i>◆</i></span>
+      <span>Universal Technical Literacy <i>◆</i></span>
+      <span>Zero-Dependency Runtimes <i>◆</i></span>
+      <span>Recursive Swarms <i>◆</i></span>
+    </div>
+  </div>
+</div>
+
+<!-- SECTION 1: EVOLUTION VIA MASTERY -->
+<section class="section callout-strip" id="mastery">
+  <div class="container antidote-grid">
+    <div>
+      <span class="eyebrow reveal">The Antidote</span>
+      <h2 class="thesis-quote reveal" style="margin-top:20px;">
+        &ldquo;Humanity does not survive epochal technological shifts by building walls around old tools; it survives through <em>systemic evolution</em>.&rdquo;
+      </h2>
+    </div>
+
+    <div class="thesis-detail reveal">
+      <p>
+        A machine, regardless of its parameter scale, context window, or execution throughput, is fundamentally an architecture of <strong>deterministic matrix operations, conditional logic, and state transitions</strong> executing on physical compute.
+      </p>
+      <p>
+        Fear of the machine arises only when the operator does not understand the substrate. If the industrial revolution amplified physical muscle, the <strong>agentic revolution amplifies cognitive intent</strong>.
+      </p>
+      <p>
+        The apocalyptic narrative of &ldquo;AI replacement&rdquo; collapses the moment the paradigm shifts from centralized AI platforms serving passive consumers to <strong>universal technical literacy</strong>—where every human holds the capability to architect, compile, deploy, and direct their own compute stack.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION 2: THE OFF-THE-SHELF MIND -->
+<section class="section" id="diagram">
+  <div class="container">
+    <div class="sec-header">
+      <div>
+        <span class="eyebrow reveal">Universal Literacy vs Homogenization</span>
+        <h2 class="sec-heading reveal">The Off-The-Shelf<br><span class="outline">Mind.</span></h2>
+      </div>
+      <p class="mono reveal" style="font-size:11px; letter-spacing:.26em; color:var(--steel); max-width:34ch;">
+        MISCONCEPTION: THAT TECHNICAL LITERACY CREATES HOMOGENIZATION. REALITY: PERSONAL TRADECRAFT DICTATES TOPOLOGY.
+      </p>
+    </div>
+
+    <!-- MERMAID FLOWCHART REPLICATION -->
+    <div class="diagram-wrapper reveal">
+      <div class="diagram-tabs">
+        <button class="d-tab active" type="button">// FLOWCHART DUALITY: CENTRALIZED VS SOVEREIGN</button>
+      </div>
+
+      <div class="diagram-board">
+        <!-- Traditional Enterprise -->
+        <div class="arch-col traditional">
+          <span class="arch-badge">TRADITIONAL ENTERPRISE (LEAST LEVERAGE)</span>
+          <div class="flow-nodes">
+            <div class="node-box">
+              <h5>Centralized Cloud Platform</h5>
+              <p>Corporate mega-hosts, black-box closed weights, API throttling &amp; telemetry inspection.</p>
+            </div>
+            <div class="node-arrow">&darr;</div>
+            <div class="node-box">
+              <h5>Generic Multi-Tenant Agent</h5>
+              <p>Off-the-shelf prompt layer, standardized guardrails, shared memory, cookie-cutter cadence.</p>
+            </div>
+            <div class="node-arrow">&darr;</div>
+            <div class="node-box" style="border-color:var(--steel);">
+              <h5>Passive Consumer / User</h5>
+              <p>Rents monthly seat licenses. Zero data sovereignty or architectural autonomy.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sovereign Symbiosis -->
+        <div class="arch-col sovereign">
+          <span class="arch-badge">SOVEREIGN SYMBIOSIS (MAXIMAL AGENCY)</span>
+          <div class="flow-nodes">
+            <div class="node-box" style="border-color:var(--forge);">
+              <h5 style="color:var(--forge-hi);">Individual Creator / Operator</h5>
+              <p>Total architectural custody: sets cognitive intent, directives, and operational boundaries.</p>
+            </div>
+            <div class="node-arrow">&darr;</div>
+            <div class="node-box">
+              <h5>Sovereign Agent Fleet</h5>
+              <p>Domain-specific local runtimes tuned to singular tradecraft and specialized cadence.</p>
+            </div>
+            <div class="node-arrow">&darr;</div>
+
+            <div class="cluster-grid">
+              <div class="cluster-item">
+                <span>Action Engine</span>
+                <small>APIs, bare-metal HW</small>
+              </div>
+              <div class="cluster-item">
+                <span>Memory Pad</span>
+                <small>Personal vector DBs</small>
+              </div>
+              <div class="cluster-item">
+                <span>Swarm</span>
+                <small>Autonomous sub-tasks</small>
+              </div>
+            </div>
+
+            <div class="node-box" style="margin-top:4px; border-style:dashed;">
+              <h5 style="color:var(--forge);">Total Personalization</h5>
+              <p>Indelible identity imprint, circadian timing, rigorous aesthetic &amp; logical filters.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- COMPARISON CASE STUDIES -->
+    <div class="case-grid">
+      <!-- Medical Practitioner -->
+      <article class="case-card reveal">
+        <span class="case-tag">Field Topology 01 // Clinical</span>
+        <h3>The Medical Practitioner</h3>
+        <p style="color:var(--muted); font-size:14px; line-height:1.7;">
+          Constructs an edge fleet focused on immediate clinical decision support, continuous physiological stream processing, and strict HIPAA boundaries.
+        </p>
+        <ul class="case-spec-list">
+          <li><strong>Substrate:</strong> Real-time bio-marker analysis &amp; edge telemetry loops.</li>
+          <li><strong>Ingestion:</strong> Continuous clinical trial literature &amp; probabilistic diagnosis trees.</li>
+          <li><strong>Boundaries:</strong> Air-gapped cryptographic patient triage workflows.</li>
+        </ul>
+      </article>
+
+      <!-- Legal Architect -->
+      <article class="case-card reveal" style="transition-delay:.1s">
+        <span class="case-tag">Field Topology 02 // Jurisprudential</span>
+        <h3>The Legal Architect</h3>
+        <p style="color:var(--muted); font-size:14px; line-height:1.7;">
+          Tuned strictly for statutory cross-examination, adversarial mock litigation, precedent trees, and exact semantic mapping.
+        </p>
+        <ul class="case-spec-list">
+          <li><strong>Substrate:</strong> Precedent graph analysis &amp; contract lineage tracking.</li>
+          <li><strong>Verification:</strong> Jurisdictional anomaly detection &amp; citation verification graphs.</li>
+          <li><strong>Runtime:</strong> Zero-tolerance formal logic and verifiable determinism.</li>
+        </ul>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION 3: ARCHITECTURE OF NON-LINEARITY -->
+<section class="section" id="nonlinearity">
+  <div class="container">
+    <div class="sec-header">
+      <div>
+        <span class="eyebrow reveal">Hierarchical Scaling</span>
+        <h2 class="sec-heading reveal">Architecture of<br><span class="outline">Non-Linearity.</span></h2>
+      </div>
+      <p class="mono reveal" style="font-size:11px; letter-spacing:.26em; color:var(--steel); max-width:32ch;">
+        LINEAR PRODUCTIVITY CAPS AT 24 BIOLOGICAL HOURS. SWARM LEVERAGE IS UNBOUNDED.
+      </p>
+    </div>
+
+    <!-- FORMULA DISPLAY -->
+    <div class="formula-banner reveal">
+      <span class="math-subtext">The Non-Linear Multiplier Law</span>
+      <div class="math-expression">
+        <span class="fn">Throughput</span> <span class="op">=</span> Human Intent <span class="op">&times;</span> &sum;<sub>i=1</sub><sup>K</sup> (Agent<sub>i</sub> <span class="op">&times;</span> Swarm Size<sub>i</sub>)
+      </div>
+      <p style="color:var(--muted); font-size:13.5px; max-width:600px; margin:0 auto; line-height:1.6;">
+        Shifting from solo individual operator to Chief Executive Officer of an autonomous digital fleet scaling across every domain of work and existence.
+      </p>
+    </div>
+
+    <!-- RECURSIVE SWARM VISUALIZER -->
+    <div class="tree-container reveal">
+      <div class="tree-root">
+        <!-- Root node -->
+        <div class="t-node human">
+          <h6>Human Operator</h6>
+          <span>Source Intent &bull; Strategic Will</span>
+        </div>
+
+        <div class="t-stem"></div>
+        <div class="t-branch-h"></div>
+
+        <!-- Tier 2: Primary Agents -->
+        <div class="t-branch-row">
+          <!-- Branch A -->
+          <div class="t-branch-col">
+            <div class="t-node">
+              <h6>Primary Agent A</h6>
+              <span>Operational / Industrial</span>
+            </div>
+            <div class="t-stem"></div>
+            <!-- Sub agents -->
+            <div class="sub-grid">
+              <div>
+                <div class="t-node" style="padding:8px 12px;">
+                  <h6 style="font-size:10px;">Sub-Agent 1</h6>
+                  <span style="font-size:9px;">Infra &amp; Proxy</span>
+                </div>
+                <div class="nano-grid">
+                  <div class="nano-pill">Nanobot 01</div>
+                  <div class="nano-pill">Nanobot 02</div>
+                </div>
+              </div>
+              <div>
+                <div class="t-node" style="padding:8px 12px;">
+                  <h6 style="font-size:10px;">Sub-Agent 2</h6>
+                  <span style="font-size:9px;">Sec &amp; Crypto</span>
+                </div>
+                <div class="nano-grid">
+                  <div class="nano-pill">Nanobot 03</div>
+                  <div class="nano-pill">Nanobot 04</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Branch B -->
+          <div class="t-branch-col">
+            <div class="t-node">
+              <h6>Primary Agent B</h6>
+              <span>Personal / Allocation</span>
+            </div>
+            <div class="t-stem"></div>
+            <!-- Sub agents -->
+            <div class="sub-grid">
+              <div>
+                <div class="t-node" style="padding:8px 12px;">
+                  <h6 style="font-size:10px;">Sub-Agent 1</h6>
+                  <span style="font-size:9px;">Arbitrage &amp; Tax</span>
+                </div>
+                <div class="nano-grid">
+                  <div class="nano-pill">Nanobot 05</div>
+                  <div class="nano-pill">Nanobot 06</div>
+                </div>
+              </div>
+              <div>
+                <div class="t-node" style="padding:8px 12px;">
+                  <h6 style="font-size:10px;">Sub-Agent 2</h6>
+                  <span style="font-size:9px;">Microgrid &amp; Edge</span>
+                </div>
+                <div class="nano-grid">
+                  <div class="nano-pill">Nanobot 07</div>
+                  <div class="nano-pill">Nanobot 08</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- THREE EXECUTION SPHERES -->
+    <div class="exec-grid">
+      <!-- 01 Real-World Executive Action -->
+      <article class="exec-card reveal">
+        <div>
+          <span class="mono-num">DIMENSION // 01</span>
+          <h4>Real-World Executive Action</h4>
+          <p>
+            Agents are not chat boxes; they are execution engines. An owned fleet triggers localized edge actions, manages bare-metal deployments, controls smart home hardware, and negotiates programmatic transactions.
+          </p>
+        </div>
+        <ul>
+          <li><strong>API Execution:</strong> Real-time liquidity monitoring &amp; localized edge commands.</li>
+          <li><strong>Hardware Bridges:</strong> Embedded IoT and physical actuator controls.</li>
+          <li><strong>Zero-Dependency:</strong> Compiled binaries operating without centralized telemetry.</li>
+        </ul>
+      </article>
+
+      <!-- 02 Deep Personal & Life Integration -->
+      <article class="exec-card reveal" style="transition-delay:.1s">
+        <div>
+          <span class="mono-num">DIMENSION // 02</span>
+          <h4>Deep Personal &amp; Life Integration</h4>
+          <p>
+            Non-linear multipliers extending far beyond code or workplace tasks, taking command of private asset velocity and domestic hardware micro-grids.
+          </p>
+        </div>
+        <ul>
+          <li><strong>Personal Finance:</strong> Continuous portfolio balancing &amp; vendor contract arbitration.</li>
+          <li><strong>Life Logistics:</strong> Energy micro-grid management &amp; circadian rhythm schedule buffers.</li>
+          <li><strong>Friction Shield:</strong> Suppression of low-signal administrative ping-pong.</li>
+        </ul>
+      </article>
+
+      <!-- 03 Deep Swarm Hierarchies -->
+      <article class="exec-card reveal" style="transition-delay:.2s">
+        <div>
+          <span class="mono-num">DIMENSION // 03</span>
+          <h4>Deep Swarm Hierarchies</h4>
+          <p>
+            Recursive delegation where high-level director agents decompose single imperatives into autonomous specialist runtimes.
+          </p>
+        </div>
+        <ul>
+          <li><strong>Sub-Agent 1 (Infra):</strong> Micro-instances, zero-dependency containers, edge proxies.</li>
+          <li><strong>Sub-Agent 2 (Security):</strong> Audits commits, verifies keys, enforces zero-trust boundaries.</li>
+          <li><strong>Sub-Agent 3 (Telemetry):</strong> Anomaly detection loops streaming directly to personal vector stores.</li>
+        </ul>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION 4: THE ULTIMATE PARADIGM -->
+<section class="section" id="paradigm">
+  <div class="container">
+    <div class="sec-header">
+      <div>
+        <span class="eyebrow reveal">Civilizational Trajectory</span>
+        <h2 class="sec-heading reveal">Absolute Ownership<br><span class="outline">vs Feudalism.</span></h2>
+      </div>
+      <p class="mono reveal" style="font-size:11px; letter-spacing:.26em; color:var(--steel); max-width:32ch;">
+        THE DIVIDE BETWEEN THE DISOWNED CONSUMER AND THE SOVEREIGN OPERATOR.
+      </p>
+    </div>
+
+    <div class="paradigm-matrix reveal">
+      <!-- Digital Feudalism -->
+      <div class="p-pane feudal">
+        <span class="p-status">// PATHWAY 01</span>
+        <h3 class="p-title" style="color:#b8c2cc;">Digital Feudalism</h3>
+        <p class="p-lead">
+          Masses relying on a handful of multi-tenant corporate mega-models via recurring monthly subscriptions.
+        </p>
+        <ul class="p-traits">
+          <li><span>[01]</span> Private telemetry fed continuously into remote black-box endpoints.</li>
+          <li><span>[02]</span> Vulnerable to arbitrary model deprecation, censorship, and sudden API price hikes.</li>
+          <li><span>[03]</span> Ephemeral rental: no compound ownership, zero defensible equity, no local hardware control.</li>
+          <li><span>[04]</span> Structural dependency on centralized platform gatekeepers.</li>
+        </ul>
+      </div>
+
+      <!-- Sovereign Symbiosis -->
+      <div class="p-pane sovereign">
+        <span class="p-status">// PATHWAY 02 — THE MANIFEST</span>
+        <h3 class="p-title" style="color:var(--forge-hi);">Sovereign Symbiosis</h3>
+        <p class="p-lead">
+          Individuals who own physical compute, author zero-dependency custom runtimes, and direct custom agent swarms.
+        </p>
+        <ul class="p-traits">
+          <li><span>[01]</span> Localized vector memory bases that compound intellectual leverage over decades.</li>
+          <li><span>[02]</span> Zero leakage: deterministic boundaries with strictly air-gapped cryptographic execution.</li>
+          <li><span>[03]</span> The fleet becomes a permanent, fortified digital asset owned exclusively by the human operator.</li>
+          <li><span>[04]</span> High-density cognitive organ of execution; absolute technical sovereignty.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION 5: QUESTION IN MOTION -->
+<section class="question-sec" id="inquiry">
+  <div class="container">
+    <div class="q-badge reveal">
+      <span>Question In Motion // Active Dialectic</span>
+    </div>
+
+    <p class="question-text reveal">
+      How do we envision the <mark>governance and coordination protocols</mark> between individual sovereign agent fleets when two different humans, each with their own custom swarms, collaborate or transact in the real world?
+    </p>
+
+    <div class="inquiry-meta reveal">
+      <div class="meta-tag">Domain: <b>Inter-Swarm Handshake Protocols</b></div>
+      <div class="meta-tag">Research Division: <b>Artifact Virtual</b></div>
+      <div class="meta-tag">Status: <b>Decentralized Consensus Discovery</b></div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="container footer-content">
+    <div class="brand-group">
+      <div class="brand-dot" aria-hidden="true"></div>
+      <span class="footer-sub">SYMBIOTIX // THE SYMBIOSIS MANIFEST</span>
+    </div>
+    <div class="footer-sub">
+      ARTIFACT VIRTUAL &gt; RESEARCH DIVISION &bull; ALL RIGHTS SOVEREIGN
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Intersection Observer for graceful scroll reveals
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if(entry.isIntersecting){
+        entry.target.classList.add('in');
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1 });
+
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>
