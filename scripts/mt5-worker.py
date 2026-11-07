@@ -65,6 +65,18 @@ def get_history_deals(mt5, request):
     return records
 
 
+def initialize_terminal(mt5, terminal_path, login, password, server):
+    options = {
+        "login": login,
+        "password": password,
+        "server": server,
+        "timeout": 15_000,
+    }
+    if terminal_path:
+        return mt5.initialize(terminal_path, **options)
+    return mt5.initialize(**options)
+
+
 
 def run():
     try:
@@ -85,13 +97,7 @@ def run():
         fail("A numeric account, password and server are required.")
 
     terminal_path = request.get("terminalPath")
-    initialized = mt5.initialize(
-        terminal_path or None,
-        login=int(login),
-        password=password,
-        server=server,
-        timeout=15_000,
-    )
+    initialized = initialize_terminal(mt5, terminal_path, int(login), password, server)
     if not initialized:
         code, message = mt5.last_error()
         fail("MetaTrader 5 initialization failed: {} ({})".format(message, code))
