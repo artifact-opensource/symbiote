@@ -14,6 +14,7 @@ import {
   FileSpreadsheet,
   FileText,
   Folder,
+  GitBranch,
   Info,
   LogOut,
   KeyRound,
@@ -185,6 +186,10 @@ export default function CloudSpacesView({
   tailscaleStatus: TailscaleIntegrationStatus | null;
   onTailscaleStatusChange: (status: TailscaleIntegrationStatus) => void;
 }) {
+  const [gitIdentity, setGitIdentity] = useState({ userName: '', userEmail: '' });
+  const [gitWorking, setGitWorking] = useState(false);
+  const [gitError, setGitError] = useState('');
+  const [gitMessage, setGitMessage] = useState('');
   const [user, setUser] = useState<User | null>(null);
   const [accountLoading, setAccountLoading] = useState(true);
   const [accountError, setAccountError] = useState('');
@@ -192,6 +197,14 @@ export default function CloudSpacesView({
   const [services, setServices] = useState<Record<string, ServiceState>>({});
   const [tailscaleWorking, setTailscaleWorking] = useState(false);
   const [tailscaleError, setTailscaleError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    void request<{ identity: typeof gitIdentity }>('/api/integrations/git')
+      .then(result => { if (active) setGitIdentity(result.identity); })
+      .catch(failure => { if (active) setGitError(failure instanceof Error ? failure.message : 'Git identity is unavailable.'); });
+    return () => { active = false; };
+  }, [request]);
 
   useEffect(() => observeGoogleUser(currentUser => {
     setUser(currentUser);
@@ -281,6 +294,25 @@ export default function CloudSpacesView({
     }
   };
 
+  const saveGitIdentity = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setGitWorking(true);
+    setGitError('');
+    setGitMessage('');
+    try {
+      const result = await request<{ identity: typeof gitIdentity }>('/api/integrations/git', {
+        method: 'PUT',
+        body: JSON.stringify({ identity: gitIdentity }),
+      });
+      setGitIdentity(result.identity);
+      setGitMessage('Git commit identity saved. Existing Git credential helpers and SSH keys will be used for remotes.');
+    } catch (failure) {
+      setGitError(failure instanceof Error ? failure.message : 'Git identity could not be saved.');
+    } finally {
+      setGitWorking(false);
+    }
+  };
+
   const authorized = Boolean(grant && grant.expiresAt > Date.now());
   const needsReauthorization = Boolean(grant && !authorized);
   const failedServices = GOOGLE_WORKSPACE_SERVICES.filter(service => services[service.id]?.status === 'offline');
@@ -295,6 +327,31 @@ export default function CloudSpacesView({
         </div>
       </header>
       <div className="integrations-grid" aria-label="Available integrations">
+        <article className="surface-card cloud-provider-card integration-provider-card">
+          <div className="integration-card-header">
+            <span className={`cloud-provider-icon${gitIdentity.userName && gitIdentity.userEmail ? ' cloud-provider-icon-online' : ''}`}><GitBranch size={20} /></span>
+            <div className="integration-card-title">
+              <h2>Git</h2>
+              <span className={`cloud-provider-status${gitIdentity.userName && gitIdentity.userEmail ? ' cloud-provider-status-online' : ''}`}>
+                {gitIdentity.userName && gitIdentity.userEmail ? 'Commit identity configured' : 'Built-in · configure commit identity'}
+              </span>
+            </div>
+            <span className="integration-info" title="Native Git works with any standard Git remote. Authentication remains in your existing SSH agent or operating-system credential helper; Symbiote does not store remote credentials."><Info size={14} /></span>
+          </div>
+          <form className="market-integration-form" onSubmit={event => void saveGitIdentity(event)}>
+            <label>Git user name<input autoComplete="name" value={gitIdentity.userName} onChange={event => setGitIdentity(current => ({ ...current, userName: event.target.value }))} placeholder="Name on commits" maxLength={200} required={Boolean(gitIdentity.userEmail)} /></label>
+            <label>Git email<input type="email" autoComplete="email" value={gitIdentity.userEmail} onChange={event => setGitIdentity(current => ({ ...current, userEmail: event.target.value }))} placeholder="you@example.com" maxLength={320} required={Boolean(gitIdentity.userName)} /></label>
+            <div className="market-integration-actions">
+              <button className="button button-primary" type="submit" disabled={gitWorking}>
+                {gitWorking ? <ActivityOrb label="Saving Git identity" compact loading /> : <GitBranch size={14} />}
+                Save Git identity
+              </button>
+            </div>
+          </form>
+          <small className="integration-account-name">This identity applies to Symbiote-created commits without changing your global Git configuration. Native Git supports GitHub, GitLab, Gitee, Bitbucket, and any standard Git server.</small>
+          {gitMessage && <p className="cloud-provider-message" role="status">{gitMessage}</p>}
+          {gitError && <p className="cloud-provider-error" role="alert">{gitError}</p>}
+        </article>
         <article className="surface-card cloud-provider-card integration-provider-card tailscale-integration-card">
           <div className="integration-card-header">
             <span className={`cloud-provider-icon${tailscaleStatus?.connected ? ' cloud-provider-icon-online' : ''}`}><Network size={20} /></span>

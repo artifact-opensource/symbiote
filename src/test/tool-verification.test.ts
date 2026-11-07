@@ -58,7 +58,7 @@ test('every built-in tool is registered with a provider-safe schema', () => {
     const definitions = registry.list();
     const names = definitions.map(tool => tool.name);
 
-    assert.equal(definitions.length, 63);
+    assert.equal(definitions.length, 64);
     assert.equal(new Set(names).size, names.length, 'built-in tool names must be unique');
     assert.deepEqual(registry.toProviderFormat().map(tool => tool.name), names);
     for (const tool of definitions) {
@@ -76,6 +76,7 @@ test('every built-in tool is registered with a provider-safe schema', () => {
     assert.ok(names.includes('computer_use'), 'native computer-use is registered independently of the model provider');
     assert.ok(names.includes('image_gen'), 'local SVG image generation is registered');
     assert.ok(names.includes('memory_offload'), 'durable memory offload is registered');
+    assert.ok(names.includes('git'), 'native Git operations are registered');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

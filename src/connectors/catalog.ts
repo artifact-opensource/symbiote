@@ -36,6 +36,174 @@ function manifest(
   };
 }
 
+function createGitHostingConnectors(fetcher: typeof fetch): RestConnectorAdapter[] {
+  const tokenFields = [{
+    id: 'token',
+    label: 'Access token',
+    description: 'Use a token scoped to the repositories and read operations Symbiote should access.',
+    required: true,
+    secret: true,
+  }];
+  const hosts = [
+    {
+      id: 'gitlab',
+      name: 'GitLab',
+      description: 'Search projects, inspect repositories, issues, and merge requests across GitLab.com or a self-managed instance.',
+      baseUrl: 'https://gitlab.com/api/v4',
+      probePath: '/user',
+      tokenHeader: 'PRIVATE-TOKEN',
+      kind: 'gitlab',
+    },
+    {
+      id: 'gitee',
+      name: 'Gitee',
+      description: 'Search repositories and inspect repository metadata, issues, and pull requests on Gitee.',
+      baseUrl: 'https://gitee.com/api/v5',
+      probePath: '/user',
+      tokenQuery: 'access_token',
+      kind: 'gitee',
+    },
+    {
+      id: 'bitbucket',
+      name: 'Bitbucket Cloud',
+      description: 'Search workspace repositories and inspect repository metadata, issues, and pull requests.',
+      baseUrl: 'https://api.bitbucket.org/2.0',
+      probePath: '/user',
+      kind: 'bitbucket',
+    },
+    {
+      id: 'codeberg',
+      name: 'Codeberg',
+      description: 'Search repositories and inspect repository metadata, issues, and pull requests on Codeberg.',
+      baseUrl: 'https://codeberg.org/api/v1',
+      probePath: '/user',
+      kind: 'codeberg',
+    },
+  ] as const;
+
+  return hosts.map(host => {
+    const capabilities = [
+      capability('search_repositories', 'Search repositories', `Search repositories visible to the connected ${host.name} account.`, 'read', {
+        query: { type: 'string' },
+        perPage: { type: 'number', description: 'Maximum results (1–50, default 10).' },
+        owner: { type: 'string', description: 'Workspace for Bitbucket repository search.' },
+      }, ['query', ...(host.kind === 'bitbucket' ? ['owner'] : [])]),
+      capability('get_repository', 'Get repository', 'Read repository metadata.', 'read', {
+        owner: { type: 'string' },
+        repository: { type: 'string', description: 'Repository name, or full namespace/project path for GitLab.' },
+      }, ['owner', 'repository']),
+      capability('list_issues', 'List issues', 'List issues in a repository.', 'read', {
+        owner: { type: 'string' },
+        repository: { type: 'string' },
+        state: { type: 'string', enum: ['open', 'closed', 'all'] },
+        perPage: { type: 'number', description: 'Maximum results (1–50, default 20).' },
+      }, ['owner', 'repository']),
+      capability('list_pull_requests', 'List pull requests', 'List pull requests or merge requests in a repository.', 'read', {
+        owner: { type: 'string' },
+        repository: { type: 'string' },
+        state: { type: 'string', enum: ['open', 'closed', 'all'] },
+        perPage: { type: 'number', description: 'Maximum results (1–50, default 20).' },
+      }, ['owner', 'repository']),
+    ];
+    const serviceManifest = manifest(
+      host.id,
+      host.name,
+      host.description,
+      'development',
+      tokenFields,
+      capabilities,
+    );
+    const adapter = new RestConnectorAdapter({
+      manifest: serviceManifest,
+      baseUrl: host.baseUrl,
+      probePath: host.probePath,
+      ...('tokenHeader' in host ? { tokenHeader: host.tokenHeader } : {}),
+      ...('tokenQuery' in host ? { tokenQuery: host.tokenQuery } : {}),
+      fetcher,
+    }, [
+      {
+        capability: capabilities[0],
+        buildRequest(input) {
+          const query = requiredString(input, 'query', 500);
+          const perPage = optionalInteger(input, 'perPage', 10, 1, 50);
+          switch (host.kind) {
+            case 'gitlab':
+              return { method: 'GET', path: '/projects', query: { search: query, per_page: perPage, membership: true } };
+            case 'gitee':
+              return { method: 'GET', path: '/search/repositories', query: { q: query, per_page: perPage } };
+            case 'bitbucket': {
+              const owner = requiredString(input, 'owner', 200);
+              return { method: 'GET', path: `/repositories/${encodeURIComponent(owner)}`, query: { q: `name~"${query.replace(/["\\]/g, '')}"`, pagelen: perPage } };
+            }
+            case 'codeberg':
+              return { method: 'GET', path: '/repos/search', query: { q: query, limit: perPage } };
+          }
+        },
+      },
+      {
+        capability: capabilities[1],
+        buildRequest(input) {
+          const owner = requiredString(input, 'owner', 200);
+          const repository = requiredString(input, 'repository', 200);
+          if (host.kind === 'gitlab') {
+            return { method: 'GET', path: `/projects/${encodeURIComponent(`${owner}/${repository}`)}` };
+          }
+          return {
+            method: 'GET',
+            path: host.kind === 'bitbucket'
+              ? `/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`
+              : `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}`,
+          };
+        },
+      },
+      {
+        capability: capabilities[2],
+        buildRequest(input) {
+          const state = String(input.state ?? 'open');
+          if (!['open', 'closed', 'all'].includes(state)) throw new Error('state must be open, closed, or all.');
+          const owner = requiredString(input, 'owner', 200);
+          const repository = requiredString(input, 'repository', 200);
+          const perPage = optionalInteger(input, 'perPage', 20, 1, 50);
+          const page = host.kind === 'gitlab'
+            ? `/projects/${encodeURIComponent(`${owner}/${repository}`)}/issues`
+            : host.kind === 'bitbucket'
+              ? `/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/issues`
+              : `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/issues`;
+          const query: Record<string, string | number> = host.kind === 'gitlab'
+            ? { state, per_page: perPage }
+            : host.kind === 'bitbucket'
+              ? { pagelen: perPage, ...(state !== 'all' ? { q: `state="${state.toUpperCase()}"` } : {}) }
+              : { state, ...(host.kind === 'gitee' ? { per_page: perPage } : { limit: perPage }) };
+          return { method: 'GET', path: page, query };
+        },
+      },
+      {
+        capability: capabilities[3],
+        buildRequest(input) {
+          const state = String(input.state ?? 'open');
+          if (!['open', 'closed', 'all'].includes(state)) throw new Error('state must be open, closed, or all.');
+          const owner = requiredString(input, 'owner', 200);
+          const repository = requiredString(input, 'repository', 200);
+          const perPage = optionalInteger(input, 'perPage', 20, 1, 50);
+          const page = host.kind === 'gitlab'
+            ? `/projects/${encodeURIComponent(`${owner}/${repository}`)}/merge_requests`
+            : host.kind === 'bitbucket'
+              ? `/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/pullrequests`
+              : `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/pulls`;
+          const query: Record<string, string | number> = host.kind === 'gitlab'
+            ? { state: state === 'closed' ? 'closed' : state === 'all' ? 'all' : 'opened', per_page: perPage }
+            : host.kind === 'bitbucket'
+              ? { pagelen: perPage, ...(state !== 'all' ? { state: state.toUpperCase() } : {}) }
+              : { state, ...(host.kind === 'gitee' ? { per_page: perPage } : { limit: perPage }) };
+          return { method: 'GET', path: page, query };
+        },
+      },
+    ]);
+
+    return adapter;
+  });
+}
+
 const tokenField = [{
   id: 'token',
   label: 'Access token',
@@ -414,5 +582,12 @@ export function createBuiltinConnectors(fetcher: typeof fetch = fetch): RestConn
     },
   ]);
 
-  return [githubAdapter, notionAdapter, slackAdapter, figmaAdapter, canvaAdapter];
+  return [
+    githubAdapter,
+    ...createGitHostingConnectors(fetcher),
+    notionAdapter,
+    slackAdapter,
+    figmaAdapter,
+    canvaAdapter,
+  ];
 }

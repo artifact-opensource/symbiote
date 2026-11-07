@@ -29,6 +29,7 @@ interface RestConnectorOptions {
   probePath: string;
   tokenField?: string;
   tokenHeader?: string;
+  tokenQuery?: string;
   headers?: Record<string, string>;
   fetcher?: FetchLike;
 }
@@ -103,6 +104,7 @@ export class RestConnectorAdapter implements ConnectorAdapter {
   private readonly probePath: string;
   private readonly tokenField: string;
   private readonly tokenHeader: string;
+  private readonly tokenQuery?: string;
   private readonly headers: Record<string, string>;
   private readonly fetcher: FetchLike;
   private readonly operations = new Map<string, RestOperation>();
@@ -112,7 +114,8 @@ export class RestConnectorAdapter implements ConnectorAdapter {
     this.baseUrl = new URL(options.baseUrl);
     this.probePath = options.probePath;
     this.tokenField = options.tokenField ?? 'token';
-    this.tokenHeader = options.tokenHeader ?? 'Authorization';
+    this.tokenQuery = options.tokenQuery;
+    this.tokenHeader = options.tokenQuery ? '' : options.tokenHeader ?? 'Authorization';
     this.headers = options.headers ?? {};
     this.fetcher = options.fetcher ?? fetch;
     for (const operation of operations) {
@@ -161,7 +164,8 @@ export class RestConnectorAdapter implements ConnectorAdapter {
       || /[\r\n#]/.test(request.path)) {
       throw new Error('Connector API paths must be relative absolute paths without traversal or fragments.');
     }
-    const url = new URL(request.path, this.baseUrl);
+    const basePath = this.baseUrl.pathname.replace(/\/+$/, '');
+    const url = new URL(`${basePath}${request.path}`, this.baseUrl.origin);
     if (url.origin !== this.baseUrl.origin || url.username || url.password) {
       throw new Error('Connector requests must stay on the configured service origin.');
     }
@@ -182,6 +186,10 @@ export class RestConnectorAdapter implements ConnectorAdapter {
       ...this.headers,
     };
     const token = credentials[this.tokenField]?.trim();
+    if (this.tokenQuery) {
+      if (!token) throw new Error(`Connector credentials are missing ${this.tokenField}.`);
+      url.searchParams.set(this.tokenQuery, token);
+    }
     if (this.tokenHeader === 'Authorization') {
       if (!token) throw new Error(`Connector credentials are missing ${this.tokenField}.`);
       headers.Authorization = `Bearer ${token}`;

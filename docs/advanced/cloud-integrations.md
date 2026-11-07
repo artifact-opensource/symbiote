@@ -23,6 +23,10 @@ If `SYMBIOTE_HOME` is set, the vault is under that directory instead. The random
 
 The browser receives only configured/not-configured status; it cannot read stored secrets. The integration API uses the same loopback/LAN access-token protection as the rest of the Control Room. Secret form fields are write-only: blank values leave the saved field unchanged, and **Disconnect** deletes that provider's local credentials.
 
+## Native Git
+
+Git is built into the gateway and does not require a hosting-provider API token. Configure the commit author name and email in **Integrations**; the built-in `git` tool uses those values for its own operations without changing global Git settings. Push and fetch use the installed Git CLI and existing SSH keys or credential helpers, so standard Git remotes work across providers. Git hosting API connectors (GitHub, GitLab, Gitee, Bitbucket Cloud, and Codeberg) are separate and can be installed and granted to agents in **Connectors**.
+
 ## Provider setup
 
 ### Microsoft Azure

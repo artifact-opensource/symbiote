@@ -58,6 +58,7 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   let updatePrepareCalls = 0;
   let restartRequests = 0;
   let tailscaleEnabled = false;
+  let gitIdentity = { userName: '', userEmail: '' };
   let updatedProviderModel: { provider: string; model: string } | undefined;
   let clonedRepository = '';
   let cloneRepositoryCalls = 0;
@@ -73,6 +74,16 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
   const control: WebControlPlane = {
     getStatus: () => ({}),
     restartGateway: () => { restartRequests++; },
+    getGitIdentity: () => gitIdentity,
+    saveGitIdentity: identity => {
+      if (!identity || typeof identity !== 'object' || !('userName' in identity) || !('userEmail' in identity)
+        || typeof identity.userName !== 'string' || typeof identity.userEmail !== 'string'
+        || !identity.userName.trim() || !identity.userEmail.trim()) {
+        throw new Error('Set both Git user name and email.');
+      }
+      gitIdentity = { userName: identity.userName.trim(), userEmail: identity.userEmail.trim() };
+      return gitIdentity;
+    },
     getTailscaleStatus: async () => ({
       connected: true,
       ip: '100.90.0.1',
@@ -319,6 +330,30 @@ test('workspace APIs validate tasks and expose real run and agent controls', asy
     assert.equal(restartResponse.status, 202);
     assert.deepEqual(await restartResponse.json(), { restarting: true });
     assert.equal(restartRequests, 1);
+
+    const gitStatus = await fetch(`${baseUrl}/api/integrations/git`);
+    assert.equal(gitStatus.status, 200);
+    assert.deepEqual(await gitStatus.json(), { identity: { userName: '', userEmail: '' } });
+    const rejectedGitIdentity = await fetch(`${baseUrl}/api/integrations/git`, {
+      method: 'PUT',
+      headers: { origin: 'https://untrusted.example', 'content-type': 'application/json' },
+      body: JSON.stringify({ identity: { userName: 'Test User', userEmail: 'test@example.com' } }),
+    });
+    assert.equal(rejectedGitIdentity.status, 403);
+    const savedGitIdentity = await fetch(`${baseUrl}/api/integrations/git`, {
+      method: 'PUT',
+      headers: { origin: baseUrl, 'content-type': 'application/json' },
+      body: JSON.stringify({ identity: { userName: 'Test User', userEmail: 'test@example.com' } }),
+    });
+    assert.deepEqual(await savedGitIdentity.json(), {
+      identity: { userName: 'Test User', userEmail: 'test@example.com' },
+    });
+    const invalidGitIdentity = await fetch(`${baseUrl}/api/integrations/git`, {
+      method: 'PUT',
+      headers: { origin: baseUrl, 'content-type': 'application/json' },
+      body: JSON.stringify({ identity: { userName: 'Test User', userEmail: '' } }),
+    });
+    assert.equal(invalidGitIdentity.status, 400);
 
     const tailscaleStatus = await fetch(`${baseUrl}/api/integrations/tailscale`);
     assert.equal(tailscaleStatus.status, 200);

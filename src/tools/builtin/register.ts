@@ -9,6 +9,7 @@ import { readTool } from './read.js';
 import { writeTool } from './write.js';
 import { editTool } from './edit.js';
 import { execTool } from './exec.js';
+import { gitTool } from './git.js';
 import { imageTool } from './image.js';
 import { imageGenTool } from './image_gen.js';
 import { processStartTool, processPollTool, processKillTool, processListTool } from './process.js';
@@ -54,7 +55,7 @@ export function registerBuiltinTools(
   dependencies: BuiltinToolDependencies,
 ): void {
   for (const tool of [
-    readTool, writeTool, editTool, execTool, imageTool, imageGenTool,
+    readTool, writeTool, editTool, execTool, gitTool, imageTool, imageGenTool,
     processStartTool, processPollTool, processKillTool, processListTool,
     ttsTool, sttTool, webFetchTool, memorySearchTool, combRecallTool, combStageTool, memoryOffloadTool,
     vdbSearchTool, vdbIngestTool, vdbStatsTool, googleWorkspaceTool,

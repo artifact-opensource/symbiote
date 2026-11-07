@@ -91,6 +91,7 @@ import {
 import { CredentialVault, type IntegrationProvider } from '../security/credential-vault.js';
 import { ConnectorEngine } from '../connectors/engine.js';
 import { createBuiltinConnectors } from '../connectors/catalog.js';
+import { GitService } from '../git/service.js';
 import { McpConnectorAdapter } from '../connectors/mcp-adapter.js';
 import {
   detectTailscaleDevice,
@@ -283,6 +284,7 @@ export class SymbioteGateway {
   private toolRegistry: ToolRegistry;
   private readonly credentialVault = new CredentialVault();
   private readonly connectorEngine = new ConnectorEngine({ vault: this.credentialVault });
+  private readonly gitService = new GitService();
   private readonly mt5Bridge: Mt5Bridge;
   private readonly tradeJournal: TradeJournal;
   private readonly marketCharts: MarketChartWorkspaceStore;
@@ -2136,6 +2138,8 @@ export class SymbioteGateway {
           parameters,
         })),
         getConnectors: () => this.connectorEngine.list(),
+        getGitIdentity: () => this.gitService.getIdentity(),
+        saveGitIdentity: identity => this.gitService.saveIdentity(identity),
         connectConnector: (id, credentials) => this.connectorEngine.connect(id, credentials),
         disconnectConnector: id => this.connectorEngine.disconnect(id),
         getConnectorPermissions: agentId => this.connectorEngine.getAgentCapabilities(agentId),

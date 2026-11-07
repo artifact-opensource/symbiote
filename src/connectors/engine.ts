@@ -184,7 +184,7 @@ export class ConnectorEngine {
       const health = this.healthById.get(id) ?? { state: 'disconnected', checkedAt: 0 };
       return {
         manifest: adapter.manifest,
-        configured: this.state.connectedConnectorIds.includes(id),
+        configured: this.state.connectedConnectorIds.includes(id) || this.vault.has(credentialProvider(id)),
         connected: this.liveConnections.has(id),
         health,
       };
@@ -233,7 +233,10 @@ export class ConnectorEngine {
   }
 
   async restoreConnections(): Promise<void> {
-    const connectorIds = [...this.state.connectedConnectorIds];
+    const connectorIds = [...new Set([
+      ...this.state.connectedConnectorIds,
+      ...[...this.adapters.keys()].filter(id => this.vault.has(credentialProvider(id))),
+    ])];
     await Promise.all(connectorIds.map(async connectorId => {
       if (this.liveConnections.has(connectorId)) return;
       const adapter = this.adapters.get(connectorId);

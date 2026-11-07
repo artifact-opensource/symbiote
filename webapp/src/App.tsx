@@ -5,7 +5,7 @@ import remarkGfm from 'remark-gfm';
 import {
   Activity, ArrowRight, ArrowUpRight, Bell, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Command, Copy, Cpu,
   Archive, Bookmark, Brain, Cloud, Database, Download, Gauge, Globe, Globe2, HardDrive, History, Info, Landmark, LayoutDashboard, Leaf, Maximize2, Menu, MessageSquare, Minimize2, Moon, Network,
-  Biohazard, ChevronUp, FolderOpen, MessagesSquare, Pause, Pencil, Plus, Plug, Power, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
+  Biohazard, ChevronUp, FolderOpen, GitBranch, MessagesSquare, Pause, Pencil, Plus, Plug, Power, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
 } from 'lucide-react';
 import type { AgentProfile, ChatMessage, GatewayConfig, GatewayStatus, HostResourceSnapshot, MemoryNodeContext, SessionSummary, ThreadUserHelpRequest, ToolSummary, ViewId, WorkspaceAgent, WorkspaceProject, WorkspaceRun } from './types';
 import type { CloudProviderStatus, GoogleWorkspaceGrant, TailscaleIntegrationStatus } from './components/IntegrationsView';
@@ -1091,6 +1091,7 @@ export default function App() {
   const [cloudProviderStatus, setCloudProviderStatus] = useState<CloudProviderStatus>({
     azure: false, oci: false, n8n: false, kaggle: false,
   });
+  const [gitIdentityConfigured, setGitIdentityConfigured] = useState(false);
   const [tailscaleStatus, setTailscaleStatus] = useState<TailscaleIntegrationStatus | null>(null);
   const [status, setStatus] = useState<GatewayStatus | null>(null);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
@@ -1205,6 +1206,7 @@ export default function App() {
   }, [messages, runs, status?.activeTurns]);
   const googleWorkspaceOnline = Boolean(googleWorkspaceGrant && googleWorkspaceGrant.expiresAt > Date.now());
   const cloudIntegrations: Array<{ id: string; label: string; online: boolean; view: ViewId; icon: ReactNode }> = [
+    { id: 'git', label: 'Git', online: gitIdentityConfigured, view: 'integrations', icon: <GitBranch /> },
     { id: 'google-workspace', label: 'Google Workspace', online: googleWorkspaceOnline, view: 'integrations', icon: <GoogleWorkspaceMark /> },
     { id: 'azure', label: 'Microsoft Azure', online: cloudProviderStatus.azure, view: 'integrations', icon: <Cloud /> },
     { id: 'oci', label: 'Oracle Cloud Infrastructure', online: cloudProviderStatus.oci, view: 'integrations', icon: <Database /> },
@@ -1543,6 +1545,8 @@ export default function App() {
       refreshStatus(),
       api<GatewayConfig>('/api/config').then(setConfig),
       api<{ providers: CloudProviderStatus }>('/api/integrations').then(result => setCloudProviderStatus(result.providers)),
+      api<{ identity: { userName: string; userEmail: string } }>('/api/integrations/git')
+        .then(result => setGitIdentityConfigured(Boolean(result.identity.userName && result.identity.userEmail))),
       api<TailscaleIntegrationStatus>('/api/integrations/tailscale').then(setTailscaleStatus),
       api<WorkspaceProject[]>('/api/projects').then(data => {
         setProjects(data);

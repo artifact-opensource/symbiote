@@ -56,6 +56,12 @@ Creates parent directories if they don't exist.
 
 `oldText` must match exactly (including whitespace). Include surrounding context for unique matches.
 
+## Native Git
+
+The `git` tool operates on the current workspace or an assigned project by default. It supports status, diff, log, branch and remote listing, staging, commits, fetch, pull, and push. It invokes the installed Git CLI without a shell and works with any standard Git remote, including GitHub, GitLab, Gitee, Bitbucket, and Codeberg.
+
+Configure the commit author name and email in **Integrations**. These values apply only to Symbiote's Git operations and do not modify the user's global Git configuration. Remote authentication uses the machine's existing SSH configuration and Git credential helpers; provider API connectors are separate. Push changes remote state, so use it only when the user explicitly requests it.
+
 ## Shell
 
 | Tool | Description |

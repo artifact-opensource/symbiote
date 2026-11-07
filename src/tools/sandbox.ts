@@ -413,7 +413,9 @@ export class SandboxedToolRegistry {
 
     // Project commands default to the assigned workspace unless the caller gives a checked path.
     const scopedInput = { ...input };
-    if (this.ctx.workspaceRoot && ['exec', 'process_start'].includes(name)
+    if (this.ctx.workspaceRoot && name === 'git' && typeof scopedInput.repositoryPath !== 'string') {
+      scopedInput.repositoryPath = this.ctx.workspaceRoot;
+    } else if (this.ctx.workspaceRoot && ['exec', 'process_start'].includes(name)
       && typeof scopedInput.workdir !== 'string') {
       scopedInput.workdir = this.ctx.workspaceRoot;
     }
@@ -459,7 +461,9 @@ export class SandboxedToolRegistry {
       return { text: JSON.stringify({ error: reason, sandbox: true }), isError: true };
     }
     const scopedInput = { ...input };
-    if (this.ctx.workspaceRoot && ['exec', 'process_start'].includes(name)
+    if (this.ctx.workspaceRoot && name === 'git' && typeof scopedInput.repositoryPath !== 'string') {
+      scopedInput.repositoryPath = this.ctx.workspaceRoot;
+    } else if (this.ctx.workspaceRoot && ['exec', 'process_start'].includes(name)
       && typeof scopedInput.workdir !== 'string') {
       scopedInput.workdir = this.ctx.workspaceRoot;
     }

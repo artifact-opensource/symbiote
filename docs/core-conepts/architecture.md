@@ -73,7 +73,7 @@ graph LR
 | **Message Bus** | Priority queue with interrupt bypass, message coalescing (merges rapid-fire messages), and backpressure management. The nervous system. |
 | **Agent Runner** | The agentic loop — sends context to the LLM, processes tool calls, iterates until the model produces a final response or hits the iteration limit. |
 | **Providers** | LLM backends — GitHub Copilot, Anthropic, OpenAI, Gladius. Hot-swappable mid-session. All implement the same `Provider` interface. |
-| **Tools** | 18 built-in tools + MCP bridge for external tool servers. Sandboxed per-session via the policy engine. |
+| **Tools** | Built-in tools + MCP bridge for external tool servers, including native Git operations. Sandboxed per-session via the policy engine. |
 | **Sessions** | Persistent conversation state with TTL. Sub-agent spawning up to depth 3. Each session has its own tool sandbox. |
 | **Web UI** | Built-in interface at `:3006` with SSE streaming, session management, and config panel. Single HTML file, no build step. |
 | **Meta-Cognitive** | Self-improvement loop — SARSI (self-model), Curator (pattern review), Meta^n (recursive improvement), MEA (audit gate), PARC (adaptive routing). All async, non-blocking, wrapped in try/catch. |
@@ -117,7 +117,7 @@ symbiote/
 │   ├── sarsi/          # Self-Aware Routing & Self-Improvement self-model
 │   ├── security/       # Input sanitization
 │   ├── sessions/       # Session store, queue, sub-agents
-│   ├── tools/          # 18 built-in tools, policy engine, registry, MCP bridge
+│   ├── tools/          # Built-in tools, policy engine, registry, MCP bridge
 │   └── web/            # Web UI server (SSE streaming, static serving)
 ├── web/                # Web UI (single HTML file)
 ├── symbiote.example.json  # Example config

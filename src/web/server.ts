@@ -14,6 +14,7 @@ import { palette, ok } from '../cli/brand.js';
 import { loadConfig } from '../config/config.js';
 import { APP_VERSION } from '../meta/version.js';
 import type { IntegrationProvider } from '../security/credential-vault.js';
+import type { GitIdentity } from '../git/service.js';
 import type { ConnectorActivity, ConnectorCatalogEntry } from '../connectors/types.js';
 import type { N8nConnectionInfo } from '../tools/builtin/cloud-integrations.js';
 import { stripBlinkControlMessages } from '../agent/blink.js';
@@ -140,6 +141,8 @@ export interface WebControlPlane {
   archiveSession: (id: string) => boolean;
   getTools: () => unknown[];
   getIntegrationStatus: () => Record<IntegrationProvider, boolean>;
+  getGitIdentity?: () => GitIdentity;
+  saveGitIdentity?: (identity: unknown) => GitIdentity;
   getConnectors?: () => ConnectorCatalogEntry[];
   connectConnector?: (id: string, credentials: unknown) => Promise<ConnectorCatalogEntry>;
   disconnectConnector?: (id: string) => Promise<void>;
@@ -1193,6 +1196,29 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
     }
     if (method === 'GET' && pathname === '/api/integrations') {
       return json(res, { providers: control.getIntegrationStatus() });
+    }
+    if (pathname === '/api/integrations/git' && method === 'GET') {
+      if (!control.getGitIdentity) return json(res, { error: 'Native Git integration is unavailable in this runtime.' }, 503);
+      res.setHeader('Cache-Control', 'no-store');
+      return json(res, { identity: control.getGitIdentity() });
+    }
+    if (pathname === '/api/integrations/git' && method === 'PUT') {
+      if (!isSameOriginRequest(req)) return json(res, { error: 'Git identity can only be changed from the Symbiote Control Room.' }, 403);
+      if (!control.saveGitIdentity) return json(res, { error: 'Native Git integration is unavailable in this runtime.' }, 503);
+      let body: unknown;
+      try {
+        body = JSON.parse(await readBody(req, 4_096) || '{}');
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Git identity must be valid JSON.' }, 400);
+      }
+      try {
+        const identity = body && typeof body === 'object' && !Array.isArray(body)
+          ? (body as { identity?: unknown }).identity
+          : undefined;
+        return json(res, { identity: control.saveGitIdentity(identity) });
+      } catch (failure) {
+        return json(res, { error: failure instanceof Error ? failure.message : 'Git identity could not be saved.' }, 400);
+      }
     }
     if (method === 'GET' && pathname === '/api/cron') {
       res.setHeader('Cache-Control', 'no-store');
