@@ -71,9 +71,17 @@ function parseModelIds(payload: unknown, providerName: string): string[] {
     if (typeof candidate === 'string') return [candidate];
     if (!candidate || typeof candidate !== 'object') return [];
     const model = candidate as Record<string, unknown>;
-    const id = typeof model.id === 'string'
-      ? model.id
-      : typeof model.name === 'string'
+    if (providerName === 'cloudflare') {
+      const task = model.task;
+      if (task && typeof task === 'object'
+        && typeof (task as Record<string, unknown>).name === 'string'
+        && (task as Record<string, unknown>).name !== 'Text Generation') return [];
+    }
+    const id = providerName === 'cloudflare' && typeof model.name === 'string'
+      ? model.name
+      : typeof model.id === 'string'
+        ? model.id
+        : typeof model.name === 'string'
         ? model.name
         : typeof model.model === 'string'
           ? model.model

@@ -311,6 +311,7 @@ export class SymbioteGateway {
   private heartbeat: HeartbeatScheduler;
   private subAgentManager: SubAgentManager;
   private discordSlashDestinations = new Map<string, { adapterId: string; chatId: string }>();
+  private discordProviderModelCache = new Map<string, { discoveredModels: string[]; warning?: string; expiresAt: number }>();
   private pulseBudget: PulseBudgetManager;
   private startTime = Date.now();
   private httpApi: HttpApiServer | null = null;
@@ -1539,34 +1540,53 @@ export class SymbioteGateway {
 
     const providerConfig = this.config.providers[providerName] ?? {};
     const configuredModel = this.getConfiguredDiscordModel(providerName);
+    const cached = this.discordProviderModelCache.get(providerName);
+    if (cached && cached.expiresAt > Date.now()) {
+      return {
+        models: this.mergeDiscordProviderModels(providerName, cached.discoveredModels),
+        ...(cached.warning ? { warning: cached.warning } : {}),
+      };
+    }
     try {
       const discovered = await discoverProviderModels(providerName, {
         apiKey: providerConfig.apiKey,
         accountId: providerConfig.accountId,
         baseUrl: providerConfig.baseUrl,
       });
-      const configuredModels = Array.isArray(providerConfig.models)
-        ? providerConfig.models.filter((model): model is string => typeof model === 'string')
-        : [];
-      const models = [...new Set([
-        ...(configuredModel ? [configuredModel] : []),
-        ...configuredModels,
-        ...discovered,
-      ])]
-        .filter((model) => model.trim().length > 0);
+      const models = this.mergeDiscordProviderModels(providerName, discovered);
       if (models.length === 0) throw new Error('The provider returned no model identifiers.');
+      this.discordProviderModelCache.set(providerName, { discoveredModels: discovered, expiresAt: Date.now() + 60_000 });
       return { models };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       console.warn(`[discord] Model discovery failed for ${providerName}: ${reason}`);
       if (configuredModel) {
-        return {
+        const result = {
           models: [configuredModel],
           warning: `Model discovery failed; showing the configured model. (${reason})`,
         };
+        this.discordProviderModelCache.set(providerName, {
+          discoveredModels: [],
+          warning: result.warning,
+          expiresAt: Date.now() + 60_000,
+        });
+        return result;
       }
       throw new Error(`Could not discover models for "${providerName}": ${reason}`);
     }
+  }
+
+  private mergeDiscordProviderModels(providerName: string, discoveredModels: string[]): string[] {
+    const providerConfig = this.config.providers[providerName] ?? {};
+    const configuredModel = this.getConfiguredDiscordModel(providerName);
+    const configuredModels = Array.isArray(providerConfig.models)
+      ? providerConfig.models.filter((model): model is string => typeof model === 'string')
+      : [];
+    return [...new Set([
+      ...(configuredModel ? [configuredModel] : []),
+      ...configuredModels,
+      ...discoveredModels,
+    ])].filter((model) => model.trim().length > 0);
   }
 
   private async showDiscordProviderPicker(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -1649,15 +1669,9 @@ export class SymbioteGateway {
     }
 
     const providerName = interaction.options.getString('provider')?.trim().toLowerCase() || this.providerName;
-    const providerConfig = this.config.providers[providerName] ?? {};
-    const configuredModel = this.getConfiguredDiscordModel(providerName);
-    const configuredModels = Array.isArray(providerConfig.models)
-      ? providerConfig.models.filter((model): model is string => typeof model === 'string')
-      : [];
-    const models = [...new Set([
-      ...(configuredModel ? [configuredModel] : []),
-      ...configuredModels,
-    ])];
+    const cached = this.discordProviderModelCache.get(providerName);
+    const discoveredModels = cached && cached.expiresAt > Date.now() ? cached.discoveredModels : [];
+    const models = this.mergeDiscordProviderModels(providerName, discoveredModels);
     const choices = models
       .filter((model) => model.length <= 100 && model.toLocaleLowerCase().includes(query))
       .slice(0, 25)

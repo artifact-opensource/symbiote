@@ -95,6 +95,10 @@ function isToolResultMsg(msg: Message): boolean {
  * CRITICAL: tool_use/tool_result messages must stay paired.
  */
 export function truncateContext(messages: Message[], maxTokens: number): Message[] {
+  if (!Number.isSafeInteger(maxTokens) || maxTokens < 0) {
+    throw new RangeError('Context token budget must be a non-negative safe integer.');
+  }
+
   const total = messages.reduce((sum, m) => sum + messageSize(m), 0);
   if (total <= maxTokens) return messages;
 
@@ -102,11 +106,33 @@ export function truncateContext(messages: Message[], maxTokens: number): Message
   const rest = messages.filter(m => m.role !== 'system');
 
   let budget = maxTokens - system.reduce((s, m) => s + messageSize(m), 0);
+  if (budget < 0) {
+    throw new RangeError('System messages exceed the available model context window.');
+  }
 
   // Build keep-set walking from newest to oldest
   const keepFlags = new Array(rest.length).fill(false);
+  let latestUserIndex = -1;
+  for (let i = rest.length - 1; i >= 0; i--) {
+    if (rest[i].role === 'user') {
+      latestUserIndex = i;
+      break;
+    }
+  }
+
+  if (latestUserIndex >= 0) {
+    const size = messageSize(rest[latestUserIndex]);
+    if (size > budget) {
+      rest[latestUserIndex] = fitLatestUserMessage(rest[latestUserIndex], budget);
+      budget -= messageSize(rest[latestUserIndex]);
+    } else {
+      budget -= size;
+    }
+    keepFlags[latestUserIndex] = true;
+  }
 
   for (let i = rest.length - 1; i >= 0; i--) {
+    if (i === latestUserIndex) continue;
     const size = messageSize(rest[i]);
     if (budget - size < 0) break;
     budget -= size;
@@ -165,6 +191,7 @@ export function truncateContext(messages: Message[], maxTokens: number): Message
   // Over budget after pairing — drop oldest complete groups
   if (budget < 0) {
     for (let i = 0; i < rest.length && budget < 0; i++) {
+      if (i === latestUserIndex) continue;
       if (!keepFlags[i]) continue;
       if (!wouldOrphan(rest, keepFlags, i)) {
         keepFlags[i] = false;
@@ -174,13 +201,54 @@ export function truncateContext(messages: Message[], maxTokens: number): Message
   }
 
   const kept = rest.filter((_, i) => keepFlags[i]);
+  if (latestUserIndex >= 0 && !keepFlags[latestUserIndex]) {
+    throw new Error('Context trimming unexpectedly discarded the latest user message.');
+  }
 
   // Final safety: strip any leading tool results (orphaned)
   while (kept.length > 0 && isToolResultMsg(kept[0])) {
     kept.shift();
   }
 
-  return [...system, ...kept];
+  const result = [...system, ...kept];
+  if (result.reduce((sum, message) => sum + messageSize(message), 0) > maxTokens) {
+    throw new RangeError('Conversation context cannot fit the model window without dropping the latest user message.');
+  }
+  return result;
+}
+
+function fitLatestUserMessage(message: Message, budget: number): Message {
+  if (typeof message.content !== 'string') {
+    throw new RangeError('The latest user message contains non-text content that cannot safely fit the model context window.');
+  }
+
+  const maxCharacters = budget * 3;
+  const marker = '\n[Middle of latest message omitted to fit model context]\n';
+  if (maxCharacters <= marker.length) {
+    throw new RangeError('The latest user message cannot fit in the remaining model context window.');
+  }
+
+  const available = maxCharacters - marker.length;
+  let headLength = Math.ceil(available * 0.65);
+  let tailLength = available - headLength;
+  if (headLength > 0
+    && message.content.charCodeAt(headLength - 1) >= 0xd800
+    && message.content.charCodeAt(headLength - 1) <= 0xdbff) {
+    headLength--;
+    tailLength++;
+  }
+  if (tailLength > 0) {
+    const tailStart = message.content.length - tailLength;
+    if (message.content.charCodeAt(tailStart) >= 0xdc00
+      && message.content.charCodeAt(tailStart) <= 0xdfff) {
+      tailLength--;
+    }
+  }
+
+  return {
+    ...message,
+    content: `${message.content.slice(0, headLength)}${marker}${message.content.slice(-tailLength)}`,
+  };
 }
 
 /** Check if dropping message at index would orphan a tool pair */

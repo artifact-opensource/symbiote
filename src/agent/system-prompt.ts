@@ -174,8 +174,9 @@ export function buildSystemPrompt(params: SystemPromptParams): string {
   }
   if (channel === 'discord') {
     addSection('Response Format', [
-      'Write plain text for Discord. Do not use Markdown syntax: no headings, asterisks, backticks, tables, or Markdown links.',
-      'Use short paragraphs and simple numbered lines when structure helps. Write URLs directly.',
+      'Use Discord-supported Markdown when it improves readability, including fenced code blocks for code and commands, inline code for identifiers, and numbered lists for ordered steps.',
+      'Preserve every numeric value, code snippet, and detail from the user; never omit them merely to shorten a reply.',
+      'Use short paragraphs and write URLs directly.',
       'Keep replies concise and within the channel message limit; avoid wide or dense output.',
     ].join('\n'));
   } else if (channel === 'cli' || channel === 'terminal') {

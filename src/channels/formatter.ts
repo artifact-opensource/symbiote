@@ -11,47 +11,11 @@ import type { ChannelCapabilities, OutboundFormatter } from './types.js';
 
 const discordFormatter: OutboundFormatter = {
   format(markdown: string): string {
-    let result = markdown.replace(/```(?:\w+)?\s*\n?([\s\S]*?)```/g, '$1');
-
-    // Keep Discord mentions/custom emoji intact while stripping other markup.
-    const discordTokens: string[] = [];
-    result = result.replace(/<(@!?&?\d+|#\d+|a?:[\w~]+:\d+|https?:\/\/[^>]+)>/g, (match, value: string) => {
-      const token = `\u0000${discordTokens.length}\u0000`;
-      discordTokens.push(value.startsWith('http') ? value : match);
-      return token;
-    });
-
-    result = result.replace(
-      /(\|[^\n]+\|\n)((?:\|[-:| ]+\|\n))((?:\|[^\n]+\|\n?)+)/g,
-      (_, header, _separator, body) => {
-        const columns = parsePipeRow(header);
-        return body.trim().split('\n').map((row: string) =>
-          parsePipeRow(row).map((cell, index) => columns[index] ? `${columns[index]}: ${cell}` : cell).join(' · '),
-        ).join('\n');
-      },
-    );
-
-    result = result
-      .replace(/^#{1,6}\s+/gm, '')
-      .replace(/^\s*>\s?/gm, '')
-      .replace(/^\s*[-*+]\s+/gm, '• ')
-      .replace(/^\s*[-*_]{3,}\s*$/gm, '')
-      .replace(/\*\*(.+?)\*\*/g, '$1')
-      .replace(/__(.+?)__/g, '$1')
-      .replace(/(?<!\*)\*([^*]+?)\*(?!\*)/g, '$1')
-      .replace(/(?<!_)_([^_]+?)_(?!_)/g, '$1')
-      .replace(/~~(.+?)~~/g, '$1')
-      .replace(/`([^`]+)`/g, '$1')
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
-      .replace(/<\/?[a-z][^>]*>/gi, '')
-      .replace(/\u0000(\d+)\u0000/g, (_token, index: string) => discordTokens[Number(index)] ?? '');
-
-    return result.trim();
+    return markdown.trim();
   },
 
   split(content: string, maxLength = 2000): string[] {
-    if (content.length <= maxLength) return [content];
-    return splitOnBoundaries(content, maxLength, ['\n\n', '\n', '. ', ' ']);
+    return splitDiscordMarkdown(content, maxLength);
   },
 };
 
@@ -265,6 +229,61 @@ function parsePipeRow(row: string): string[] {
     .split('|')
     .map(cell => cell.trim())
     .filter(cell => cell.length > 0);
+}
+
+function splitDiscordMarkdown(text: string, maxLength: number): string[] {
+  if (text.length <= maxLength) return [text];
+  if (maxLength < 16) return splitOnBoundaries(text, maxLength, ['\n', ' ']);
+
+  const chunks: string[] = [];
+  let remaining = text;
+  let openFence: { marker: string; language: string } | null = null;
+
+  while (remaining.length + (openFence ? openFence.marker.length + openFence.language.length + 1 : 0) > maxLength) {
+    let prefix = openFence ? `${openFence.marker}${openFence.language}\n` : '';
+    const closingLength = openFence ? openFence.marker.length + 1 : 4;
+    if (prefix.length + closingLength >= maxLength && openFence) {
+      prefix = `${openFence.marker}\n`;
+    }
+    const bodyLimit = maxLength - prefix.length - closingLength;
+    if (bodyLimit < 1) throw new RangeError('Discord message limit is too small to preserve a code fence.');
+    const searchArea = remaining.slice(0, bodyLimit);
+    let splitAt = -1;
+    for (const boundary of ['\n\n', '\n', '. ', ' ']) {
+      const lastIndex = searchArea.lastIndexOf(boundary);
+      if (lastIndex > bodyLimit * 0.3) {
+        splitAt = lastIndex + boundary.length;
+        break;
+      }
+    }
+    if (splitAt <= 0) splitAt = bodyLimit;
+    if (splitAt < remaining.length
+      && splitAt > 0
+      && remaining.charCodeAt(splitAt - 1) >= 0xd800
+      && remaining.charCodeAt(splitAt - 1) <= 0xdbff) {
+      splitAt--;
+    }
+
+    const part = remaining.slice(0, splitAt).trimEnd();
+    for (const line of part.split('\n')) {
+      const match = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+      if (!match) continue;
+      if (!openFence) {
+        openFence = { marker: match[1], language: match[2].trim() };
+      } else if (match[1][0] === openFence.marker[0] && match[1].length >= openFence.marker.length) {
+        openFence = null;
+      }
+    }
+
+    chunks.push(`${prefix}${part}${openFence ? `${part.endsWith('\n') ? '' : '\n'}${openFence.marker}` : ''}`);
+    remaining = remaining.slice(splitAt);
+  }
+
+  if (remaining.length > 0) {
+    const prefix = openFence ? `${openFence.marker}${openFence.language}\n` : '';
+    chunks.push(`${prefix}${remaining}`);
+  }
+  return chunks;
 }
 
 function stripMarkdown(text: string): string {

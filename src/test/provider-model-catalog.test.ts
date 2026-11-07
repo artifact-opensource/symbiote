@@ -63,3 +63,36 @@ test('Gemini model discovery normalizes resource names and uses the API-key head
   assert.equal(apiKeyHeader, 'test-gemini-key');
   assert.deepEqual(models, ['gemini-test']);
 });
+
+test('Cloudflare discovery returns selectable model names instead of catalog UUIDs', async () => {
+  let requestUrl = '';
+  let authorization = '';
+  const fetcher: typeof fetch = async (input, init) => {
+    requestUrl = String(input);
+    authorization = new Headers(init?.headers).get('authorization') ?? '';
+    return new Response(JSON.stringify({
+      success: true,
+      result: [
+        {
+          id: 'catalog-uuid-qwen',
+          name: '@cf/qwen/qwen3.8-27b',
+          task: { name: 'Text Generation' },
+        },
+        {
+          id: 'catalog-uuid-embedding',
+          name: '@cf/qwen/qwen3-embedding-0.6b',
+          task: { name: 'Text Embeddings' },
+        },
+      ],
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+
+  const models = await discoverProviderModels('cloudflare', {
+    accountId: 'a'.repeat(32),
+    apiKey: 'test-cloudflare-key',
+  }, { fetcher });
+
+  assert.match(requestUrl, /\/accounts\/a{32}\/ai\/models\/search/);
+  assert.equal(authorization, 'Bearer test-cloudflare-key');
+  assert.deepEqual(models, ['@cf/qwen/qwen3.8-27b']);
+});

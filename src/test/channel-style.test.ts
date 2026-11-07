@@ -9,14 +9,14 @@ test('system prompt enforces CLI and Discord response styles', () => {
   const workspace = mkdtempSync(join(tmpdir(), 'symbiote-channel-style-'));
   try {
     const discordPrompt = buildSystemPrompt({ workspace, tools: [], channel: 'discord', chatType: 'group' });
-    assert.match(discordPrompt, /plain text for Discord/i);
-    assert.match(discordPrompt, /Do not use Markdown syntax/i);
+    assert.match(discordPrompt, /Discord-supported Markdown/i);
+    assert.match(discordPrompt, /Preserve every numeric value/i);
     assert.match(discordPrompt, /message limit/i);
 
     const cliPrompt = buildSystemPrompt({ workspace, tools: [], channel: 'cli', chatType: 'direct' });
     assert.match(cliPrompt, /Format for a terminal/i);
     assert.match(cliPrompt, /terminal control sequences/i);
-    assert.doesNotMatch(cliPrompt, /Do not use Markdown syntax/i);
+    assert.doesNotMatch(cliPrompt, /Discord-supported Markdown/i);
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
