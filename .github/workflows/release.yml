@@ -56,7 +56,7 @@ jobs:
           npm --prefix webapp sbom --package-lock-only --sbom-format=spdx --sbom-type=application > release-assets/symbiote-webapp-linux.spdx.json
           cd release-assets
           sha256sum *.tgz > SHA256SUMS-linux.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-release-assets
           path: release-assets/*
@@ -82,7 +82,7 @@ jobs:
         run: |
           npm sbom --package-lock-only --sbom-format=spdx --sbom-type=application > dist/windows-installer/symbiote-windows.spdx.json
           npm --prefix webapp sbom --package-lock-only --sbom-format=spdx --sbom-type=application > dist/windows-installer/symbiote-webapp-windows.spdx.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-release-assets
           path: |
