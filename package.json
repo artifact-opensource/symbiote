@@ -95,11 +95,11 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@google/genai": "^1.44.0",
-    "@trycua/cua-driver": "^0.36.0",
+    "@google/genai": "^3.0.0",
+    "@trycua/cua-driver": "^0.38.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "discord.js": "^14.25.1",
-    "dotenv": "^17.3.1",
+    "dotenv": "^18.0.9",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "tsx": "^4.23.15"
