@@ -172,11 +172,21 @@ try {
   $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Running, [TimeSpan]::FromSeconds(30))
 }
 catch {
+  $errorMessage = $_.Exception.Message
+  if ($TranscriptPath) {
+    $gatewayErrorLog = Join-Path $LogDir 'gateway.stderr.log'
+    if (Test-Path -LiteralPath $gatewayErrorLog) {
+      $gatewayErrors = Get-Content -LiteralPath $gatewayErrorLog -Tail 40
+      if ($gatewayErrors) {
+        $errorMessage += "`nGateway stderr:`n$($gatewayErrors -join "`n")"
+      }
+    }
+  }
   if ($serviceInstalled) {
     & $NssmPath stop $ServiceName 2>$null | Out-Null
     & $NssmPath remove $ServiceName confirm 2>$null | Out-Null
   }
-  throw "The service could not be installed and started: $($_.Exception.Message)"
+  throw "The service could not be installed and started: $errorMessage"
 }
 
 Write-Host "Symbiote service '$ServiceName' is running as LocalSystem."
