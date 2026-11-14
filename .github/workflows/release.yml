@@ -80,14 +80,27 @@ jobs:
       - name: Smoke-test MSI install and uninstall
         shell: pwsh
         run: ./scripts/windows/test-msi-install.ps1
+      - name: Collect MSI smoke-test logs
+        if: failure()
+        shell: pwsh
+        run: |
+          $destination = Join-Path $env:RUNNER_TEMP 'symbiote-msi-logs'
+          New-Item -ItemType Directory -Path $destination -Force | Out-Null
+          foreach ($source in @(
+            (Join-Path $env:RUNNER_TEMP 'symbiote-msi-install.log'),
+            (Join-Path $env:RUNNER_TEMP 'symbiote-msi-uninstall.log'),
+            (Join-Path $env:ProgramData 'Symbiote\logs\service-install.log')
+          )) {
+            if (Test-Path -LiteralPath $source) {
+              Copy-Item -LiteralPath $source -Destination $destination -Force
+            }
+          }
       - name: Upload MSI smoke-test logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: windows-msi-install-logs
-          path: |
-            ${{ runner.temp }}/symbiote-msi-*.log
-            C:/ProgramData/Symbiote/logs/service-install.log
+          path: ${{ runner.temp }}/symbiote-msi-logs/*
           if-no-files-found: ignore
       - name: Generate SPDX SBOMs
         run: |
@@ -125,7 +138,15 @@ jobs:
       - name: Publish package to GitHub Packages
         run: |
           npm pkg set name=@artifact-opensource/symbiote
-          npm publish --access public
+          version="$(node -p 'require("./package.json").version')"
+          if npm view "@artifact-opensource/symbiote@${version}" version >/dev/null 2>npm-view.log; then
+            echo "Package version ${version} already exists; skipping duplicate publish."
+          elif grep -q 'E404' npm-view.log; then
+            npm publish --access public
+          else
+            cat npm-view.log
+            exit 1
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

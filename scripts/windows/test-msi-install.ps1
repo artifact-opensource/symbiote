@@ -16,8 +16,12 @@ $dataDirectory = Join-Path $env:ProgramData 'Symbiote'
 $serviceName = 'SymbioteGateway'
 
 function Invoke-Msi([string[]]$Arguments, [string]$LogPath) {
-  & msiexec.exe @Arguments "/L*V" $LogPath
-  $exitCode = $LASTEXITCODE
+  $processArguments = (@($Arguments + @('/L*V', $LogPath) | ForEach-Object {
+    if ($_ -match '\s') { '"{0}"' -f $_ } else { $_ }
+  }) -join ' ')
+  $process = Start-Process -FilePath "$env:SystemRoot\System32\msiexec.exe" `
+    -ArgumentList $processArguments -Wait -PassThru -NoNewWindow
+  $exitCode = $process.ExitCode
   if ($exitCode -notin @(0, 3010)) {
     if (Test-Path -LiteralPath $LogPath) {
       Get-Content -LiteralPath $LogPath -Tail 100
