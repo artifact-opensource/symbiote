@@ -140,6 +140,10 @@ $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
 if ($LASTEXITCODE -ne 0) {
   throw "Could not restrict permissions on service data directory: $DataDir"
 }
+& $icacls $environmentFile '/inheritance:r' '/grant:r' '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  throw "Could not restrict permissions on service environment file: $environmentFile"
+}
 
 $script:NssmPath = $NssmPath
 $serviceInstalled = $false
@@ -147,7 +151,6 @@ try {
   $nodeArguments = '\"{0}\" --config=\"{1}\"' -f $GatewayPath, $ConfigPath
   Invoke-Nssm @('install', $ServiceName, $NodePath, $nodeArguments)
   $serviceInstalled = $true
-  Invoke-Nssm @('set', $ServiceName, 'ObjectName', 'LocalSystem')
   Invoke-Nssm @('set', $ServiceName, 'Start', 'SERVICE_AUTO_START')
   Invoke-Nssm @('set', $ServiceName, 'AppDirectory', $configDirectory)
   Invoke-Nssm @('set', $ServiceName, 'AppExit', 'Default', 'Restart')
@@ -162,6 +165,10 @@ try {
   Invoke-Nssm @('set', $ServiceName, 'AppEnvironmentExtra', 'NODE_ENV=production')
 
   $serviceControl = Join-Path $env:SystemRoot 'System32\sc.exe'
+  & $serviceControl config $ServiceName 'obj=' 'LocalSystem' | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Could not configure '$ServiceName' to run as LocalSystem."
+  }
   & $serviceControl failure $ServiceName 'reset=' '86400' 'actions=' 'restart/5000/restart/5000/restart/5000' | Out-Null
   if ($LASTEXITCODE -ne 0) {
     throw "Could not configure Windows Service Control Manager recovery for '$ServiceName'."
@@ -178,8 +185,12 @@ catch {
     $serviceControl = Join-Path $env:SystemRoot 'System32\sc.exe'
     $serviceStatus = & $serviceControl queryex $ServiceName 2>&1 | Out-String
     $errorMessage += "`nService status:`n$serviceStatus"
+    $serviceConfiguration = & $serviceControl qc $ServiceName 2>&1 | Out-String
+    $errorMessage += "`nService configuration:`n$serviceConfiguration"
     $nssmStatus = & $NssmPath status $ServiceName 2>&1 | Out-String
     $errorMessage += "`nNSSM status:`n$nssmStatus"
+    $environmentAcl = & $icacls $environmentFile 2>&1 | Out-String
+    $errorMessage += "`nEnvironment file ACL:`n$environmentAcl"
     foreach ($logName in @('gateway.stdout.log', 'gateway.stderr.log')) {
       $gatewayLog = Join-Path $LogDir $logName
       if (Test-Path -LiteralPath $gatewayLog) {
