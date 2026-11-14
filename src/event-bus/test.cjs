@@ -2,8 +2,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const EVENT_BUS_DIR = path.join(path.resolve('.'), '.session', 'event-bus');
-const LOG_PATH = path.join(path.resolve('.'), '.session', 'conversation-log.jsonl');
+const EVENT_BUS_DIR = path.join(path.resolve('.'), '.sessions', 'event-bus');
+const LOG_PATH = path.join(path.resolve('.'), '.sessions', 'conversation-log.jsonl');
 
 // Ensure directories exist
 fs.mkdirSync(EVENT_BUS_DIR, { recursive: true, mode: 0o700 });

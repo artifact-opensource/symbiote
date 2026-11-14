@@ -36,4 +36,4 @@ if ($service.Status -ne 'Stopped') {
 if ($LASTEXITCODE -ne 0) {
   throw "NSSM could not remove service '$ServiceName' (exit $LASTEXITCODE)."
 }
-Write-Host "Removed '$ServiceName'. Configuration, logs, .session data, and memory under ProgramData were preserved."
+Write-Host "Removed '$ServiceName'. Configuration, logs, .sessions data, and memory under ProgramData were preserved."

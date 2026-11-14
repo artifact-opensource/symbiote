@@ -16,7 +16,7 @@
     "logChanges": false
   },
   "workspace": ".",
-  "sessionsDir": ".session",
+  "sessionsDir": ".sessions",
   "ownerIds": [],
   "apiHost": "127.0.0.1",
   "apiPort": 3006,

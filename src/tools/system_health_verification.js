@@ -323,7 +323,7 @@ function parseDiskInfo(output) {
 
 async function getSessionState() {
   try {
-    const sessionsDir = './.session';
+    const sessionsDir = './.sessions';
     const sessions = [];
 
     if (require('fs').existsSync(sessionsDir)) {
@@ -439,8 +439,8 @@ async function getSystemLogs() {
   // Check for recent log files
   const logPatterns = [
     './symbiote.log',
-    './.session/desktop-launch.log',
-    './.session/health-events.jsonl'
+    './.sessions/desktop-launch.log',
+    './.sessions/health-events.jsonl'
   ];
 
   for (const pattern of logPatterns) {

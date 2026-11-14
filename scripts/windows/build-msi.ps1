@@ -43,6 +43,30 @@ function Get-Sha256Hash([string]$Path) {
   }
 }
 
+function ConvertTo-RtfText([string]$Text) {
+  $builder = New-Object System.Text.StringBuilder
+  foreach ($character in $Text.ToCharArray()) {
+    $code = [int]$character
+    if ($code -eq 92) {
+      $null = $builder.Append('\\')
+    }
+    elseif ($code -eq 123) {
+      $null = $builder.Append('\{')
+    }
+    elseif ($code -eq 125) {
+      $null = $builder.Append('\}')
+    }
+    elseif ($code -gt 127) {
+      if ($code -gt 32767) { $code -= 65536 }
+      $null = $builder.Append('\u').Append($code).Append('?')
+    }
+    else {
+      $null = $builder.Append($character)
+    }
+  }
+  return $builder.ToString()
+}
+
 function Get-VerifiedArchive([string]$Url, [string]$Destination, [string]$ExpectedSha256) {
   $archiveName = [IO.Path]::GetFileName($Destination)
   $cachedArchive = if ($DependencyCacheDirectory) { Join-Path $DependencyCacheDirectory $archiveName } else { '' }
@@ -71,6 +95,12 @@ try {
   $wixSource = Join-Path $workDirectory 'wix'
   $objectDirectory = Join-Path $workDirectory 'obj'
   New-Item -ItemType Directory -Path $downloads, $appSource, $objectDirectory -Force | Out-Null
+  $licensePath = Join-Path $repositoryRoot 'LICENSE'
+  $licenseRtfPath = Join-Path $workDirectory 'License.rtf'
+  $licenseParagraphs = [IO.File]::ReadAllLines($licensePath) | ForEach-Object { ConvertTo-RtfText $_ }
+  $licenseRtf = '{\rtf1\ansi\deff0{\fonttbl{\f0\fswiss Arial;}}\viewkind4\uc1\pard\f0\fs20 ' +
+    ($licenseParagraphs -join '\par ') + '\par}'
+  [IO.File]::WriteAllText($licenseRtfPath, $licenseRtf, [Text.Encoding]::ASCII)
 
   if (-not $SkipBuild) {
     Push-Location $repositoryRoot
@@ -231,6 +261,7 @@ try {
       "-dProductVersion=$versionArgument" `
       "-dAppSource=$appSource" `
       "-dNssmSource=$nssmExecutable" `
+      "-dLicenseRtf=$licenseRtfPath" `
       -ext (Join-Path $WixDirectory 'WixUtilExtension.dll') `
       -ext (Join-Path $WixDirectory 'WixUIExtension.dll') `
       $productSource $harvestedFiles

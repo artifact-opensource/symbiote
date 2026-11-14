@@ -77,7 +77,7 @@ function unlinkAndVerify(filePath: string, label: string): boolean {
 }
 
 
-const DEFAULT_DIR = '.session';
+const DEFAULT_DIR = '.sessions';
 const DEFAULT_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 export function resolveSessionDirectory(workspace: string): string {
@@ -86,10 +86,12 @@ export function resolveSessionDirectory(workspace: string): string {
 
 export function createWorkspaceSessionManager(workspace: string, configuredDirectory?: string): SessionManager {
   const root = resolveSessionDirectory(workspace);
-  return new SessionManager(root, undefined, [
-    configuredDirectory ?? path.join(workspace, '.sessions'),
-    path.join(workspace, '.sessions'),
-  ]);
+  return new SessionManager(
+    root,
+    undefined,
+    [configuredDirectory, path.join(path.resolve(workspace), '.session')].filter((directory): directory is string => Boolean(directory)),
+    workspace,
+  );
 }
 
 /**
@@ -186,40 +188,62 @@ export class SessionManager {
   private ttl: number;
   private sessionSummaryCache: Map<string, SessionSummary> | null = null;
 
-  constructor(baseDir?: string, ttl?: number, legacyDirs: string[] = []) {
+  constructor(baseDir?: string, ttl?: number, legacyDirs: string[] = [], legacyWorkspace?: string) {
     this.dir = path.resolve(baseDir ?? path.join(os.homedir(), DEFAULT_DIR));
     this.ttl = ttl ?? DEFAULT_TTL;
     for (const legacyDir of new Set(legacyDirs.map(directory => path.resolve(directory)))) {
       this.migrateLegacyDirectory(legacyDir);
     }
     fs.mkdirSync(this.dir, { recursive: true });
+    if (legacyWorkspace) this.migrateLegacyProjectSessions(legacyWorkspace);
   }
 
   get directory(): string {
     return this.dir;
   }
 
-  private migrateLegacyDirectory(source: string): void {
-    if (source === this.dir || !fs.existsSync(source)) return;
-    fs.mkdirSync(path.dirname(this.dir), { recursive: true });
+  private legacyConflictPath(name: string): string {
+    const archiveDirectory = path.join(this.dir, 'archive');
+    fs.mkdirSync(archiveDirectory, { recursive: true });
+    return path.join(archiveDirectory, `legacy-${Date.now()}-${randomUUID()}-${path.basename(name)}`);
+  }
+
+  private migrateLegacyDirectory(source: string, target = this.dir): void {
+    const resolvedSource = path.resolve(source);
+    const resolvedTarget = path.resolve(target);
+    if (resolvedSource === resolvedTarget || !fs.existsSync(resolvedSource)) return;
+    fs.mkdirSync(path.dirname(resolvedTarget), { recursive: true });
     const moveContents = (from: string, to: string): void => {
+      if (fs.existsSync(to)) {
+        const existing = fs.lstatSync(to);
+        if (!existing.isDirectory() || existing.isSymbolicLink()) {
+          to = this.legacyConflictPath(to);
+        }
+      }
       fs.mkdirSync(to, { recursive: true });
       for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
         const sourcePath = path.join(from, entry.name);
         let targetPath = path.join(to, entry.name);
-        if (entry.isDirectory()) {
+        if (entry.isDirectory() && !entry.isSymbolicLink()) {
+          if (fs.existsSync(targetPath)) {
+            const existing = fs.lstatSync(targetPath);
+            if (!existing.isDirectory() || existing.isSymbolicLink()) {
+              targetPath = this.legacyConflictPath(targetPath);
+            }
+          }
           moveContents(sourcePath, targetPath);
           continue;
         }
         if (fs.existsSync(targetPath)) {
-          const conflictDir = path.join(this.dir, 'archive');
-          fs.mkdirSync(conflictDir, { recursive: true });
-          targetPath = path.join(conflictDir, `legacy-${Date.now()}-${entry.name}`);
+          targetPath = this.legacyConflictPath(targetPath);
         }
         try {
           fs.renameSync(sourcePath, targetPath);
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+          if (entry.isSymbolicLink()) {
+            throw new Error(`Cannot migrate symbolic link ${sourcePath} across filesystems.`, { cause: error });
+          }
           fs.copyFileSync(sourcePath, targetPath);
           fs.unlinkSync(sourcePath);
         }
@@ -227,8 +251,44 @@ export class SessionManager {
       fs.rmdirSync(from);
     };
 
-    console.log(`[sessions] Migrating session data from ${source} to ${this.dir}`);
-    moveContents(source, this.dir);
+    console.log(`[sessions] Migrating session data from ${resolvedSource} to ${resolvedTarget}`);
+    moveContents(resolvedSource, resolvedTarget);
+  }
+
+  private migrateLegacyProjectSessions(workspace: string): void {
+    const projectsDirectory = path.join(path.resolve(workspace), '.agents', 'projects');
+    let projects: fs.Dirent[];
+    try {
+      projects = fs.readdirSync(projectsDirectory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+
+    for (const project of projects) {
+      if (!project.isDirectory() || !/^[a-f0-9-]{36}$/i.test(project.name)) continue;
+      const projectDirectory = path.join(projectsDirectory, project.name);
+      this.migrateLegacyDirectory(
+        path.join(projectDirectory, '.session'),
+        path.join(this.dir, 'projects', project.name),
+      );
+
+      const agentsDirectory = path.join(projectDirectory, 'agents');
+      let agents: fs.Dirent[];
+      try {
+        agents = fs.readdirSync(agentsDirectory, { withFileTypes: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        throw error;
+      }
+      for (const agent of agents) {
+        if (!agent.isDirectory() || !/^[a-f0-9-]{36}$/i.test(agent.name)) continue;
+        this.migrateLegacyDirectory(
+          path.join(agentsDirectory, agent.name, '.session'),
+          path.join(this.dir, 'projects', project.name, 'agents', agent.name),
+        );
+      }
+    }
   }
 
   private filePath(id: string): string {
@@ -236,18 +296,18 @@ export class SessionManager {
     const fileSafe = process.platform === 'win32' ? safe.replace(/:/g, '~3A') : safe;
     const scopedAgent = /^agent-([a-f0-9-]{36})-([a-f0-9-]{36})-/i.exec(id);
     if (scopedAgent) {
-      return path.join(path.dirname(this.dir), '.agents', 'projects', scopedAgent[1], 'agents', scopedAgent[2], '.session', `${fileSafe}.json`);
+      return path.join(this.dir, 'projects', scopedAgent[1], 'agents', scopedAgent[2], `${fileSafe}.json`);
     }
     const scopedProject = /^project-([a-f0-9-]{36})-/i.exec(id);
     if (scopedProject) {
-      return path.join(path.dirname(this.dir), '.agents', 'projects', scopedProject[1], '.session', `${fileSafe}.json`);
+      return path.join(this.dir, 'projects', scopedProject[1], `${fileSafe}.json`);
     }
     return path.join(this.dir, `${fileSafe}.json`);
   }
 
   private sessionDirectories(): string[] {
     const directories = [this.dir];
-    const projectsDirectory = path.join(path.dirname(this.dir), '.agents', 'projects');
+    const projectsDirectory = path.join(this.dir, 'projects');
     let projects: fs.Dirent[];
     try {
       projects = fs.readdirSync(projectsDirectory, { withFileTypes: true });
@@ -258,7 +318,7 @@ export class SessionManager {
     for (const project of projects) {
       if (!project.isDirectory()) continue;
       const projectDirectory = path.join(projectsDirectory, project.name);
-      directories.push(path.join(projectDirectory, '.session'));
+      directories.push(projectDirectory);
       const agentsDirectory = path.join(projectDirectory, 'agents');
       let agents: fs.Dirent[];
       try {
@@ -268,7 +328,7 @@ export class SessionManager {
         throw error;
       }
       for (const agent of agents) {
-        if (agent.isDirectory()) directories.push(path.join(agentsDirectory, agent.name, '.session'));
+        if (agent.isDirectory()) directories.push(path.join(agentsDirectory, agent.name));
       }
     }
     return directories;
@@ -465,12 +525,12 @@ export class SessionManager {
 
   restoreProjectSessions(projectId: string): number {
     if (!/^[a-f0-9-]{36}$/i.test(projectId)) throw new Error('Project ID is invalid.');
-    const projectDirectory = path.join(path.dirname(this.dir), '.agents', 'projects', projectId);
-    const sessionRoots = [path.join(projectDirectory, '.session')];
+    const projectDirectory = path.join(this.dir, 'projects', projectId);
+    const sessionRoots = [projectDirectory];
     const agentsDirectory = path.join(projectDirectory, 'agents');
     try {
       for (const entry of fs.readdirSync(agentsDirectory, { withFileTypes: true })) {
-        if (entry.isDirectory() && !entry.isSymbolicLink()) sessionRoots.push(path.join(agentsDirectory, entry.name, '.session'));
+        if (entry.isDirectory() && !entry.isSymbolicLink()) sessionRoots.push(path.join(agentsDirectory, entry.name));
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;

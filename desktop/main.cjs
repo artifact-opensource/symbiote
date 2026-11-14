@@ -165,16 +165,18 @@ function readGatewayConfig(tailscaleResolution) {
     }
     const configuredHost = process.env.SYMBIOTE_WEB_HOST || environmentHost || config.webHost || '127.0.0.1';
     const workspace = path.resolve(path.dirname(configPath), config.workspace || '.');
-    const tailscaleSettingsPath = path.join(workspace, '.session', 'tailscale-access.json');
+    const tailscaleSettingsPaths = [
+      path.join(workspace, '.sessions', 'tailscale-access.json'),
+      path.join(workspace, '.session', 'tailscale-access.json'),
+    ];
+    const tailscaleSettingsPath = tailscaleSettingsPaths.find(candidate => fs.existsSync(candidate));
     let tailscaleEnabled = false;
-    try {
+    if (tailscaleSettingsPath) {
       const settings = JSON.parse(fs.readFileSync(tailscaleSettingsPath, 'utf8'));
       if (settings?.version !== 1 || typeof settings.enabled !== 'boolean') {
         throw new Error(`Tailscale access settings at ${tailscaleSettingsPath} have an unsupported format.`);
       }
       tailscaleEnabled = settings.enabled;
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
     }
     let bindHost = configuredHost;
     let tailscaleError;
@@ -219,7 +221,7 @@ async function resolveGatewayConfig() {
 }
 
 function startDesktopControl(gateway) {
-  desktopControlPath = path.join(gateway.configDirectory, '.session', 'desktop-control.json');
+  desktopControlPath = path.join(gateway.workspace, '.sessions', 'desktop-control.json');
   desktopControlToken = crypto.randomBytes(32).toString('base64url');
   const server = http.createServer((request, response) => {
     const action = request.url;
@@ -336,7 +338,7 @@ function gatewayRequestOptions(gateway) {
   }
   if (token) return { headers: { Authorization: `Bearer ${token}` } };
 
-  const tokenPath = path.join(gateway.workspace, '.session', 'web-access-token');
+  const tokenPath = path.join(gateway.workspace, '.sessions', 'web-access-token');
   try {
     token = fs.readFileSync(tokenPath, 'utf8').trim();
     return token ? { headers: { Authorization: `Bearer ${token}` } } : {};
@@ -1177,7 +1179,7 @@ function runMaintenanceAction(action) {
   let controlPath = desktopControlPath;
   if (!controlPath) {
     const gateway = readGatewayConfig();
-    controlPath = path.join(gateway.configDirectory, '.session', 'desktop-control.json');
+    controlPath = path.join(gateway.workspace, '.sessions', 'desktop-control.json');
   }
   const args = [
     '-NoProfile',

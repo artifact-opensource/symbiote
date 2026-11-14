@@ -89,7 +89,7 @@ internal static class SymbioteLauncher
                     string details = output.ToString();
                     if (details.Length > 3500) details = details.Substring(details.Length - 3500);
                     MessageBox.Show(
-                        "Symbiote did not start successfully. Check .session\\desktop-launch.log for Gateway diagnostics.\n\n" + details,
+                        "Symbiote did not start successfully. Check .sessions\\desktop-launch.log for Gateway diagnostics.\n\n" + details,
                         "Symbiote could not start",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);

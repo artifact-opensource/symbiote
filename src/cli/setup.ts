@@ -146,7 +146,7 @@ export function buildConfig(input: SetupInput, configDir = process.cwd()): Recor
   });
   if (input.provider === 'cloudflare') config.sarsiProviders = ['cloudflare'];
   config.workspace = rel === '' ? '.' : rel.startsWith('..') && path.isAbsolute(input.workspace) ? input.workspace : rel;
-  config.sessionsDir = '.session';
+  config.sessionsDir = '.sessions';
   if (input.provider === 'cloudflare') config.providers.cloudflare.model = input.model;
   return config;
 }
@@ -241,7 +241,7 @@ export function writeSetupFiles(input: SetupInput, configPath = path.resolve('sy
   config.$schema = SCHEMA_REF;
   config.configVersion = CONFIG_VERSION;
 
-  const resolved = { ...config, workspace: input.workspace, sessionsDir: path.join(input.workspace, '.session') } as unknown as SymbioteConfig;
+  const resolved = { ...config, workspace: input.workspace, sessionsDir: path.join(input.workspace, '.sessions') } as unknown as SymbioteConfig;
   const issues = validateConfig(resolved);
   const errors = issues.filter(i => i.severity === 'error');
   if (errors.length) throw new Error(`Generated configuration failed validation: ${errors.map(e => `${e.field}: ${e.message}`).join('; ')}`);

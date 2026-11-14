@@ -147,6 +147,12 @@ test('permanent project deletion is limited to archived projects and removes pro
       instructions: 'Work only in this project.',
     });
     registry.createProjectFile(project.id, 'README.md', 'Project data');
+    const sessions = new SessionManager(path.join(root, '.sessions'));
+    sessions.create(`agent-${project.id}-${agent.id}-retained`, {
+      projectId: project.id,
+      agentId: agent.id,
+      sessionKind: 'conversation',
+    });
 
     assert.throws(() => registry.deleteArchivedProject(project.id), /archive the project/i);
     assert.equal(registry.archiveProject(project.id).archivedAt !== undefined, true);
@@ -155,6 +161,7 @@ test('permanent project deletion is limited to archived projects and removes pro
     assert.equal(registry.getProject(project.id), undefined);
     assert.equal(registry.getAgent(agent.id), undefined);
     assert.equal(fs.existsSync(path.dirname(project.workspace)), false);
+    assert.equal(fs.existsSync(path.join(root, '.sessions', 'projects', project.id)), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -202,49 +209,51 @@ test('project and agent associations persist with session summaries', () => {
       sessionKind: 'conversation',
     });
 
-    test('agent and subagent transcripts persist in their project-owned session roots', () => {
-      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-scoped-sessions-'));
-      try {
-        const registry = new WorkspaceRegistry(root);
-        const project = registry.createProject('Scoped');
-        const agent = registry.createAgent({
-          projectId: project.id,
-          name: 'Builder',
-          emoji: '🧭',
-          instructions: 'Build within this project.',
-        });
-        const sessions = new SessionManager(path.join(root, '.session'));
-        const agentSession = sessions.create(`agent-${project.id}-${agent.id}-thread`, {
-          projectId: project.id,
-          agentId: agent.id,
-          sessionKind: 'conversation',
-        });
-        const childSession = sessions.create(`agent-${project.id}-${agent.id}-child`, {
-          projectId: project.id,
-          agentId: agent.id,
-          parentSessionId: agentSession.id,
-          sessionKind: 'subagent',
-          depth: 1,
-        });
-        const expectedDirectory = path.join(agent.workspace, '.session');
-
-        assert.equal(fs.existsSync(path.join(expectedDirectory, `${agentSession.id}.json`)), true);
-        assert.equal(fs.existsSync(path.join(expectedDirectory, `${childSession.id}.json`)), true);
-        assert.deepEqual(new SessionManager(path.join(root, '.session')).list().map(item => item.id).sort(), [agentSession.id, childSession.id].sort());
-        assert.equal(sessions.archiveSession(agentSession.id), true);
-        assert.equal(sessions.archiveSession(childSession.id), true);
-        assert.equal(fs.existsSync(path.join(expectedDirectory, 'archive', `${childSession.id}.json`)), true);
-        assert.equal(sessions.restoreProjectSessions(project.id), 2);
-        assert.deepEqual(sessions.list().map(item => item.id).sort(), [agentSession.id, childSession.id].sort());
-      } finally {
-        fs.rmSync(root, { recursive: true, force: true });
-      }
-    });
     const restored = new SessionManager(root).list()[0];
 
     assert.equal(restored.id, session.id);
     assert.equal(restored.projectId, 'project-a');
     assert.equal(restored.agentId, 'agent-a');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('agent and subagent transcripts persist in their project-owned session roots', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-scoped-sessions-'));
+  try {
+    const registry = new WorkspaceRegistry(root);
+    const project = registry.createProject('Scoped');
+    const agent = registry.createAgent({
+      projectId: project.id,
+      name: 'Builder',
+      emoji: '🧭',
+      instructions: 'Build within this project.',
+    });
+    const sessions = new SessionManager(path.join(root, '.sessions'));
+    const agentSession = sessions.create(`agent-${project.id}-${agent.id}-thread`, {
+      projectId: project.id,
+      agentId: agent.id,
+      sessionKind: 'conversation',
+    });
+    const childSession = sessions.create(`agent-${project.id}-${agent.id}-child`, {
+      projectId: project.id,
+      agentId: agent.id,
+      parentSessionId: agentSession.id,
+      sessionKind: 'subagent',
+      depth: 1,
+    });
+    const expectedDirectory = path.join(root, '.sessions', 'projects', project.id, 'agents', agent.id);
+
+    assert.equal(fs.existsSync(path.join(expectedDirectory, `${agentSession.id}.json`)), true);
+    assert.equal(fs.existsSync(path.join(expectedDirectory, `${childSession.id}.json`)), true);
+    assert.deepEqual(new SessionManager(path.join(root, '.sessions')).list().map(item => item.id).sort(), [agentSession.id, childSession.id].sort());
+    assert.equal(fs.existsSync(path.join(agent.workspace, '.session')), false);
+    assert.equal(sessions.archiveSession(agentSession.id), true);
+    assert.equal(sessions.archiveSession(childSession.id), true);
+    assert.equal(fs.existsSync(path.join(expectedDirectory, 'archive', `${childSession.id}.json`)), true);
+    assert.equal(sessions.restoreProjectSessions(project.id), 2);
+    assert.deepEqual(sessions.list().map(item => item.id).sort(), [agentSession.id, childSession.id].sort());
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

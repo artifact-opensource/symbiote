@@ -73,7 +73,7 @@ export function buildConfigTemplate(input: TemplateInput = {}): Record<string, a
     adaptiveTemperature: { adaptive: false, default: 0.5, logChanges: false },
 
     workspace: '.',
-    sessionsDir: '.session',
+    sessionsDir: '.sessions',
     ownerIds,
 
     apiHost,

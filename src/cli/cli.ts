@@ -17,6 +17,7 @@ import {
 } from './brand.js';
 import { APP_VERSION, RELEASE_CODENAME } from '../meta/version.js';
 import { loadConfig } from '../config/config.js';
+import { createWorkspaceSessionManager } from '../sessions/manager.js';
 import { configSearchPaths, preferredExistingPath } from '../runtime/platform.js';
 import { needsUpgrade, readConfigFile, readEnv, upgradeConfigFile, writeEnvValues } from '../config/upgrade.js';
 
@@ -61,7 +62,8 @@ interface DesktopControlRecord {
 
 function readDesktopControl(configPath: string): DesktopControlRecord | undefined {
   try {
-    const record = JSON.parse(fs.readFileSync(path.join(path.dirname(path.resolve(configPath)), '.session', 'desktop-control.json'), 'utf8')) as Partial<DesktopControlRecord>;
+    const workspace = loadConfig(configPath).workspace;
+    const record = JSON.parse(fs.readFileSync(path.join(workspace, '.sessions', 'desktop-control.json'), 'utf8')) as Partial<DesktopControlRecord>;
     if (!Number.isInteger(record.pid) || (record.pid ?? 0) < 1 || !Number.isInteger(record.port) || (record.port ?? 0) < 1
       || (record.port ?? 0) > 65_535 || typeof record.token !== 'string' || record.token.length < 32) return undefined;
     return record as DesktopControlRecord;
@@ -370,8 +372,7 @@ async function cmdStatus() {
         (cfg.discord?.enabled ?? !!cfg.discord?.token) && 'Discord',
         cfg.whatsapp?.enabled && 'WhatsApp',
       ].filter(Boolean).join(' · ');
-      const sessionsDir = path.join(path.resolve(cfg.workspace), '.session');
-      const sessions = fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir).filter(f => f.endsWith('.json')).length : 0;
+      const sessions = createWorkspaceSessionManager(cfg.workspace, cfg.sessionsDir).list().length;
       rows.push(
         kv('Model', `${palette.cyan}${cfg.defaultProvider}${palette.reset}${palette.dim} / ${palette.reset}${palette.white}${cfg.defaultModel}${palette.reset}`, 11),
         kv('Channels', channels ? `${palette.white}${channels}${palette.reset}` : `${palette.dim}none${palette.reset}`, 11),

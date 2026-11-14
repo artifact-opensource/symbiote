@@ -90,7 +90,7 @@ The MSI installs a bundled Node.js runtime, Electron desktop shell, and NSSM ser
 after five seconds; Windows Service Control Manager recovery also restarts a failed
 service wrapper. The installer keeps configuration, credentials, sessions, workspace,
 and logs under `%ProgramData%\Symbiote`; runtime sessions are stored in
-`%ProgramData%\Symbiote\workspace\.session`. The MSI adds Start Menu and desktop
+`%ProgramData%\Symbiote\workspace\.sessions`. The MSI adds Start Menu and desktop
 shortcuts, then opens the setup wizard in the browser with its configuration target set
 to `%ProgramData%\Symbiote`. The wizard covers the provider key, Discord, and WhatsApp
 settings and saves `symbiote.json` and `.env` in that protected data directory. Start the

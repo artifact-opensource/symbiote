@@ -15,6 +15,7 @@
     <MediaTemplate EmbedCab="yes" />
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     <Property Id="SYMBIOTE_SEED_DIRECTORY" Secure="yes" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
     <UIRef Id="WixUI_InstallDir" />
     <Icon Id="SymbioteApplicationIcon" SourceFile="$(var.AppSource)\desktop\app-icon.ico" />
 
@@ -29,7 +30,7 @@
       <Directory Id="CommonAppDataFolder">
         <Directory Id="DATAFOLDER" Name="Symbiote">
           <Directory Id="WORKSPACEFOLDER" Name="workspace">
-            <Directory Id="SESSIONFOLDER" Name=".session" />
+            <Directory Id="SESSIONFOLDER" Name=".sessions" />
           </Directory>
           <Directory Id="LOGFOLDER" Name="logs" />
         </Directory>
@@ -166,7 +167,7 @@
     <InstallExecuteSequence>
       <Custom Action="InstallSymbioteService" After="InstallFiles">NOT Installed</Custom>
       <Custom Action="UninstallSymbioteService" Before="RemoveFiles">REMOVE~=&quot;ALL&quot;</Custom>
-      <Custom Action="LaunchSymbioteSetup" After="InstallFinalize">NOT Installed</Custom>
+      <Custom Action="LaunchSymbioteSetup" After="InstallFinalize">NOT Installed AND UILevel &gt; 2</Custom>
     </InstallExecuteSequence>
   </Product>
 </Wix>

@@ -44,7 +44,7 @@ export interface WorkspaceAgentProfile {
 }
 
 const MAX_PROJECT_FILES = 10_000;
-const BLOCKED_PROJECT_PATH_SEGMENTS = new Set(['.agents', '.git', '.session', 'node_modules']);
+const BLOCKED_PROJECT_PATH_SEGMENTS = new Set(['.agents', '.git', '.session', '.sessions', 'node_modules']);
 const AGENT_ICON_IDS = new Set([
   'bot', 'brain', 'compass', 'leaf', 'sparkles', 'terminal', 'globe', 'database', 'shield',
   'wrench', 'network', 'cpu', 'server', 'message', 'users', 'workflow', 'gauge', 'hard-drive',
@@ -359,7 +359,6 @@ export class WorkspaceRegistry {
     const id = randomUUID();
     const workspace = path.join(this.root, 'projects', id, 'workspace');
     fs.mkdirSync(workspace, { recursive: true });
-    fs.mkdirSync(path.join(this.root, 'projects', id, '.session'), { recursive: true });
     const project = { id, name, workspace, scope, createdAt: Date.now() };
     data.projects.push(project);
     this.write(data);
@@ -403,7 +402,42 @@ export class WorkspaceRegistry {
     if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) throw new Error('Project storage is not a regular directory.');
 
     const tombstone = path.join(this.root, `.deleted-${project.id}-${randomUUID()}`);
+    const sessionsRoot = path.resolve(path.dirname(this.root), '.sessions');
+    const sessionsProjectsRoot = path.join(sessionsRoot, 'projects');
+    const projectSessionsDirectory = path.join(sessionsProjectsRoot, project.id);
+    if (!projectSessionsDirectory.startsWith(`${sessionsProjectsRoot}${path.sep}`)) {
+      throw new Error('Project session storage path is invalid.');
+    }
+    let sessionsTombstone: string | undefined;
+    if (fs.existsSync(sessionsRoot)) {
+      const sessionsStat = fs.lstatSync(sessionsRoot);
+      if (sessionsStat.isSymbolicLink() || !sessionsStat.isDirectory()) throw new Error('Project session storage cannot be a symbolic link.');
+      if (fs.existsSync(sessionsProjectsRoot)) {
+        const sessionsProjectsStat = fs.lstatSync(sessionsProjectsRoot);
+        if (sessionsProjectsStat.isSymbolicLink() || !sessionsProjectsStat.isDirectory()) {
+          throw new Error('Project session storage cannot traverse symbolic links.');
+        }
+        if (fs.existsSync(projectSessionsDirectory)) {
+          const projectSessionsStat = fs.lstatSync(projectSessionsDirectory);
+          if (projectSessionsStat.isSymbolicLink() || !projectSessionsStat.isDirectory()) {
+            throw new Error('Project session storage is not a regular directory.');
+          }
+          sessionsTombstone = path.join(sessionsRoot, `.deleted-project-${project.id}-${randomUUID()}`);
+        }
+      }
+    }
+
     fs.renameSync(projectDirectory, tombstone);
+    try {
+      if (sessionsTombstone) fs.renameSync(projectSessionsDirectory, sessionsTombstone);
+    } catch (failure) {
+      try {
+        fs.renameSync(tombstone, projectDirectory);
+      } catch (rollbackFailure) {
+        throw new Error(`Project deletion could not move session storage and workspace rollback failed: ${rollbackFailure instanceof Error ? rollbackFailure.message : String(rollbackFailure)}`);
+      }
+      throw failure;
+    }
     const next = {
       ...data,
       projects: data.projects.filter(item => item.id !== id),
@@ -413,6 +447,11 @@ export class WorkspaceRegistry {
       this.write(next);
     } catch (failure) {
       try {
+        if (sessionsTombstone) fs.renameSync(sessionsTombstone, projectSessionsDirectory);
+      } catch (rollbackFailure) {
+        throw new Error(`Project deletion could not be recorded and session-storage rollback failed: ${rollbackFailure instanceof Error ? rollbackFailure.message : String(rollbackFailure)}`);
+      }
+      try {
         fs.renameSync(tombstone, projectDirectory);
       } catch (rollbackFailure) {
         throw new Error(`Project deletion could not be recorded and storage rollback failed: ${rollbackFailure instanceof Error ? rollbackFailure.message : String(rollbackFailure)}`);
@@ -420,6 +459,7 @@ export class WorkspaceRegistry {
       throw failure;
     }
     fs.rmSync(tombstone, { recursive: true, force: false });
+    if (sessionsTombstone) fs.rmSync(sessionsTombstone, { recursive: true, force: false });
     return true;
   }
 
@@ -436,7 +476,7 @@ export class WorkspaceRegistry {
     }
     const id = randomUUID();
     const workspace = path.join(this.root, 'projects', project.id, 'agents', id);
-    fs.mkdirSync(path.join(workspace, '.session'), { recursive: true });
+    fs.mkdirSync(workspace, { recursive: true });
     fs.writeFileSync(path.join(workspace, 'AGENT_INSTRUCTIONS.md'), instructions, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
     const agent = { id, projectId: project.id, name, emoji: input.emoji, instructions, workspace, createdAt: Date.now() };
     data.agents.push(agent);
@@ -476,12 +516,24 @@ export class WorkspaceRegistry {
 
   private projectTaskPath(projectId: string): string {
     this.projectRoot(projectId);
-    const projectDirectory = path.join(this.root, 'projects', projectId);
-    const sessionDirectory = path.join(projectDirectory, '.session');
-    for (const directory of [projectDirectory, sessionDirectory]) {
-      if (fs.lstatSync(directory).isSymbolicLink()) throw new Error('Project task storage cannot traverse symbolic links.');
+    const sessionsRoot = path.join(path.dirname(this.root), '.sessions');
+    const directories = [
+      sessionsRoot,
+      path.join(sessionsRoot, 'projects'),
+      path.join(sessionsRoot, 'projects', projectId),
+    ];
+    for (const directory of directories) {
+      try {
+        const stat = fs.lstatSync(directory);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) {
+          throw new Error('Project task storage cannot traverse symbolic links.');
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        fs.mkdirSync(directory, { recursive: false, mode: 0o700 });
+      }
     }
-    return path.join(sessionDirectory, 'project-tasks.json');
+    return path.join(directories[2], 'project-tasks.json');
   }
 
   private writeProjectTasks(projectId: string, tasks: ProjectTask[]): void {

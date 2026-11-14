@@ -152,7 +152,7 @@ const DEFAULT_CONFIG: SymbioteConfig = {
   temperature: 0.7,
   maxIterations: 100,
   workspace: process.cwd(),
-  sessionsDir: '.session',
+  sessionsDir: '.sessions',
   sandbox: {
     enabled: false,
     ownerAccess: true,

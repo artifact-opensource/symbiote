@@ -4209,8 +4209,14 @@ export async function startGateway(configPath?: string): Promise<SymbioteGateway
 
   // Load gateway config from symbiote config or env
   const config = loadConfig(configPath);
-  const tailscaleSessionDirectory = path.join(path.resolve(config.workspace), '.session');
-  if (readTailscaleAccessEnabled(tailscaleSessionDirectory)) {
+  const workspace = path.resolve(config.workspace);
+  const tailscaleSessionDirectory = path.join(workspace, '.sessions');
+  const legacyTailscaleSettingsPath = path.join(workspace, '.session', 'tailscale-access.json');
+  const tailscaleSettingsPath = fs.existsSync(path.join(tailscaleSessionDirectory, 'tailscale-access.json'))
+    ? path.join(tailscaleSessionDirectory, 'tailscale-access.json')
+    : legacyTailscaleSettingsPath;
+  const tailscaleSettingsDirectory = path.dirname(tailscaleSettingsPath);
+  if (readTailscaleAccessEnabled(tailscaleSettingsDirectory)) {
     const device = await detectTailscaleDevice();
     if (device.connected && device.ip) {
       config.webHost = device.ip;

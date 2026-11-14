@@ -31,7 +31,29 @@ function isProcessRunning(pid: number): boolean {
 }
 
 export function acquireGatewayInstanceLock(workspace: string): () => void {
-  const directory = path.join(path.resolve(workspace), '.session');
+  const resolvedWorkspace = path.resolve(workspace);
+  const legacyLockPath = path.join(resolvedWorkspace, '.session', 'gateway-instance.lock');
+  try {
+    const existingContents = fs.readFileSync(legacyLockPath, 'utf8');
+    const modifiedAt = fs.statSync(legacyLockPath).mtimeMs;
+    let existing: unknown;
+    try {
+      existing = JSON.parse(existingContents);
+    } catch {
+      existing = null;
+    }
+    if (isGatewayLockRecord(existing) && isProcessRunning(existing.pid)) {
+      throw new Error(`A Symbiote Gateway is already running for ${resolvedWorkspace} (PID ${existing.pid}).`);
+    }
+    if (!isGatewayLockRecord(existing) && Date.now() - modifiedAt < INITIALIZATION_GRACE_MS) {
+      throw new Error(`A Symbiote Gateway is initializing its legacy instance lock at ${legacyLockPath}.`);
+    }
+    if (fs.readFileSync(legacyLockPath, 'utf8') === existingContents) fs.unlinkSync(legacyLockPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+
+  const directory = path.join(resolvedWorkspace, '.sessions');
   const lockPath = path.join(directory, 'gateway-instance.lock');
   const token = randomUUID();
   fs.mkdirSync(directory, { recursive: true });

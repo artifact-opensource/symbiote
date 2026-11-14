@@ -88,14 +88,14 @@ if ($service) {
   throw "Service '$ServiceName' already exists. Stop and remove it before installing a replacement."
 }
 
-New-Item -ItemType Directory -Path $DataDir, $LogDir, (Split-Path -Parent $ConfigPath), (Join-Path $DataDir 'workspace'), (Join-Path $DataDir 'workspace\.session') -Force | Out-Null
+New-Item -ItemType Directory -Path $DataDir, $LogDir, (Split-Path -Parent $ConfigPath), (Join-Path $DataDir 'workspace'), (Join-Path $DataDir 'workspace\.sessions') -Force | Out-Null
 if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
   $seedConfig = if ($SeedDirectory) { Join-Path $SeedDirectory 'symbiote.json' } else { '' }
   if ($seedConfig) {
     Copy-Item -LiteralPath $seedConfig -Destination $ConfigPath
     $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
     $config.workspace = '.\workspace'
-    $config.sessionsDir = '.\workspace\.session'
+    $config.sessionsDir = '.\workspace\.sessions'
     $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
   }
   else {
@@ -106,7 +106,7 @@ if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
 
     $config = Get-Content -LiteralPath $examplePath -Raw | ConvertFrom-Json
     $config.workspace = '.\workspace'
-    $config.sessionsDir = '.\workspace\.session'
+    $config.sessionsDir = '.\workspace\.sessions'
     $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
   }
 }

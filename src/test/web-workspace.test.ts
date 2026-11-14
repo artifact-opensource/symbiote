@@ -918,9 +918,9 @@ test('workspace identity reads its name from AGENTS.md and updates it with ident
   }
 });
 
-test('workspace sessions migrate to .session and archived conversations leave active listings', () => {
+test('workspace sessions migrate to .sessions and archived conversations leave active listings', () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-session-migration-'));
-  const legacy = path.join(workspace, '.sessions');
+  const legacy = path.join(workspace, '.session');
   fs.mkdirSync(path.join(legacy, 'archive'), { recursive: true });
   fs.writeFileSync(path.join(legacy, 'web-conversation.json'), JSON.stringify({
     id: 'web-conversation',
@@ -932,13 +932,47 @@ test('workspace sessions migrate to .session and archived conversations leave ac
   fs.writeFileSync(path.join(legacy, 'archive', 'old-transcript.json'), '{"messages":[]}');
   try {
     const manager = createWorkspaceSessionManager(workspace, legacy);
-    assert.equal(manager.directory, path.join(workspace, '.session'));
+    assert.equal(manager.directory, path.join(workspace, '.sessions'));
     assert.equal(fs.existsSync(path.join(legacy, 'web-conversation.json')), false);
+    assert.equal(fs.existsSync(legacy), false);
     assert.equal(fs.existsSync(path.join(manager.directory, 'archive', 'old-transcript.json')), true);
     assert.equal(manager.list().length, 1);
     assert.equal(manager.archiveSession('web-conversation'), true);
     assert.equal(manager.list().length, 0);
     assert.equal(fs.existsSync(path.join(manager.directory, 'archive', 'web-conversation.json')), true);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('project and agent session folders migrate into the shared .sessions tree', () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-scoped-session-migration-'));
+  const projectId = '00000000-0000-4000-8000-000000000001';
+  const agentId = '00000000-0000-4000-8000-000000000002';
+  const projectSessionId = `project-${projectId}-legacy`;
+  const agentSessionId = `agent-${projectId}-${agentId}-legacy`;
+  const projectLegacyDirectory = path.join(workspace, '.agents', 'projects', projectId, '.session');
+  const agentLegacyDirectory = path.join(workspace, '.agents', 'projects', projectId, 'agents', agentId, '.session');
+  const legacySession = (id: string, label: string) => ({
+    id,
+    createdAt: 1,
+    updatedAt: 1,
+    messages: [],
+    metadata: { label, messageCount: 0, tokenUsage: { input: 0, output: 0 }, toolsUsed: {}, depth: 0 },
+  });
+  fs.mkdirSync(projectLegacyDirectory, { recursive: true });
+  fs.mkdirSync(agentLegacyDirectory, { recursive: true });
+  fs.writeFileSync(path.join(projectLegacyDirectory, `${projectSessionId}.json`), JSON.stringify(legacySession(projectSessionId, 'Project')));
+  fs.writeFileSync(path.join(agentLegacyDirectory, `${agentSessionId}.json`), JSON.stringify(legacySession(agentSessionId, 'Agent')));
+
+  try {
+    const manager = createWorkspaceSessionManager(workspace);
+    assert.equal(manager.load(projectSessionId)?.metadata.label, 'Project');
+    assert.equal(manager.load(agentSessionId)?.metadata.label, 'Agent');
+    assert.equal(fs.existsSync(path.join(workspace, '.sessions', 'projects', projectId, `${projectSessionId}.json`)), true);
+    assert.equal(fs.existsSync(path.join(workspace, '.sessions', 'projects', projectId, 'agents', agentId, `${agentSessionId}.json`)), true);
+    assert.equal(fs.existsSync(projectLegacyDirectory), false);
+    assert.equal(fs.existsSync(agentLegacyDirectory), false);
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

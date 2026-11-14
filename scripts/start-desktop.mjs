@@ -63,9 +63,10 @@ function hasInstalledGatewayService() {
   return false;
 }
 
+let startupConfig;
 if (fs.existsSync(configPath)) {
   try {
-    JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    startupConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   } catch (error) {
     if (error instanceof SyntaxError) {
       throw new Error(`Invalid JSON in Symbiote configuration at ${configPath}: ${error.message}`, { cause: error });
@@ -73,6 +74,8 @@ if (fs.existsSync(configPath)) {
     throw error;
   }
 }
+const workspace = path.resolve(path.dirname(configPath), startupConfig?.workspace || '.');
+const sessionDirectory = path.join(workspace, '.sessions');
 
 const installedGatewayService = hasInstalledGatewayService();
 stopPreviousInstances(installedGatewayService);
@@ -104,11 +107,11 @@ if (buildRequired && hasBuildSource) {
   throw new Error('The production build is missing and its source files are unavailable; restore the source before launching Symbiote.');
 }
 
-const launchLog = path.join(root, '.session', 'desktop-launch.log');
+const launchLog = path.join(sessionDirectory, 'desktop-launch.log');
 fs.mkdirSync(path.dirname(launchLog), { recursive: true });
 const logFd = fs.openSync(launchLog, 'w');
 fs.writeSync(logFd, `${new Date().toISOString()} Symbiote launcher starting from ${root}.\n`);
-const gatewayProcessPath = path.join(root, '.session', 'desktop-gateway-process.json');
+const gatewayProcessPath = path.join(sessionDirectory, 'desktop-gateway-process.json');
 fs.rmSync(gatewayProcessPath, { force: true });
 
 const electronExecutable = createRequire(import.meta.url)('electron');
@@ -116,7 +119,7 @@ let gatewayChild;
 let child;
 try {
   if (!installedGatewayService) {
-    const gatewayLogFd = fs.openSync(path.join(root, '.session', 'gateway.log'), 'a');
+    const gatewayLogFd = fs.openSync(path.join(sessionDirectory, 'gateway.log'), 'a');
     try {
       gatewayChild = spawn(process.execPath, [gatewayEntry, `--config=${configPath}`], {
         cwd: root,

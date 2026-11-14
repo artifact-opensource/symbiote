@@ -113,7 +113,7 @@ test('namespace synchronization refreshes changed project documents and removes 
 test('session ingestion includes nested archives and deduplicates stable session turns', () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-session-ingest-'));
   try {
-    const sessions = path.join(workspace, '.session');
+    const sessions = path.join(workspace, '.sessions');
     const archive = path.join(sessions, 'archive', 'nested');
     fs.mkdirSync(archive, { recursive: true });
     const messages = [

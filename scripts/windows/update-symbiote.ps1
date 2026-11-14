@@ -9,7 +9,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $Root).Path
-$logPath = Join-Path $root '.session\update.log'
+$logPath = Join-Path $root '.sessions\update.log'
 
 function Write-UpdateLog {
   param(
@@ -132,7 +132,7 @@ function Request-DesktopQuit {
 function Stop-RunningDesktopGracefully {
   if ($DesktopProcessId -le 0) {
     if (-not $DesktopControlPath) {
-      $DesktopControlPath = Join-Path $root '.session\desktop-control.json'
+      $DesktopControlPath = Join-Path $root '.sessions\desktop-control.json'
     }
     if (-not (Test-Path -LiteralPath $DesktopControlPath)) { return }
 

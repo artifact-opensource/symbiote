@@ -14,7 +14,7 @@ test('only one Gateway can hold the same workspace lock', () => {
       /A Symbiote Gateway is already running/,
     );
     release();
-    assert.equal(fs.existsSync(path.join(workspace, '.session', 'gateway-instance.lock')), false);
+    assert.equal(fs.existsSync(path.join(workspace, '.sessions', 'gateway-instance.lock')), false);
 
     const nextRelease = acquireGatewayInstanceLock(workspace);
     nextRelease();
@@ -25,7 +25,7 @@ test('only one Gateway can hold the same workspace lock', () => {
 
 test('a lock left by a dead Gateway process can be reclaimed', () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-gateway-stale-lock-'));
-  const lockPath = path.join(workspace, '.session', 'gateway-instance.lock');
+  const lockPath = path.join(workspace, '.sessions', 'gateway-instance.lock');
   fs.mkdirSync(path.dirname(lockPath), { recursive: true });
   fs.writeFileSync(lockPath, JSON.stringify({
     pid: 2_000_000_000,
@@ -37,6 +37,24 @@ test('a lock left by a dead Gateway process can be reclaimed', () => {
     const release = acquireGatewayInstanceLock(workspace);
     release();
     assert.equal(fs.existsSync(lockPath), false);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('a running Gateway with a legacy .session lock prevents a second instance', () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-gateway-legacy-lock-'));
+  const lockPath = path.join(workspace, '.session', 'gateway-instance.lock');
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  fs.writeFileSync(lockPath, JSON.stringify({
+    pid: process.pid,
+    token: 'legacy-live-lock',
+    startedAt: Date.now(),
+  }));
+
+  try {
+    assert.throws(() => acquireGatewayInstanceLock(workspace), /A Symbiote Gateway is already running/);
+    assert.equal(fs.existsSync(path.join(workspace, '.sessions', 'gateway-instance.lock')), false);
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

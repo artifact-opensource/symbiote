@@ -24,7 +24,7 @@ function getVDB(): VectorDB {
 
 function getSessionDirectories(): string[] {
   const workspace = getWorkspace();
-  const workspaceSessionDir = path.join(workspace, '.session');
+  const workspaceSessionDir = path.join(workspace, '.sessions');
   return [...new Set([
     workspaceSessionDir,
   ])];
