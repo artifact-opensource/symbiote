@@ -174,11 +174,19 @@ try {
 catch {
   $errorMessage = $_.Exception.Message
   if ($TranscriptPath) {
-    $gatewayErrorLog = Join-Path $LogDir 'gateway.stderr.log'
-    if (Test-Path -LiteralPath $gatewayErrorLog) {
-      $gatewayErrors = Get-Content -LiteralPath $gatewayErrorLog -Tail 40
-      if ($gatewayErrors) {
-        $errorMessage += "`nGateway stderr:`n$($gatewayErrors -join "`n")"
+    $errorMessage += "`n$($_.Exception.ToString())"
+    $serviceControl = Join-Path $env:SystemRoot 'System32\sc.exe'
+    $serviceStatus = & $serviceControl queryex $ServiceName 2>&1 | Out-String
+    $errorMessage += "`nService status:`n$serviceStatus"
+    $nssmStatus = & $NssmPath status $ServiceName 2>&1 | Out-String
+    $errorMessage += "`nNSSM status:`n$nssmStatus"
+    foreach ($logName in @('gateway.stdout.log', 'gateway.stderr.log')) {
+      $gatewayLog = Join-Path $LogDir $logName
+      if (Test-Path -LiteralPath $gatewayLog) {
+        $gatewayLines = Get-Content -LiteralPath $gatewayLog -Tail 40
+        if ($gatewayLines) {
+          $errorMessage += "`n${logName}:`n$($gatewayLines -join "`n")"
+        }
       }
     }
   }
