@@ -190,6 +190,7 @@ catch {
       }
     }
   }
+  Write-Host $errorMessage
   if ($serviceInstalled) {
     & $NssmPath stop $ServiceName 2>$null | Out-Null
     & $NssmPath remove $ServiceName confirm 2>$null | Out-Null
