@@ -72,7 +72,7 @@ function getPortsStatus() {
 }
 
 function getLogsPreview() {
-  const logFiles = ['symbiote.log', '.sessions/desktop-launch.log', '.sessions/health-events.jsonl'];
+  const logFiles = ['symbiote.log', '.sessions/health-events.jsonl'];
   let output = '=== LOG PREVIEW ===\n';
 
   for (const file of logFiles) {

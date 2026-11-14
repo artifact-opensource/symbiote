@@ -17,16 +17,11 @@
     <Property Id="SYMBIOTE_SEED_DIRECTORY" Secure="yes" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
     <UIRef Id="WixUI_InstallDir" />
-    <Icon Id="SymbioteApplicationIcon" SourceFile="$(var.AppSource)\desktop\app-icon.ico" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLFOLDER" Name="Symbiote" />
       </Directory>
-      <Directory Id="CommonProgramsFolder">
-        <Directory Id="ApplicationProgramsFolder" Name="Symbiote" />
-      </Directory>
-      <Directory Id="CommonDesktopFolder" />
       <Directory Id="CommonAppDataFolder">
         <Directory Id="DATAFOLDER" Name="Symbiote">
           <Directory Id="WORKSPACEFOLDER" Name="workspace">
@@ -44,7 +39,6 @@
       <ComponentRef Id="SessionsDirectory" />
       <ComponentRef Id="LogsDirectory" />
       <ComponentRef Id="GatewayService" />
-      <ComponentRef Id="ElectronExecutableComponent" />
     </Feature>
 
     <DirectoryRef Id="DATAFOLDER">
@@ -59,34 +53,6 @@
                        Type="string"
                        Value="[DATAFOLDER]"
                        KeyPath="yes" />
-      </Component>
-    </DirectoryRef>
-
-    <DirectoryRef Id="ElectronRuntimeFolder">
-      <Component Id="ElectronExecutableComponent" Guid="{A61D76D1-676E-44C5-81A4-24F09F0E93E6}" Win64="yes">
-        <File Id="ElectronExecutable"
-              Name="electron.exe"
-              Source="$(var.AppSource)\electron-runtime\electron.exe"
-              KeyPath="yes" />
-        <Shortcut Id="StartMenuShortcut"
-                  Directory="ApplicationProgramsFolder"
-                  Name="Symbiote"
-                  Target="[INSTALLFOLDER]electron-runtime\electron.exe"
-                  Icon="SymbioteApplicationIcon"
-                  IconIndex="0"
-                  Arguments="&quot;[INSTALLFOLDER]desktop\main.cjs&quot;"
-                  WorkingDirectory="INSTALLFOLDER"
-                  Advertise="no" />
-        <Shortcut Id="DesktopShortcut"
-                  Directory="CommonDesktopFolder"
-                  Name="Symbiote"
-                  Target="[INSTALLFOLDER]electron-runtime\electron.exe"
-                  Icon="SymbioteApplicationIcon"
-                  IconIndex="0"
-                  Arguments="&quot;[INSTALLFOLDER]desktop\main.cjs&quot;"
-                  WorkingDirectory="INSTALLFOLDER"
-                  Advertise="no" />
-        <RemoveFolder Id="RemoveStartMenuFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
       </Component>
     </DirectoryRef>
 

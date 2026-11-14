@@ -6,7 +6,7 @@ The runtime registers the `google_workspace` agent tool. While a valid browser g
 
 This is user-account OAuth, not Google Cloud organization administration. The token cannot access resources the signed-in user cannot access. OAuth verification, Workspace administrator policy, account type, and enabled APIs can further restrict individual services.
 
-The Electron shell loads the same gateway-served Control Room, so the Integrations page and dashboard status icon ship through the normal webapp build without a separate Electron UI. The desktop URL uses loopback; sign-in still depends on Google allowing OAuth in the embedded Electron browser. Validate OAuth in the packaged Electron app before promising desktop Workspace access; if Google blocks the embedded user agent, the desktop needs a system-browser OAuth flow.
+The Integrations page and dashboard status icon ship through the normal webapp build. Google sign-in runs in the browser used to open the Control Room and depends on Firebase's authorized-domain configuration.
 
 ## Google Cloud and Firebase setup
 

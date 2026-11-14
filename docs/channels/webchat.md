@@ -8,13 +8,9 @@ Open `http://localhost:3009` on the machine running the gateway. The web server 
 
 LAN control requests require a bearer token. On first startup, Symbiote creates a random token at `<workspace>/.sessions/web-access-token`; open **Configuration → Connect another device** on the gateway host to reveal and copy it. The token is only exposed to same-origin requests from the local control room and is stored in the remote browser tab's session storage. Alternatively, set `SYMBIOTE_WEB_TOKEN` to a secret of at least 32 characters. Do not share the token or expose the service on an untrusted network. The static UI can load without a token, but session, agent, task, configuration, and log APIs remain protected. Local loopback use does not require a token.
 
-When Tailscale-only access is enabled, the Gateway listens on the device's Tailscale address and local loopback. The desktop app and health monitor continue using loopback; other tailnet devices open the Tailscale URL and enter the same access token.
+When Tailscale-only access is enabled, the Gateway listens on the device's Tailscale address and local loopback. Local health checks continue using loopback; other tailnet devices open the Tailscale URL and enter the same access token.
 
-On Windows, Electron checks for an existing firewall rule and, if none is present, asks before adding optional LAN access. Approval triggers the Windows elevation prompt and limits inbound access to the configured TCP port from the local subnet on Domain and Private networks. Declining or cancelling elevation leaves the gateway and desktop app usable on the host; LAN access stays blocked by the firewall. The choice can be revisited from **Configuration** in the desktop app. The MSI does not change the firewall during installation; see [Production Deployment](../advanced/production.md).
-
-The Electron app is a desktop shell for the gateway-served Control Room and connects to the configured web port over loopback. It does not start a separate runtime or bypass the LAN token. Other devices still connect to the gateway's LAN address and need the access token; Windows firewall access is optional and can be enabled later from the desktop **Configuration** page.
-
-The desktop shell is single-instance. Closing its window hides Symbiote in the system tray; use the tray icon to reopen the Control Room, check for updates, restart the complete desktop and Gateway, or quit. The Windows update check requires a clean source checkout with an upstream branch: it fast-forwards available upstream commits, installs locked dependencies, rebuilds only when updates are available, refreshes the green-icon launcher, and restarts the app. Local changes and diverged branches are left untouched. When there are no updates it reports **Your Symbiant is up to date.** The root `symbiote.link.cmd` delegates to `symbiote.exe`, which checks build fingerprints, rebuilds stale output, and starts the desktop and Gateway with the checkout's `symbiote.json`. If the source-checkout launcher is not already elevated, it requests administrator approval before starting Node, Electron, and its supervised Gateway; cancelling the prompt prevents that desktop launch. This is separate from the MSI-installed `SymbioteGateway` service, which runs as LocalSystem. Electron supervises one Gateway child when no Windows service is installed; with the MSI, it attaches to the existing service instead and never starts a competing process. Quitting the desktop stops its supervised child, while an installed service remains under Windows Service Control Manager.
+The Control Room is served by the Gateway and runs in a standard browser. It does not start or supervise the Gateway. On Windows, the MSI installs the Gateway as a service but does not open a firewall port; configure Windows Firewall separately if LAN access is required. Other devices also need the web access token.
 
 ## Workspace tasks
 
@@ -44,13 +40,13 @@ Open **Cron** in the workspace drawer to create one-time reminders or recurring 
 
 ## Shared appearance and release notices
 
-The Appearance controls adjust brightness (from AMOLED black to full light) and the primary and accent hues. These settings are stored by the gateway under `<workspace>/.agents/appearance.json` and shared by Control Room browser tabs and Electron; browser-local values provide a fallback while connecting.
+The Appearance controls adjust brightness (from AMOLED black to full light) and the primary and accent hues. These settings are stored by the Gateway under `<workspace>/.agents/appearance.json` and shared by Control Room browser tabs.
 
 When the gateway can reach GitHub, it checks the latest stable release at startup and periodically afterward. If a newer version is found, the Control Room links to its release page. This is a notice only: Symbiote does not download or install updates automatically. Offline or failed checks do not prevent the gateway from running.
 
 ## Games
 
-The **Zen** entry in the sidebar opens the games area. Its game tabs are registered in the web UI so new games can be added alongside Chess. Chess is played against a built-in opponent with five difficulty levels; **Adaptive** selects a level from the player's rating. Legal moves are enforced by `chess.js`. Match results update an Elo rating (K-factor 32), which in turn informs adaptive difficulty. The current position, difficulty, rating, result, and recent match history are persisted by the gateway in `<workspace>/.sessions/games/chess-state.json`, shared by the web UI and Electron and retained across restarts.
+The **Zen** entry in the sidebar opens the games area. Its game tabs are registered in the web UI so new games can be added alongside Chess. Chess is played against a built-in opponent with five difficulty levels; **Adaptive** selects a level from the player's rating. Legal moves are enforced by `chess.js`. Match results update an Elo rating (K-factor 32), which in turn informs adaptive difficulty. The current position, difficulty, rating, result, and recent match history are persisted by the Gateway in `<workspace>/.sessions/games/chess-state.json` and retained across restarts.
 
 ## Conversations and operations
 
@@ -62,7 +58,7 @@ The **Zen** entry in the sidebar opens the games area. Its game tabs are registe
 - **Notifications** prioritizes runtime alerts and attention items in the control room. Optional native browser notifications require browser permission and a secure context; this is not an offline Web Push service.
 - **Tool registry** lists tools available to the runtime.
 - **Integrations** configures optional Google Workspace, Azure, OCI, local n8n (or an explicitly configured remote instance), and Kaggle connections. See [Google Workspace](../advanced/google-workspace.md) and [Cloud Integrations](../advanced/cloud-integrations.md) for setup and access limits.
-- **Configuration** displays runtime settings without allowing web-based edits; on the gateway host it can reveal the LAN access token and, in Electron on Windows, configure the optional firewall rule.
+- **Configuration** displays runtime settings without allowing web-based edits; on the Gateway host it can reveal the LAN access token.
 - Light and dark themes are available; brightness and palette settings are shared through the gateway.
 
 The Memory map is built from the shared VDB and `.sessions/` history. At startup, session JSON files are recursively ingested, including archived transcripts; new active-session turns are added by the VDB pulse. Only user and assistant text is indexed from sessions, not system prompts or tool messages. Similarity is calculated from the VDB's sparse term-frequency vectors, so it represents lexical overlap rather than dense-embedding semantics.

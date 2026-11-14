@@ -1,6 +1,6 @@
 {
   "name": "@symbiote-agi/symbiote",
-  "version": "5.7.1",
+  "version": "6.0.0",
   "description": "Super-Agent, at scale",
   "type": "module",
   "main": "dist/index.js",
@@ -11,14 +11,10 @@
     "dist",
     "web",
     "webapp/dist",
-    "desktop",
-    "scripts/start-desktop.mjs",
     "scripts/mt5-worker.py",
     "scripts/voice/vosk-transcribe.py",
     "scripts/voice/windows-speech.ps1",
     "requirements-mt5.txt",
-    "scripts/windows/stop-symbiote.ps1",
-    "scripts/windows/update-symbiote.ps1",
     "skills/cron-autonomy",
     "README.md",
     "CHANGELOG.md",
@@ -39,15 +35,14 @@
   "scripts": {
     "build": "node scripts/clean-build.mjs && tsc && npm --prefix webapp run build && node scripts/copy-runtime-assets.mjs",
     "build:msi": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows/build-msi.ps1",
-    "desktop": "node scripts/start-desktop.mjs",
     "dev:webapp": "npm --prefix webapp run dev",
     "build:webapp": "npm --prefix webapp run build",
     "index:codebase": "node scripts/generate-codebase-index.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --test-concurrency=1 dist/test/*.test.js && npm run test:webapp && node --test --test-concurrency=1 desktop/*.test.cjs",
+    "test": "node --test --test-concurrency=1 dist/test/*.test.js && npm run test:webapp",
     "test:webapp": "tsx --test --test-concurrency=1 webapp/test/activity-orb-state.test.ts webapp/test/hero-orb-adaptive-controller.test.ts webapp/test/hero-orb-appearance.test.ts webapp/test/hero-orb-geometry.test.ts webapp/test/voice-recorder.test.ts webapp/test/voice-wake-word.test.ts",
     "check:release": "node scripts/verify-release-metadata.mjs",
-    "start": "node scripts/start-desktop.mjs",
+    "start": "node dist/index.js start",
     "dev": "tsc && node dist/index.js",
     "init": "tsc && node dist/cli/wizard.js"
   },
@@ -107,8 +102,6 @@
   "devDependencies": {
     "@types/node": "^22.20.4",
     "@types/qrcode": "^1.5.6",
-    "electron": "^44.7.2",
-    "rcedit": "^4.0.1",
     "typescript": "^5.9.3"
   },
   "overrides": {

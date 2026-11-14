@@ -6,11 +6,9 @@
  */
 
 import * as fs from 'node:fs';
-import * as http from 'node:http';
 import * as path from 'node:path';
 import { execFileSync, execSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
 import {
   palette, multiGradient, BRAND_STOPS, versionBanner, heading, hint, cmd,
   kv, ok, warn, fail, info, box,
@@ -24,7 +22,6 @@ import { needsUpgrade, readConfigFile, readEnv, upgradeConfigFile, writeEnvValue
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_ROOT = path.resolve(__dirname, '..');
 const PROJECT_ROOT = path.resolve(DIST_ROOT, '..');
-const require = createRequire(import.meta.url);
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -54,60 +51,31 @@ function isRunning(): { running: boolean; pid?: number } {
 
 const removePid = () => { try { fs.unlinkSync(pidFile()); } catch { /* already gone */ } };
 
-interface DesktopControlRecord {
-  pid: number;
-  port: number;
-  token: string;
-}
-
-function readDesktopControl(configPath: string): DesktopControlRecord | undefined {
+function getWindowsGatewayServiceState(): { installed: boolean; state?: number } {
+  if (process.platform !== 'win32') return { installed: false };
   try {
-    const workspace = loadConfig(configPath).workspace;
-    const record = JSON.parse(fs.readFileSync(path.join(workspace, '.sessions', 'desktop-control.json'), 'utf8')) as Partial<DesktopControlRecord>;
-    if (!Number.isInteger(record.pid) || (record.pid ?? 0) < 1 || !Number.isInteger(record.port) || (record.port ?? 0) < 1
-      || (record.port ?? 0) > 65_535 || typeof record.token !== 'string' || record.token.length < 32) return undefined;
-    return record as DesktopControlRecord;
+    const output = execFileSync('sc.exe', ['query', 'SymbioteGateway'], {
+      encoding: 'utf8',
+      stdio: 'pipe',
+      windowsHide: true,
+    });
+    const match = output.match(/STATE\s*:\s*(\d+)/i);
+    if (!match) throw new Error(`Unexpected service status output: ${output.trim()}`);
+    return { installed: true, state: Number(match[1]) };
   } catch (error) {
-    const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
-    if (code !== 'ENOENT' && !(error instanceof SyntaxError)) console.error('Could not read the desktop control record:', error);
-    return undefined;
+    const output = `${String((error as { stdout?: Buffer | string }).stdout ?? '')}\n${String((error as { stderr?: Buffer | string }).stderr ?? '')}`;
+    if (/1060|does not exist as an installed service/i.test(output)) return { installed: false };
+    throw new Error(`Could not query the SymbioteGateway service: ${output.trim() || String(error)}`);
   }
 }
 
-function requestDesktopControl(record: DesktopControlRecord, action: 'quit' | 'focus' | 'status'): Promise<string | undefined> {
-  return new Promise(resolve => {
-    const request = http.request({
-      host: '127.0.0.1',
-      port: record.port,
-      path: `/${action}`,
-      method: 'POST',
-      headers: { 'x-symbiote-control-token': record.token },
-      timeout: 2000,
-    }, response => {
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', chunk => { body += chunk; });
-      response.on('end', () => {
-        const expectedStatus = action === 'status' ? 200 : 202;
-        resolve(response.statusCode === expectedStatus ? body : undefined);
-      });
-    });
-    request.once('timeout', () => {
-      request.destroy();
-      resolve(undefined);
-    });
-    request.once('error', () => resolve(undefined));
-    request.end();
-  });
-}
-
-function processIsRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
+async function waitForWindowsGatewayServiceState(targetState: number): Promise<boolean> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (getWindowsGatewayServiceState().state === targetState) return true;
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
+  return getWindowsGatewayServiceState().state === targetState;
 }
 
 function isManagedGatewayProcess(pid: number, configPath: string): boolean {
@@ -131,7 +99,7 @@ function isManagedGatewayProcess(pid: number, configPath: string): boolean {
     }
   }
   try {
-    const commandLine = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+    const commandLine = execFileSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
     return commandLine.includes(daemonPath) && commandLine.includes(path.resolve(configPath));
   } catch {
     return false;
@@ -162,7 +130,7 @@ async function cmdHelp() {
     ['Run', [
       ['symbiote', 'interactive agent (REPL)'],
       ['symbiote agent "…"', 'one-shot prompt'],
-      ['start | stop | restart', 'open or close the Control Room and its Gateway'],
+      ['start | stop | restart', 'manage the background Gateway'],
       ['status', 'daemon, model and channels at a glance'],
       ['logs [-f] [-n=50]', 'show or follow the daemon log'],
     ]],
@@ -232,81 +200,108 @@ async function cmdInstall() {
 }
 
 async function cmdStart() {
+  const service = getWindowsGatewayServiceState();
+  if (service.installed) {
+    if (service.state === 4) {
+      console.log(warn('The SymbioteGateway Windows service is already running.'));
+      return;
+    }
+    if (service.state !== 1) {
+      console.log(warn(`The SymbioteGateway Windows service is already changing state (${service.state}).`));
+      return;
+    }
+    try {
+      execFileSync('sc.exe', ['start', 'SymbioteGateway'], { stdio: 'pipe', windowsHide: true });
+      if (!await waitForWindowsGatewayServiceState(4)) {
+        console.log(fail('The SymbioteGateway service did not reach RUNNING within 30 seconds. Check its service logs.'));
+        return;
+      }
+      console.log(ok('Started the SymbioteGateway Windows service.'));
+    } catch (error) {
+      console.log(fail(`Could not start the SymbioteGateway service: ${error instanceof Error ? error.message : String(error)}`));
+    }
+    return;
+  }
+
+  const { running, pid } = isRunning();
+  if (running) {
+    console.log(warn(`Already running (pid ${pid}). Use ${cmd('symbiote restart')}.`));
+    return;
+  }
+
   const configPath = getConfigPath();
   if (!configPath) {
     console.log(fail(`No symbiote.json found. Run ${cmd('symbiote init')}.`));
     return;
   }
-  const existingControl = readDesktopControl(configPath);
-  if (existingControl && processIsRunning(existingControl.pid) && await requestDesktopControl(existingControl, 'focus')) {
-    console.log(ok(`Symbiote Control Room is already running ${palette.dim}(pid ${existingControl.pid})${palette.reset}.`));
-    return;
-  }
-  const desktopMain = path.join(PROJECT_ROOT, 'desktop', 'main.cjs');
-  if (!fs.existsSync(desktopMain)) {
-    console.log(fail(`Electron entry point is missing: ${desktopMain}`));
-    return;
-  }
-  if (process.env.SYMBIOTE_BUILD_READY !== '1'
-    && fs.existsSync(path.join(PROJECT_ROOT, 'src', 'gateway', 'daemon.ts'))
-    && fs.existsSync(path.join(PROJECT_ROOT, 'tsconfig.json'))) {
-    try {
-      execSync('npm run build', { cwd: PROJECT_ROOT, stdio: 'inherit' });
-    } catch (error) {
-      console.log(fail(`Could not build a fresh Gateway before launch: ${error instanceof Error ? error.message : String(error)}`));
-      return;
-    }
-  }
-  let electronExecutable: string;
-  try {
-    electronExecutable = require('electron') as string;
-    if (typeof electronExecutable !== 'string' || !fs.existsSync(electronExecutable)) {
-      throw new Error('The installed Electron runtime was not found.');
-    }
-  } catch (error) {
-    console.log(fail(`Could not launch Electron: ${error instanceof Error ? error.message : String(error)}. Install desktop dependencies or launch the installed Symbiote app.`));
+  const daemonPath = path.join(DIST_ROOT, 'gateway', 'daemon.js');
+  if (!fs.existsSync(daemonPath)) {
+    console.log(fail(`Gateway entry point is missing: ${daemonPath}. Run ${cmd('npm run build')}.`));
     return;
   }
 
   const absoluteConfigPath = path.resolve(configPath);
+  let logFd: number | undefined;
   try {
+    logFd = fs.openSync(logFile(), 'a');
     const child = await new Promise<ReturnType<typeof spawn>>((resolve, reject) => {
-      const process = spawn(electronExecutable, [desktopMain], {
-        cwd: path.dirname(absoluteConfigPath),
+      const daemon = spawn(process.execPath, [daemonPath, `--config=${absoluteConfigPath}`], {
+        cwd: process.cwd(),
         detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', logFd!, logFd!],
         env: { ...globalThis.process.env, SYMBIOTE_CONFIG: absoluteConfigPath },
-        windowsHide: false,
+        windowsHide: true,
       });
-      process.once('error', reject);
-      process.once('spawn', () => resolve(process));
+      daemon.once('error', reject);
+      daemon.once('spawn', () => resolve(daemon));
     });
+    if (!child.pid) throw new Error('The Gateway process did not provide a process ID.');
+    fs.writeFileSync(pidFile(), String(child.pid));
     child.unref();
-    console.log(ok(`Opened the Symbiote Control Room ${palette.dim}(Electron PID ${child.pid ?? 'starting'})${palette.reset}; Electron supervises the Gateway.`));
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const check = isRunning();
+    if (!check.running) {
+      removePid();
+      console.log(fail(`Gateway exited during startup. See ${cmd('symbiote logs')}.`));
+      return;
+    }
+    console.log(ok(`Started ${palette.dim}pid ${check.pid} · ${cmd('symbiote logs -f')}${palette.dim} to follow${palette.reset}`));
     if (needsUpgrade(configPath)) console.log(hint(`Config is an older format. Run ${cmd('symbiote upgrade')} to modernise it.`));
   } catch (error) {
-    console.log(fail(`Could not start Electron: ${error instanceof Error ? error.message : String(error)}`));
+    console.log(fail(`Could not start the Gateway: ${error instanceof Error ? error.message : String(error)}`));
+  } finally {
+    if (logFd !== undefined) fs.closeSync(logFd);
   }
 }
 
 async function cmdStop() {
-  const configPath = getConfigPath();
-  const control = configPath ? readDesktopControl(configPath) : undefined;
-  if (control && processIsRunning(control.pid)) {
-    if (!await requestDesktopControl(control, 'quit')) {
-      console.log(warn(`Could not contact the running Control Room (pid ${control.pid}); it was left untouched.`));
+  const service = getWindowsGatewayServiceState();
+  if (service.installed) {
+    if (service.state === 1) {
+      console.log(info('The SymbioteGateway Windows service is already stopped.'));
+    } else if (service.state !== 4) {
+      console.log(warn(`The SymbioteGateway Windows service is already changing state (${service.state}).`));
+      return;
+    } else {
+      try {
+        execFileSync('sc.exe', ['stop', 'SymbioteGateway'], { stdio: 'pipe', windowsHide: true });
+        if (!await waitForWindowsGatewayServiceState(1)) {
+          console.log(warn('The SymbioteGateway service did not reach STOPPED within 30 seconds.'));
+          return;
+        }
+        console.log(ok('Stopped the SymbioteGateway Windows service.'));
+      } catch (error) {
+        console.log(warn(`Could not stop the SymbioteGateway service: ${error instanceof Error ? error.message : String(error)}`));
+        return;
+      }
+    }
+    if (!isRunning().running) {
+      removePid();
       return;
     }
-    const deadline = Date.now() + 15_000;
-    while (Date.now() < deadline && processIsRunning(control.pid)) await new Promise(resolve => setTimeout(resolve, 250));
-    if (processIsRunning(control.pid)) {
-      console.log(warn(`Electron accepted shutdown but process ${control.pid} is still running. Check the desktop app before retrying.`));
-      return;
-    }
-    console.log(ok(`Closed the Symbiote Control Room and requested Gateway shutdown from its configured manager ${palette.dim}(Electron pid ${control.pid})${palette.reset}.`));
-    return;
   }
 
+  const configPath = getConfigPath();
   const { running, pid } = isRunning();
   if (!running) {
     console.log(info('Not running.'));
@@ -334,35 +329,21 @@ async function cmdStop() {
 }
 
 async function cmdRestart() {
-  const configPath = getConfigPath();
-  const desktop = configPath ? readDesktopControl(configPath) : undefined;
   await cmdStop();
-  if (desktop && processIsRunning(desktop.pid)) return;
   await cmdStart();
 }
 
 async function cmdStatus() {
   const configPath = getConfigPath();
-  const legacyDaemon = isRunning();
-  const desktopControl = configPath ? readDesktopControl(configPath) : undefined;
-  const desktopRunning = desktopControl ? processIsRunning(desktopControl.pid) : false;
-  let desktopStatus: { pid?: number; gatewayPid?: number | null; gatewayMode?: 'electron' | 'service' } | undefined;
-  if (desktopControl && desktopRunning) {
-    try {
-      const result = await requestDesktopControl(desktopControl, 'status');
-      if (result) desktopStatus = JSON.parse(result) as { pid?: number; gatewayPid?: number | null };
-    } catch {
-      desktopStatus = undefined;
-    }
-  }
-  const gatewayPid = desktopStatus?.gatewayPid ?? legacyDaemon.pid;
-  const serviceGatewayRunning = desktopRunning && desktopStatus?.gatewayMode === 'service';
-  const running = serviceGatewayRunning || (Number.isInteger(gatewayPid) && (desktopStatus?.gatewayPid ? true : legacyDaemon.running));
+  const { running, pid } = isRunning();
+  const service = getWindowsGatewayServiceState();
+  const serviceRunning = service.installed && service.state === 4;
   const rows: string[] = [
-    kv('Gateway', running
-      ? `${palette.green}● running${palette.reset} ${palette.dim}${serviceGatewayRunning ? 'Windows service' : `pid ${gatewayPid}`}${palette.reset}`
+    kv('Gateway', serviceRunning
+      ? `${palette.green}● running${palette.reset} ${palette.dim}Windows service${palette.reset}`
+      : running
+        ? `${palette.green}● running${palette.reset} ${palette.dim}pid ${pid}${palette.reset}`
       : `${palette.red}○ stopped${palette.reset}`, 11),
-    ...(desktopRunning ? [kv('Control Room', `${palette.green}● running${palette.reset} ${palette.dim}pid ${desktopControl?.pid}${palette.reset}`, 11)] : []),
   ];
 
   if (configPath) {
@@ -389,7 +370,7 @@ async function cmdStatus() {
 
   console.log();
   console.log(box(rows, { title: `${palette.bold}${multiGradient(`symbiote ${APP_VERSION}`, BRAND_STOPS)}${palette.reset}`, borderColor: palette.dark }));
-  if (!running && fs.existsSync(pidFile())) console.log(hint('Stale pid file: the daemon exited unexpectedly. See symbiote logs.'));
+  if (!running && !serviceRunning && fs.existsSync(pidFile())) console.log(hint('Stale pid file: the daemon exited unexpectedly. See symbiote logs.'));
   if (configPath && needsUpgrade(configPath)) console.log(hint(`Older config format. Run ${cmd('symbiote upgrade')}.`));
   console.log();
 }
@@ -493,7 +474,7 @@ async function cmdLogs() {
 
 async function cmdInit() {
   const args = process.argv.slice(3);
-  if (args.includes('--ui') || args.includes('--desktop')) {
+  if (args.includes('--ui')) {
     const { startInstallerUi } = await import('./installer-ui.js');
     const configDirectoryArgument = args.find(argument => argument.startsWith('--config-dir='));
     const configDirectory = configDirectoryArgument

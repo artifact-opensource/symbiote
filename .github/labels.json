@@ -37,7 +37,7 @@
   {
     "name": "ui",
     "color": "bfdadc",
-    "description": "Web, desktop, or CLI user interface work."
+    "description": "Web or CLI user interface work."
   },
   {
     "name": "needs-triage",

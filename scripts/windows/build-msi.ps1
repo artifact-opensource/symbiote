@@ -2,7 +2,6 @@ param(
   [string]$OutputDirectory = '',
   [string]$WixDirectory = '',
   [string]$DependencyCacheDirectory = '',
-  [string]$ElectronDistributionDirectory = '',
   [switch]$SkipBuild
 )
 
@@ -115,7 +114,6 @@ try {
 
   $applicationFiles = @(
     'dist',
-    'desktop',
     'package.json',
     'package-lock.json',
     'requirements-mt5.txt',
@@ -145,28 +143,6 @@ try {
   New-Item -ItemType Directory -Path $installerWebDirectory -Force | Out-Null
   Copy-Item -LiteralPath (Join-Path $repositoryRoot 'web\installer.html') -Destination $installerWebDirectory
 
-  if ($ElectronDistributionDirectory) {
-    $electronDistribution = (Resolve-Path -LiteralPath $ElectronDistributionDirectory).Path
-  }
-  else {
-    $electronDistribution = Join-Path $repositoryRoot 'node_modules\electron\dist'
-  }
-  if (-not (Test-Path -LiteralPath (Join-Path $electronDistribution 'electron.exe') -PathType Leaf)) {
-    throw "Electron runtime is missing. Run npm install before building the MSI: $electronDistribution"
-  }
-  $electronPackagePath = Join-Path (Split-Path -Parent $electronDistribution) 'package.json'
-  $packageLockPath = Join-Path $repositoryRoot 'package-lock.json'
-  $electronVersion = (Get-Content -LiteralPath $electronPackagePath -Raw | ConvertFrom-Json).version
-  $lockedElectronVersion = & node -e "const fs = require('node:fs'); const lock = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); const electron = lock.packages && lock.packages['node_modules/electron']; if (!electron || typeof electron.version !== 'string') process.exit(1); process.stdout.write(electron.version);" $packageLockPath
-  if ($LASTEXITCODE -ne 0) {
-    throw "Could not read the Electron version from package-lock.json: $packageLockPath"
-  }
-  $lockedElectronVersion = ([string]$lockedElectronVersion).Trim()
-  if (-not $lockedElectronVersion -or $electronVersion -ne $lockedElectronVersion) {
-    throw "Electron runtime version $electronVersion does not match package-lock.json ($lockedElectronVersion)."
-  }
-  Copy-Item -LiteralPath $electronDistribution -Destination (Join-Path $appSource 'electron-runtime') -Recurse -Force
-
   $stagedInstallerDirectory = Join-Path $appSource 'dist\windows-installer'
   if (Test-Path -LiteralPath $stagedInstallerDirectory -PathType Container) {
     Remove-Item -LiteralPath $stagedInstallerDirectory -Recurse -Force
@@ -176,7 +152,6 @@ try {
   New-Item -ItemType Directory -Path $scriptStage -Force | Out-Null
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install-service.ps1') -Destination $scriptStage
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'uninstall-service.ps1') -Destination $scriptStage
-  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'configure-firewall.ps1') -Destination $scriptStage
 
   Push-Location $repositoryRoot
   try {
@@ -186,7 +161,7 @@ try {
   finally {
     Pop-Location
   }
-  foreach ($installerScript in @('configure-firewall.ps1', 'install-service.ps1', 'uninstall-service.ps1')) {
+  foreach ($installerScript in @('install-service.ps1', 'uninstall-service.ps1')) {
     $stagedInstallerScript = Join-Path $scriptStage $installerScript
     if (-not (Test-Path -LiteralPath $stagedInstallerScript -PathType Leaf)) {
       throw "Staged installer input is missing: $stagedInstallerScript"
@@ -240,18 +215,6 @@ try {
   [xml]$harvestedXml = Get-Content -LiteralPath $harvestedFiles -Raw
   foreach ($component in $harvestedXml.SelectNodes('//*[local-name()="Component"]')) {
     $component.SetAttribute('Win64', 'yes')
-  }
-  foreach ($electronExecutableComponent in $harvestedXml.SelectNodes('//*[local-name()="File" and contains(@Source, "electron-runtime\electron.exe")]/..')) {
-    $electronComponentId = $electronExecutableComponent.GetAttribute('Id')
-    $electronExecutableComponent.ParentNode.RemoveChild($electronExecutableComponent) | Out-Null
-    foreach ($componentReference in $harvestedXml.SelectNodes('//*[local-name()="ComponentRef"]')) {
-      if ($componentReference.GetAttribute('Id') -eq $electronComponentId) {
-        $componentReference.ParentNode.RemoveChild($componentReference) | Out-Null
-      }
-    }
-  }
-  foreach ($electronRuntimeDirectory in $harvestedXml.SelectNodes('//*[local-name()="Directory" and @Name="electron-runtime"]')) {
-    $electronRuntimeDirectory.SetAttribute('Id', 'ElectronRuntimeFolder')
   }
   $harvestedXml.Save($harvestedFiles)
 

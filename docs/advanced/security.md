@@ -23,7 +23,7 @@ The default configuration disables tier restrictions for trusted internal sessio
 - With `enabled: false`, internal sessions are `admin` when `ownerAccess` is enabled; external non-owners remain at `nonOwnerTier`. Treat internal admin access as full host access for agent tool calls, not as a harmless convenience setting.
 - `standard` and `restricted` are policy tiers, not OS accounts or containers. The exact tool restrictions are enforced in the sandbox rules.
 
-The Control Room's local operator is trusted only when the gateway verifies a same-origin loopback request. LAN access requires the web access token; a request body cannot grant itself trusted-admin status. The Electron app connects to the local Control Room and does not bypass its access checks.
+The Control Room's local operator is trusted only when the Gateway verifies a same-origin loopback request. LAN access requires the web access token; a request body cannot grant itself trusted-admin status.
 
 ## Channel access
 

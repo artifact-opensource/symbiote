@@ -1,8 +1,11 @@
 # Symbiote Releases
 
-The latest release is **v5.7.1**. Post-release work is listed under [Unreleased](CHANGELOG.md#unreleased) until it receives a versioned release.
+The latest release is **v6.0.0**. Post-release work is listed under [Unreleased](CHANGELOG.md#unreleased) until it receives a versioned release.
 
-## Latest: v5.7.1 (November 7, 2026)
+## Latest: v6.0.0 (November 15, 2026)
+The Legacy Gateway release removes Electron, starts the Gateway directly, centralizes session storage, and provides a Windows MSI that installs the Gateway service with a bundled Node.js runtime. Details: [Release Notes](docs/releases/RELEASE_NOTES_v6.0.0.md).
+
+## v5.7.1 (November 7, 2026)
 Stability and Gateway reliability improvements, Cloudflare context-window budgeting, provider discovery and hot-swapping, and local Artifact Engine support. Details: [Release Notes](docs/releases/RELEASE_NOTES_v5.7.1.md).
 
 ## v5.7.0 Apex (November 2, 2026)
@@ -24,6 +27,7 @@ Project-scoped agent operations and project memory, a redesigned workspace hiera
 
 | Version | Date | Highlights |
 |---------|------|-----------|
+| **v6.0.0 Legacy Gateway** | Nov 15, 2026 | Electron removal, direct Gateway startup, centralized sessions, Windows service MSI, native Git and connectors |
 | **v5.7.1** | Nov 7, 2026 | Gateway/Electron stability, Cloudflare context budgeting, provider discovery and hot-swapping, Artifact Engine |
 | **v5.7.0 Apex** | Nov 2, 2026 | Connectors, Markets, neural memory, public resource aggregation, provider discovery, recovery UI, production automation |
 | **v5.6.2 Apex** | Oct 29, 2026 | Windows launch and setup hardening, update progress, runtime and UI reliability |

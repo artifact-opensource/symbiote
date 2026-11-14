@@ -21,10 +21,9 @@ node --test dist/test/*.test.js
 
 The web application has its own lockfile, so install its dependencies before running the full build. If your change only affects the web application, you can also run `npm --prefix webapp run build` for a focused check.
 
-Windows MSI packaging is supported on Windows. Install the Electron runtime before building the installer:
+Windows MSI packaging is supported on Windows. After installing the project dependencies, build the Gateway service installer with:
 
 ```powershell
-node node_modules/electron/install.js
 npm run build:msi
 ```
 

@@ -85,21 +85,18 @@ Build the per-machine Windows MSI from a Windows x64 machine:
 npm run build:msi
 ```
 
-The MSI installs a bundled Node.js runtime, Electron desktop shell, and NSSM service wrapper, then configures
-`SymbioteGateway` to start automatically as LocalSystem. NSSM restarts a failed gateway
+The MSI installs a bundled Node.js runtime and NSSM service wrapper, then configures
+`SymbioteGateway` to start automatically as LocalSystem. NSSM restarts a failed Gateway
 after five seconds; Windows Service Control Manager recovery also restarts a failed
 service wrapper. The installer keeps configuration, credentials, sessions, workspace,
 and logs under `%ProgramData%\Symbiote`; runtime sessions are stored in
-`%ProgramData%\Symbiote\workspace\.sessions`. The MSI adds Start Menu and desktop
-shortcuts, then opens the setup wizard in the browser with its configuration target set
-to `%ProgramData%\Symbiote`. The wizard covers the provider key, Discord, and WhatsApp
+`%ProgramData%\Symbiote\workspace\.sessions`. The MSI opens the setup wizard in the
+browser with its configuration target set to `%ProgramData%\Symbiote`. The wizard covers the provider key, Discord, and WhatsApp
 settings and saves `symbiote.json` and `.env` in that protected data directory. Start the
 gateway service again after saving so it loads newly entered environment credentials.
-The desktop app remains available from the installed shortcuts. The MSI does not add a
-firewall rule during installation. When the Electron desktop app is opened, it checks for
-an existing rule and asks before adding optional Domain/Private LAN access for the
-configured web port. Uninstalling removes the Symbiote firewall rule, if present, and
-preserves data.
+The Control Room is available in a browser at `http://localhost:3009` after the service
+starts. The MSI does not add a firewall rule; configure Windows Firewall separately if
+LAN access is required. Uninstalling preserves the service data.
 
 To initialize the installed service from a source checkout, pass the checkout as the
 seed directory when installing. The installer copies `symbiote.json` and `.env` into
@@ -119,9 +116,9 @@ If no seed directory is supplied, the service starts with the example configurat
 The post-install setup wizard opens automatically; if it was closed, rerun the setup
 wizard from the installed package or add provider keys and channel credentials to
 `%ProgramData%\Symbiote\.env`, then restart the service from an elevated PowerShell.
-The installed desktop app opens the running control room; from **Configuration** on
-the host, reveal the LAN access token to connect other devices on the trusted network.
-The token can only be revealed from the local control room. For a fully preconfigured
+Open the Control Room at `http://localhost:3009`; from **Configuration** on the host,
+reveal the LAN access token to connect other devices on the trusted network. The token
+can only be revealed from the local control room. For a fully preconfigured
 install, provide a source checkout as `SYMBIOTE_SEED_DIRECTORY`:
 
 ```powershell
@@ -141,14 +138,8 @@ service while preserving its state with `scripts\windows\uninstall-service.ps1`.
 
 Pushing a `vX.Y.Z` tag runs the release workflow after the full test suite passes. It
 publishes the Windows MSI and Linux npm package with SHA-256 checksum files. The
-Windows Electron Control Room can prepare a newer stable MSI after the user chooses
-**Download and install**. The Gateway downloads only the release's version-matched MSI,
-checks its published SHA-256 manifest and size, and serves the verified file to Electron.
-Electron verifies the downloaded bytes again, asks for confirmation, then opens the MSI
-installer, which may request Windows administrator approval. Electron closes while the
-installer upgrades the application and Gateway service. The browser Control Room and
-non-Windows platforms continue to link to the release page for manual installation;
-they do not perform in-place updates.
+Control Room links to available releases; install updates manually using the release
+instructions.
 
 > **Note:** `SIGUSR1` hot-reload is not available on Windows. Restart the service to apply config changes.
 

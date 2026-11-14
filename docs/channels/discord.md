@@ -57,7 +57,7 @@ The bot's Discord activity changes between thinking, `🧩 Reasoning...` when th
 
 Slash commands are available to configured owners. `/provider` with no arguments opens a provider picker, then discovers and presents models for the selected provider. You can also use its optional `provider` and `model` fields directly; `/model` autocompletes models for the active provider. Autocomplete responds from configured models immediately and refreshes the discovery cache in the background so slow provider APIs cannot time out the Discord interaction. Provider/model selections are saved to `symbiote.json` and hot-reloaded without restarting the Gateway. Cloudflare model discovery uses the configured account ID and API token.
 
-`/reset` reloads `symbiote.json`, clears the current Discord conversation, and gracefully restarts the Gateway. `/restart` performs the same reload and restart. When managed by the Electron desktop, its supervisor starts the Gateway again automatically; Electron itself stays open.
+`/reset` reloads `symbiote.json`, clears the current Discord conversation, and gracefully restarts the Gateway. `/restart` performs the same reload and restart.
 
 ## Policies
 

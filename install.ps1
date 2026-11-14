@@ -29,7 +29,7 @@ $Branch = 'main'
 
 Write-Host ""
 Write-Host "+----------------------------------------------+" -ForegroundColor Magenta
-Write-Host "|  Symbiote Desktop Installer                  |" -ForegroundColor Magenta
+Write-Host "|  Symbiote Installer                          |" -ForegroundColor Magenta
 Write-Host "|  Guided source setup                         |" -ForegroundColor Magenta
 Write-Host "+----------------------------------------------+" -ForegroundColor Magenta
 Write-Host ""
@@ -61,19 +61,15 @@ Write-Host ""
 Write-Host "[3/4] Installing and building"
 Invoke-Step 'npm ci' { npm ci --prefix $Dir }
 Invoke-Step 'Web UI npm ci' { npm ci --prefix (Join-Path $Dir 'webapp') }
-Invoke-Step 'Electron runtime' { node (Join-Path $Dir 'node_modules\electron\install.js') }
 Invoke-Step 'Web UI build runtime' { node (Join-Path $Dir 'webapp\node_modules\esbuild\install.js') }
 Invoke-Step 'npm run build' { npm run build --prefix $Dir }
-if ($env:OS -eq 'Windows_NT') {
-  Invoke-Step 'Windows shortcut launcher' { & (Join-Path $Dir 'scripts\windows\build-launcher.ps1') }
-}
 Write-Ok 'Build complete'
 
 Write-Host ""
 Write-Host "[4/4] Launching setup"
 Set-Location $Dir
 if ($Mode -eq 'ui') {
-  Write-Info 'Opening desktop installer UI in your browser'
+  Write-Info 'Opening setup UI in your browser'
   node dist/index.js init --ui
 } else {
   Write-Info 'Starting guided CLI setup'

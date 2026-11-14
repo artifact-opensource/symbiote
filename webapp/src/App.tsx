@@ -4,8 +4,8 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   Activity, ArrowRight, ArrowUpRight, Bell, Bot, Check, ChevronDown, CircleAlert, CircleCheck, Clock3, Command, Copy, Cpu,
-  Archive, Bookmark, Brain, Cloud, Database, Download, Gauge, Globe, Globe2, HardDrive, History, Info, Landmark, LayoutDashboard, Leaf, Maximize2, Menu, MessageSquare, Minimize2, Moon, Network,
-  Biohazard, ChevronUp, FolderOpen, GitBranch, MessagesSquare, Pause, Pencil, Plus, Plug, Power, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Sun, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
+  Archive, Bookmark, Brain, Cloud, Database, Download, Gauge, Globe, Globe2, HardDrive, Info, Landmark, LayoutDashboard, Leaf, Menu, MessageSquare, Network,
+  Biohazard, ChevronUp, FolderOpen, GitBranch, MessagesSquare, Pause, Pencil, Plus, Plug, RefreshCw, Search, Server, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, TerminalSquare, Thermometer, Upload, Users, Workflow, Wrench, X,
 } from 'lucide-react';
 import type { AgentProfile, ChatMessage, GatewayConfig, GatewayStatus, HostResourceSnapshot, MemoryNodeContext, SessionSummary, ThreadUserHelpRequest, ToolSummary, ViewId, WorkspaceAgent, WorkspaceProject, WorkspaceRun } from './types';
 import type { CloudProviderStatus, GoogleWorkspaceGrant, TailscaleIntegrationStatus } from './components/IntegrationsView';
@@ -137,25 +137,6 @@ function createClientId(): string {
   return typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-}
-
-declare global {
-  interface Window {
-    symbioteDesktop?: {
-      supportsReboot: boolean;
-      openMini(): Promise<void>;
-      expand(): Promise<void>;
-      closeMini(): Promise<void>;
-      restartApp(): Promise<void>;
-      getLanUrl(): Promise<string>;
-      getOpacity(): Promise<number>;
-      setOpacity(opacity: number): Promise<number>;
-      setTheme(theme: Theme): Promise<Theme>;
-      requestLanAccess(): Promise<{ status: string }>;
-      installUpdate(): Promise<boolean>;
-      requestReboot(): Promise<void>;
-    };
-  }
 }
 
 function ResourceStatusStrip({ host }: { host?: HostResourceSnapshot }) {
@@ -508,247 +489,6 @@ function TodoActivityBubble({ items }: { items: TodoActivityItem[] }) {
   );
 }
 
-function MinimalMode({ theme, agentName, agentEmoji, agentAvatarDataUrl, onThemeChange }: {
-  theme: Theme;
-  agentName?: string;
-  agentEmoji?: string;
-  agentAvatarDataUrl?: string;
-  onThemeChange: () => void;
-}) {
-  const [tab, setTab] = useState<'chat' | 'history' | 'agents' | 'tasks'>('chat');
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [agents, setAgents] = useState<WorkspaceAgent[]>([]);
-  const [runs, setRuns] = useState<WorkspaceRun[]>([]);
-  const [text, setText] = useState('');
-  const [opacity, setOpacity] = useState(0.88);
-  const [opacityControlsOpen, setOpacityControlsOpen] = useState(false);
-  const opacityRevisionRef = useRef(0);
-  const [busy, setBusy] = useState(false);
-  const [activeTurnSessionId, setActiveTurnSessionId] = useState('');
-  const [error, setError] = useState('');
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const conversations = useMemo(() => sessions.filter(session => session.sessionKind !== 'subagent'), [sessions]);
-
-  const refresh = useCallback(async () => {
-    try {
-      const [sessionList, runList, agentList] = await Promise.all([
-        api<SessionSummary[]>('/api/sessions'),
-        api<WorkspaceRun[]>('/api/runs'),
-        api<WorkspaceAgent[]>('/api/agents'),
-      ]);
-      setSessions(sessionList);
-      setRuns(runList);
-      setAgents(agentList);
-      setActiveSessionId(current => current || sessionList.find(session => session.sessionKind !== 'subagent')?.id || '');
-      setError('');
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not refresh the workspace.');
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), tab === 'tasks' ? 1000 : 5000);
-    return () => window.clearInterval(timer);
-  }, [refresh, tab]);
-
-
-
-  useEffect(() => {
-    void window.symbioteDesktop?.getOpacity().then(setOpacity).catch(failure => {
-      setError(failure instanceof Error ? failure.message : 'Could not read overlay transparency.');
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!activeSessionId) {
-      setMessages([]);
-      return;
-    }
-    let cancelled = false;
-    void api<ChatMessage[]>(`/api/sessions/${encodeURIComponent(activeSessionId)}/messages`)
-      .then(result => { if (!cancelled) setMessages(result); })
-      .catch(failure => { if (!cancelled) setError(failure instanceof Error ? failure.message : 'Could not load conversation.'); });
-    return () => { cancelled = true; };
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    if (tab === 'chat') scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages, tab]);
-
-  const newConversation = async () => {
-    try {
-      const session = await api<SessionSummary>('/api/sessions', {
-        method: 'POST',
-        body: JSON.stringify({ name: 'Conversation' }),
-      });
-      setSessions(current => [session, ...current.filter(item => item.id !== session.id)]);
-      setActiveSessionId(session.id);
-      setTab('chat');
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not start a conversation.');
-    }
-  };
-
-  const sendMessage = async (event: FormEvent) => {
-    event.preventDefault();
-    const message = text.trim();
-    if (!message || !activeSessionId || busy) return;
-    setText('');
-    setBusy(true);
-    const assistantId = createClientId();
-    let streamedText = '';
-    setActiveTurnSessionId(activeSessionId);
-    setMessages(current => [...current, { id: `pending-${Date.now()}`, role: 'user', content: message, timestamp: Date.now() }, { id: assistantId, role: 'assistant', content: '', streaming: true, thinking: true, activityState: 'thinking', timestamp: Date.now() }]);
-    try {
-      const outcome = await streamApi<{ text: string }>('/api/chat', { text: message, sessionId: activeSessionId }, event => {
-        if (event.type === 'todo_update') {
-          setMessages(current => current.map(item => item.id === assistantId
-            ? { ...item, todoActivity: mergeTodoActivity(item.todoActivity, event.completedTodo, event.remainingTodos) }
-            : item));
-          return;
-        }
-        setMessages(current => current.map(item => {
-          if (item.id !== assistantId) return item;
-          if (event.type === 'text_delta') return { ...item, content: item.content + String(event.text ?? ''), thinking: false, activityState: 'responding' };
-          if (event.type === 'thinking_delta') return { ...item, thinking: true, activityState: 'reasoning' };
-          if (event.type === 'tool_start') {
-            const name = String(event.name ?? 'tool');
-            return { ...item, thinking: false, activityState: getToolActivity(name).activity, activeTool: name, activeTools: [...(item.activeTools ?? []), name] };
-          }
-          if (event.type === 'tool_end') {
-            const name = String(event.name ?? 'tool');
-            const activeTools = (item.activeTools ?? []).filter((tool, index, tools) => tool !== name || index !== tools.lastIndexOf(name));
-            return { ...item, activeTools, activeTool: activeTools.at(-1), thinking: activeTools.length === 0, activityState: activeTools.length ? getToolActivity(activeTools.at(-1)!).activity : 'thinking' };
-          }
-          return item;
-        }));
-        if (event.type === 'text_delta') streamedText += String(event.text ?? '');
-      });
-      if (!outcome.complete) {
-        const saved = await api<ChatMessage[]>(`/api/sessions/${encodeURIComponent(activeSessionId)}/messages`);
-        const latestAssistant = findSavedAssistantResponse(saved, message);
-        if (latestAssistant) {
-          setMessages(saved);
-        } else {
-          setMessages(current => current.map(item => item.id === assistantId
-            ? { ...item, content: streamedText, streaming: false, activeTools: [], activeTool: undefined, todoActivity: [], interrupted: true }
-            : item));
-        }
-        return;
-      }
-      const result = outcome.result;
-      await refresh();
-      const saved = await api<ChatMessage[]>(`/api/sessions/${encodeURIComponent(activeSessionId)}/messages`);
-      setMessages(saved.length ? saved : current => current.map(item => item.id === assistantId
-        ? { ...item, content: result.text, streaming: false, activeTools: [], activeTool: undefined, todoActivity: [] }
-        : item));
-    } catch (failure) {
-      setMessages(current => current.map(item => item.id === assistantId ? {
-        ...item,
-        content: item.content || streamedText || (failure instanceof Error ? failure.message : 'The agent turn failed.'),
-        streaming: false,
-        activeTools: [],
-        activeTool: undefined,
-        todoActivity: [],
-        interrupted: true,
-      } : item));
-    } finally {
-      setBusy(false);
-      setActiveTurnSessionId('');
-    }
-  };
-
-  const updateOpacity = async (value: number) => {
-    const revision = ++opacityRevisionRef.current;
-    setOpacity(value);
-    try {
-      const applied = await window.symbioteDesktop?.setOpacity(value);
-      if (revision === opacityRevisionRef.current && applied !== undefined) setOpacity(applied);
-    } catch (failure) {
-      if (revision !== opacityRevisionRef.current) return;
-      try {
-        setOpacity(await window.symbioteDesktop?.getOpacity() ?? opacity);
-      } catch (readFailure) {
-        console.error('Could not restore the Electron overlay opacity after an update failed:', readFailure);
-      }
-      setError(failure instanceof Error ? failure.message : 'Could not update overlay transparency.');
-    }
-  };
-
-  return (
-    <div className="control-room minimal-mode" data-theme={theme}>
-      <section className="minimal-card" aria-label="Symbiote mini chat">
-        <header className="minimal-header">
-          <span className="minimal-drag"><Biohazard size={16} /> <strong>Symbiote</strong></span>
-          <div className="minimal-header-actions">
-            <button className="minimal-icon-button" onClick={onThemeChange} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`} title="Change appearance">{theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}</button>
-            <button className="minimal-icon-button" onClick={() => void window.symbioteDesktop?.expand()} aria-label="Open full application" title="Expand"><Maximize2 size={15} /></button>
-            <button className="minimal-icon-button" onClick={() => void window.symbioteDesktop?.closeMini()} aria-label="Close mini window" title="Close"><X size={16} /></button>
-          </div>
-        </header>
-        <nav className="minimal-tabs" aria-label="Mini window sections">
-          {([
-            ['chat', MessageSquare, 'Chat'],
-            ['history', History, 'History'],
-            ['agents', Users, 'Agents'],
-            ['tasks', Activity, 'Tasks'],
-          ] as const).map(([id, Icon, label]) => (
-            <button key={id} className={tab === id ? 'minimal-tab minimal-tab-active' : 'minimal-tab'} onClick={() => setTab(id)}>
-              <Icon size={14} /><span>{label}</span>
-            </button>
-          ))}
-        </nav>
-        {error && <div className="minimal-error" role="alert">{error}</div>}
-        {tab === 'chat' && <>
-          <div className="minimal-session-row">
-            <select aria-label="Select conversation" value={activeSessionId} onChange={event => setActiveSessionId(event.target.value)}>
-              {conversations.map(session => <option key={session.id} value={session.id}>{session.label || 'Conversation'}</option>)}
-            </select>
-            <button className="minimal-icon-button" onClick={() => void newConversation()} aria-label="New conversation" title="New conversation"><Plus size={16} /></button>
-          </div>
-          <div className="minimal-messages" ref={scrollRef}>
-            {messages.length === 0 && <p className="minimal-empty">Start a conversation.</p>}
-            {messages.map(message => <article className={`minimal-message minimal-message-${message.role}`} key={message.id}><span className={message.role === 'assistant' ? 'minimal-message-agent' : undefined}>{message.role === 'user' ? 'You' : <><AgentAvatar emoji={agentEmoji} image={agentAvatarDataUrl} size={13} />{agentName || 'Agent'}</>}</span>{message.content && <MessageBody content={message.content} />}{message.streaming && message.todoActivity?.length ? <TodoActivityBubble items={message.todoActivity} /> : null}{message.streaming && (() => {
-              const activity = isAgentActivity(message.activityState) ? message.activityState : message.activeTool ? getToolActivity(message.activeTool).activity : 'thinking';
-              const tool = message.activeTool ? getToolActivity(message.activeTool) : undefined;
-              return <ReasoningDisplay activity={activity} toolLabel={tool ? `Executing · ${tool.label}` : undefined} compact />;
-            })()}{message.interrupted && <small className="message-interrupted">This reply did not finish. Your message is preserved; you can try again.</small>}</article>)}
-          </div>
-          <form className="minimal-composer" onSubmit={event => void sendMessage(event)}>
-            <textarea value={text} onChange={event => setText(event.target.value)} rows={2} placeholder="Write a message…" aria-label="Message" onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
-            {busy
-              ? <button type="button" onClick={() => void api(`/api/sessions/${encodeURIComponent(activeTurnSessionId)}/interrupt`, { method: 'POST' }).catch(failure => setError(failure instanceof Error ? failure.message : 'Could not interrupt the agent turn.'))} aria-label="Stop agent turn" title="Stop"><X size={16} /></button>
-              : <button type="submit" disabled={!text.trim() || !activeSessionId} aria-label="Send message" title="Send"><ArrowRight size={16} /></button>}
-          </form>
-        </>}
-        {tab === 'history' && <div className="minimal-list">
-          {conversations.map(session => <button key={session.id} className="minimal-list-item" onClick={() => { setActiveSessionId(session.id); setTab('chat'); }}><span><strong>{session.label || 'Conversation'}</strong><small>{session.messageCount} messages · {formatRelative(session.updatedAt)}</small></span><ArrowRight size={14} /></button>)}
-          {conversations.length === 0 && <p className="minimal-empty">No conversations yet.</p>}
-        </div>}
-        {tab === 'agents' && <div className="minimal-list">
-          {agents.map(agent => <div key={agent.sessionId} className="minimal-list-item"><span><strong>{agent.task}</strong><small>{agent.status} · {agent.sessionId.slice(0, 8)}</small></span>{agent.status === 'running' ? <button className="minimal-icon-button" onClick={() => void api(`/api/agents/${encodeURIComponent(agent.sessionId)}/action`, { method: 'POST', body: JSON.stringify({ action: 'stop' }) }).then(refresh).catch(failure => setError(failure instanceof Error ? failure.message : 'Could not stop subagent.'))} aria-label={`Stop ${agent.task}`} title="Stop subagent"><X size={14} /></button> : <span className={`minimal-status minimal-status-${agent.status}`} />}</div>)}
-          {agents.length === 0 && <p className="minimal-empty">No subagents yet.</p>}
-        </div>}
-        {tab === 'tasks' && <div className="minimal-list">
-          {runs.map(run => <div key={run.id} className="minimal-list-item"><span><strong>{run.name}</strong><small>{run.status} · {formatRelative(run.startedAt)}</small></span>{run.status === 'running' ? <button className="minimal-icon-button" onClick={() => void api(`/api/runs/${encodeURIComponent(run.id)}/stop`, { method: 'POST' }).then(refresh).catch(failure => setError(failure instanceof Error ? failure.message : 'Could not stop task.'))} aria-label={`Stop ${run.name}`} title="Stop task"><X size={14} /></button> : <span className={`minimal-status minimal-status-${run.status}`} />}</div>)}
-          {runs.length === 0 && <p className="minimal-empty">No agent tasks yet.</p>}
-        </div>}
-        <footer className="minimal-footer">
-          <button type="button" className="minimal-opacity-toggle" onClick={() => setOpacityControlsOpen(open => !open)} aria-expanded={opacityControlsOpen} aria-controls="minimal-opacity-controls">
-            <Gauge size={13} /><span>Opacity</span><strong>{Math.round(opacity * 100)}%</strong><ChevronDown size={12} />
-          </button>
-          {opacityControlsOpen && <div id="minimal-opacity-controls" className="minimal-opacity-controls">
-            <input type="range" min="0.35" max="1" step="0.01" value={opacity} onChange={event => void updateOpacity(Number(event.target.value))} aria-label="Overlay opacity" />
-          </div>}
-        </footer>
-      </section>
-    </div>
-  );
-}
-
 function formatBytes(megabytes?: number): string {
   if (typeof megabytes !== 'number') return '—';
   return megabytes >= 1024 ? `${(megabytes / 1024).toFixed(1)} GB` : `${Math.round(megabytes)} MB`;
@@ -940,7 +680,7 @@ function AccessGate({ onUnlock, error }: { onUnlock: (token: string) => Promise<
   );
 }
 
-function CommandPalette({ query, onQuery, onClose, onNavigate, onNewSession, onRestartGateway, onChangeProviderModel, onCloneRepository, onReboot, isDesktopApp }: {
+function CommandPalette({ query, onQuery, onClose, onNavigate, onNewSession, onRestartGateway, onChangeProviderModel, onCloneRepository }: {
   query: string;
   onQuery: (value: string) => void;
   onClose: () => void;
@@ -949,8 +689,6 @@ function CommandPalette({ query, onQuery, onClose, onNavigate, onNewSession, onR
   onRestartGateway: () => void;
   onChangeProviderModel: () => void;
   onCloneRepository: () => void;
-  onReboot: () => void;
-  isDesktopApp: boolean;
 }) {
   const commands = [
     ...NAVIGATION.map(item => ({ label: item.label, detail: `Open ${item.group.toLowerCase()}`, icon: item.icon, run: () => onNavigate(item.id) })),
@@ -958,7 +696,6 @@ function CommandPalette({ query, onQuery, onClose, onNavigate, onNewSession, onR
     { label: 'Restart gateway', detail: 'Restart the supervised runtime', icon: RefreshCw, run: onRestartGateway },
     { label: 'Update provider & model', detail: 'Change the active model route', icon: Cpu, run: onChangeProviderModel },
     { label: 'Clone repository', detail: 'Clone an HTTPS repository into Projects', icon: FolderOpen, run: onCloneRepository },
-    ...(isDesktopApp ? [{ label: 'Restart computer', detail: 'Requires confirmation and Windows approval', icon: Power, run: onReboot }] : []),
   ].filter(command => `${command.label} ${command.detail}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
@@ -1081,8 +818,6 @@ export default function App() {
     appearanceRef.current = next;
     setAppearance(next);
   };
-  const isMinimalMode = new URLSearchParams(window.location.search).get('minimal') === '1';
-  const isDesktopApp = new URLSearchParams(window.location.search).get('desktop') === '1' && Boolean(window.symbioteDesktop);
   const [view, setView] = useState<ViewId>('workspace');
   const [refreshIntervalMs, setRefreshIntervalMs] = useState(readRefreshInterval);
   const [threadToOpen, setThreadToOpen] = useState('');
@@ -1096,12 +831,6 @@ export default function App() {
   const [status, setStatus] = useState<GatewayStatus | null>(null);
   const [dismissedUpdateVersion, setDismissedUpdateVersion] = useState<string | null>(null);
   const [checkingForUpdates, setCheckingForUpdates] = useState(false);
-  const [preparingUpdate, setPreparingUpdate] = useState(false);
-  const updateDownload = status?.update?.download;
-  const updateDownloadPercent = updateDownload?.state === 'downloading'
-    && updateDownload.totalBytes && updateDownload.totalBytes > 0
-    ? Math.min(100, Math.floor((updateDownload.downloadedBytes ?? 0) / updateDownload.totalBytes * 100))
-    : null;
   const [config, setConfig] = useState<GatewayConfig | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [gammaHeartbeatSession, setGammaHeartbeatSession] = useState<SessionSummary | null>(null);
@@ -1352,11 +1081,6 @@ export default function App() {
     document.title = 'Control Room';
     const primary = getComputedStyle(document.documentElement).getPropertyValue('--appearance-primary').trim();
     document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute('content', primary || (theme === 'dark' ? '#080808' : '#f4f4f4'));
-    if (window.symbioteDesktop) {
-      void window.symbioteDesktop.setTheme(theme).catch(failure => {
-        console.error('Could not synchronize the Electron window theme:', failure);
-      });
-    }
     try {
       window.localStorage.setItem('symbiote-theme', theme);
     } catch {
@@ -1460,20 +1184,6 @@ export default function App() {
     statusRequest.current = request;
     return request;
   }, []);
-
-  const installUpdate = async () => {
-    if (!window.symbioteDesktop || preparingUpdate) return;
-    setPreparingUpdate(true);
-    setError('');
-    try {
-      await api('/api/update/download', { method: 'POST', body: '{}' });
-      const started = await window.symbioteDesktop.installUpdate();
-      if (!started) throw new Error('Update installation was cancelled or could not be started.');
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Could not prepare the verified update installer.');
-      setPreparingUpdate(false);
-    }
-  };
 
   const checkForUpdates = async () => {
     if (checkingForUpdates) return;
@@ -1587,7 +1297,7 @@ export default function App() {
     try {
       await api('/api/gateway/restart', { method: 'POST', body: '{}' });
       setError('');
-      setCommandNotice('Gateway restart requested. Electron will supervise the restart.');
+      setCommandNotice('Gateway restart requested.');
       window.setTimeout(() => setCommandNotice(''), 7000);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Gateway restart could not be requested.');
@@ -1613,17 +1323,6 @@ export default function App() {
       window.setTimeout(() => setCommandNotice(''), 7000);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Incidents could not be archived.');
-    }
-  };
-
-  const rebootComputer = async () => {
-    if (!window.symbioteDesktop || !window.confirm('Restart this computer? Windows will ask for approval, then restart in 15 seconds.')) return;
-    try {
-      await window.symbioteDesktop.requestReboot();
-      setCommandNotice('Windows accepted the restart request. You can cancel it with “shutdown /a” before the countdown ends.');
-      window.setTimeout(() => setCommandNotice(''), 7000);
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Computer restart was not started.');
     }
   };
 
@@ -2497,10 +2196,6 @@ export default function App() {
     return <AccessGate onUnlock={unlockLanAccess} error={accessError} />;
   }
 
-  if (isMinimalMode && isDesktopApp) {
-    return <MinimalMode theme={theme} agentName={config?.agentName || config?.name} agentEmoji={config?.agentEmoji} agentAvatarDataUrl={config?.agentAvatarDataUrl} onThemeChange={() => changeAppearance({ ...appearance, brightness: appearance.brightness >= 50 ? 0 : 100 })} />;
-  }
-
   return (
     <ChatVoiceProvider
       request={api}
@@ -2686,7 +2381,6 @@ export default function App() {
             <div className="breadcrumb"><span className="breadcrumb-divider">/</span><strong>{view === 'chat' ? activeSession?.label || 'Conversation' : currentNavigation.label}</strong></div>
           </div>
           <div className="topbar-right">
-            {isDesktopApp && <button className="icon-button utility-button" onClick={() => void window.symbioteDesktop?.openMini()} aria-label="Open floating mini chat" title="Open floating mini chat"><Minimize2 size={16} /></button>}
             <button className="icon-button utility-button" onClick={() => { setCommandOpen(true); setCommandQuery(''); }} aria-label="Open command menu (Ctrl+K)" title="Command menu · Ctrl+K">
               <Command size={16} />
             </button>
@@ -2736,13 +2430,7 @@ export default function App() {
             {status?.update?.state === 'available' && status.update.latestVersion !== dismissedUpdateVersion && (
               <div className="notice notice-update" role="status">
                 <span>Symbiote {status.update.latestVersion} is available.</span>
-                {isDesktopApp
-                  ? <button className="button button-secondary" onClick={() => void installUpdate()} disabled={preparingUpdate || updateDownload?.state === 'downloading'}>
-                      {preparingUpdate || updateDownload?.state === 'downloading'
-                        ? updateDownloadPercent === null ? 'Preparing installer…' : `Downloading ${updateDownloadPercent}%`
-                        : 'Install update'}
-                    </button>
-                  : <a className="button button-secondary" href={status.update.releaseUrl} target="_blank" rel="noreferrer">View update</a>}
+                <a className="button button-secondary" href={status.update.releaseUrl} target="_blank" rel="noreferrer">View update</a>
                 <button className="icon-button small" onClick={() => setDismissedUpdateVersion(status.update?.latestVersion ?? null)} aria-label="Dismiss update notice"><X size={14} /></button>
               </div>
             )}
@@ -2938,8 +2626,6 @@ export default function App() {
         onRestartGateway={() => { setCommandOpen(false); void restartGateway(); }}
         onChangeProviderModel={() => { setCommandOpen(false); setCommandAction('provider-model'); }}
         onCloneRepository={() => { setCommandOpen(false); setCommandAction('clone-repository'); }}
-        onReboot={() => { setCommandOpen(false); void rebootComputer(); }}
-        isDesktopApp={isDesktopApp && window.symbioteDesktop?.supportsReboot === true}
       />}
       {commandAction && <CommandActionDialog action={commandAction} config={config} onClose={() => setCommandAction(null)} onSubmit={runCommandAction} />}
     </div>
@@ -5311,34 +4997,9 @@ function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChan
   refreshIntervalMs: number;
   onRefreshIntervalChange: (value: number) => void;
 }) {
-  const [lanUrl, setLanUrl] = useState('');
   const [lanToken, setLanToken] = useState('');
   const [tokenError, setTokenError] = useState('');
   const [tokenLoading, setTokenLoading] = useState(false);
-  const [firewallStatus, setFirewallStatus] = useState('');
-  const [firewallLoading, setFirewallLoading] = useState(false);
-
-  const configureLanFirewall = async () => {
-    if (!window.symbioteDesktop) return;
-    setFirewallLoading(true);
-    setFirewallStatus('');
-    try {
-      const result = await window.symbioteDesktop.requestLanAccess();
-      setFirewallStatus(result.status === 'configured'
-        ? 'Local-network access is allowed by Windows Firewall.'
-        : result.status === 'declined'
-          ? 'Access remains limited by Windows Firewall; the desktop app still works locally.'
-          : result.status === 'loopback'
-            ? 'The gateway is bound to this computer only; no firewall rule is needed.'
-            : result.status === 'unsupported'
-              ? 'Windows Firewall settings are available only in the Windows desktop app.'
-              : 'The firewall rule was not changed. Local access remains available.');
-    } catch (failure) {
-      setFirewallStatus(failure instanceof Error ? failure.message : 'Could not configure Windows Firewall.');
-    } finally {
-      setFirewallLoading(false);
-    }
-  };
 
   const showLanToken = async () => {
     setTokenLoading(true);
@@ -5351,27 +5012,6 @@ function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChan
       setTokenError(failure instanceof Error ? failure.message : 'Could not retrieve the LAN access token.');
     } finally {
       setTokenLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    let mounted = true;
-    const refreshLanUrl = () => {
-      if (!window.symbioteDesktop) return;
-      void window.symbioteDesktop.getLanUrl()
-        .then(url => { if (mounted) setLanUrl(url); })
-        .catch(() => { if (mounted) setLanUrl(''); });
-    };
-    refreshLanUrl();
-    const timer = window.setInterval(refreshLanUrl, 30_000);
-    return () => { mounted = false; window.clearInterval(timer); };
-  }, []);
-
-  const copyLanUrl = async () => {
-    try {
-      await navigator.clipboard.writeText(lanUrl);
-    } catch (failure) {
-      setTokenError(failure instanceof Error ? failure.message : 'Could not copy the LAN URL.');
     }
   };
 
@@ -5402,7 +5042,6 @@ function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChan
         <div className="section-heading"><div><div className="eyebrow">NETWORK BOUNDARIES</div><h2>Gateway endpoints</h2></div><span className="settings-source"><ShieldCheck size={14} />LOCAL API</span></div>
         <div className="settings-grid">
           <Setting label="Control room" value={config?.gateway ? `${config.gateway.webHost}:${config.gateway.webPort}` : undefined} />
-          <Setting label="LAN URL" value={lanUrl || 'Not available'} wide />
           <Setting label="Agent API" value={config?.gateway ? `${config.gateway.apiHost}:${config.gateway.apiPort}` : undefined} />
           <Setting label="Authenticated API" value={config?.gateway ? (config.gateway.apiEnabled ? 'Enabled' : 'Disabled') : undefined} />
           <Setting label="Process ID" value={status?.pid?.toString()} />
@@ -5428,12 +5067,7 @@ function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChan
       </section>
       <section className="surface-card settings-card">
         <div className="section-heading"><div><div className="eyebrow">NETWORK ACCESS</div><h2>Connect another device</h2></div><span className="settings-source"><ShieldCheck size={14} />LOCAL ONLY</span></div>
-        <p className="settings-access-copy">On a device on your trusted network, open the refreshed LAN URL below and enter this access token.</p>
-        {lanUrl && <div className="settings-token-row">
-          <code>{lanUrl}</code>
-          <button className="button button-secondary" type="button" onClick={() => void copyLanUrl()}><Copy size={14} />Copy URL</button>
-          <a className="button button-secondary" href={lanUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} />Open</a>
-        </div>}
+        <p className="settings-access-copy">On a device on your trusted network, open <code>http://&lt;gateway-host&gt;:{config?.gateway?.webPort ?? 3009}</code> and enter this access token. Windows Firewall may need a separate inbound rule for LAN access.</p>
         {lanToken ? (
           <div className="settings-token-row">
             <code>{lanToken}</code>
@@ -5443,13 +5077,6 @@ function SettingsView({ config, status, refreshIntervalMs, onRefreshIntervalChan
           <button className="button button-secondary" type="button" disabled={tokenLoading} onClick={() => void showLanToken()}>{tokenLoading ? <ActivityOrb label="Loading token" compact loading /> : <ShieldCheck size={14} />}{tokenLoading ? 'Loading token' : 'Reveal LAN token'}</button>
         )}
         {tokenError && <p className="settings-token-error" role="alert">{tokenError}</p>}
-        {window.symbioteDesktop && <div className="settings-firewall">
-          <button className="button button-secondary" type="button" disabled={firewallLoading} onClick={() => void configureLanFirewall()}>
-            {firewallLoading ? <ActivityOrb label="Checking firewall" compact loading /> : <ShieldCheck size={14} />}
-            {firewallLoading ? 'Waiting for permission' : 'Configure Windows Firewall'}
-          </button>
-          {firewallStatus && <p className="settings-token-error" role="status">{firewallStatus}</p>}
-        </div>}
       </section>
       <div className="notice notice-info"><ShieldCheck size={16} /><span>Runtime configuration secrets are never revealed here. Configuration changes remain in the local config file; Google Workspace authorization is managed separately in Integrations.</span></div>
     </div>

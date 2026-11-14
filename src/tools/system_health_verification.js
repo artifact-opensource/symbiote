@@ -439,7 +439,6 @@ async function getSystemLogs() {
   // Check for recent log files
   const logPatterns = [
     './symbiote.log',
-    './.sessions/desktop-launch.log',
     './.sessions/health-events.jsonl'
   ];
 

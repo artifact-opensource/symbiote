@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## v6.0.0 (2026-11-15) — Legacy Gateway
+
+Full release notes: [RELEASE_NOTES_v6.0.0.md](docs/releases/RELEASE_NOTES_v6.0.0.md)
+
+### Breaking
+- Removed the Electron desktop shell and its launcher, tray, updater, and mini-chat features. The browser-based Control Room remains available through the Gateway.
+- `npm start` now starts the Gateway directly. On Windows, the MSI installs the Gateway as an automatically-starting Windows service.
+
+### Added
+- Native Git operations and hosting connectors.
+- A bundled Node.js runtime and service wrapper in the Windows MSI, with a browser-based setup flow.
+
+### Changed
+- Session storage is centralized in the configured workspace session directory.
+- Source installers and release packaging no longer install or build Electron.
+
+### Fixed
+- Cloudflare model selection and Discord provider/model fidelity.
+- MetaTrader initialization when no terminal path is configured.
+- Windows MSI setup, persistent data handling, and service install/uninstall coverage.
+
 ## v5.7.1 (2026-11-07) — Stability and Gateway Reliability
 
 Full release notes: [RELEASE_NOTES_v5.7.1.md](docs/releases/RELEASE_NOTES_v5.7.1.md)

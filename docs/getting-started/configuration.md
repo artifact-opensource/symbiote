@@ -162,7 +162,7 @@ SYMBIOTE_WEB_TOKEN=
 # SYMBIOTE_SHELL=
 ```
 
-> Install with `npm i @symbiote-agi/symbiote`, then run `npx symbiote init` for the guided CLI setup or `npx symbiote init --ui` for the desktop installer UI. See [Setup Flow](wizard.md).
+> Install with `npm i @symbiote-agi/symbiote`, then run `npx symbiote init` for the guided CLI setup or `npx symbiote init --ui` for the browser-based setup UI. See [Setup Flow](wizard.md).
 
 ## Key Settings
 
@@ -197,7 +197,7 @@ The Web UI runs on a separate port from the HTTP API:
 
 The web UI listens on all interfaces by default and protects LAN control requests with a generated token stored at `<workspace>/.sessions/web-access-token`. Set `SYMBIOTE_WEB_TOKEN` to provide a custom token. Configure `webHost`, `webPort`, `apiHost`, and `apiPort` in `symbiote.json`; the HTTP API and Control Room use separate endpoints. See [Web UI](../channels/webchat.md) for details.
 
-Enabling Tailscale-only access changes the Gateway's external bind to the connected Tailscale address while retaining a loopback listener for the desktop app and local health checks. Other tailnet devices still need the web access token.
+Enabling Tailscale-only access changes the Gateway's external bind to the connected Tailscale address while retaining a loopback listener for local health checks. Other tailnet devices still need the web access token.
 
 ## VDB And Memograph
 

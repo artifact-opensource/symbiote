@@ -117,15 +117,6 @@ else {
   }
 }
 
-$config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-$webPort = if ($config.webPort) { [int]$config.webPort } else { 3009 }
-if ($webPort -lt 1 -or $webPort -gt 65535) {
-  throw "Invalid configured web port: $webPort"
-}
-$registryPath = 'HKLM:\Software\Artifact Virtual\Symbiote'
-New-Item -Path $registryPath -Force | Out-Null
-New-ItemProperty -Path $registryPath -Name WebPort -Value $webPort -PropertyType DWord -Force | Out-Null
-
 $configDirectory = Split-Path -Parent $ConfigPath
 $environmentFile = Join-Path $configDirectory '.env'
 $seedEnvironment = if ($SeedDirectory) { Join-Path $SeedDirectory '.env' } else { '' }
