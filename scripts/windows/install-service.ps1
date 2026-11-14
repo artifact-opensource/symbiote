@@ -173,6 +173,8 @@ try {
   Invoke-Nssm @('set', $ServiceName, 'AppRotateOnline', '1')
   Invoke-Nssm @('set', $ServiceName, 'AppRotateBytes', '10485760')
   Invoke-Nssm @('set', $ServiceName, 'AppEnvironmentExtra', 'NODE_ENV=production')
+  $applicationParameters = Invoke-Nssm @('get', $ServiceName, 'AppParameters')
+  Write-Host "NSSM application parameters: $applicationParameters"
 
   $serviceControl = Join-Path $env:SystemRoot 'System32\sc.exe'
   & $serviceControl config $ServiceName 'obj=' 'LocalSystem' | Out-Null
