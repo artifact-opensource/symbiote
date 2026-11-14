@@ -144,7 +144,7 @@ if ($LASTEXITCODE -ne 0) {
 $script:NssmPath = $NssmPath
 $serviceInstalled = $false
 try {
-  $nodeArguments = "`"$GatewayPath`" --config=`"$ConfigPath`""
+  $nodeArguments = '\"{0}\" --config=\"{1}\"' -f $GatewayPath, $ConfigPath
   Invoke-Nssm @('install', $ServiceName, $NodePath, $nodeArguments)
   $serviceInstalled = $true
   Invoke-Nssm @('set', $ServiceName, 'ObjectName', 'LocalSystem')
