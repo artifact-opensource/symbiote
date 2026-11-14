@@ -15,6 +15,7 @@
     <MediaTemplate EmbedCab="yes" />
     <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
     <Property Id="SYMBIOTE_SEED_DIRECTORY" Secure="yes" />
+    <Property Id="SYMBIOTE_TRANSCRIPT_PATH" Secure="yes" />
     <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
     <UIRef Id="WixUI_InstallDir" />
 
@@ -119,13 +120,13 @@
 
     <CustomAction Id="InstallSymbioteService"
                   Directory="TARGETDIR"
-                  ExeCommand="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\windows\install-service.ps1&quot; -SeedDirectory &quot;[SYMBIOTE_SEED_DIRECTORY]&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\windows\install-service.ps1&quot; -SeedDirectory &quot;[SYMBIOTE_SEED_DIRECTORY]&quot; -TranscriptPath &quot;[SYMBIOTE_TRANSCRIPT_PATH]&quot;"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check" />
     <CustomAction Id="UninstallSymbioteService"
                   Directory="TARGETDIR"
-                  ExeCommand="&quot;[SystemFolder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\windows\uninstall-service.ps1&quot;"
+                  ExeCommand="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\windows\uninstall-service.ps1&quot;"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check" />

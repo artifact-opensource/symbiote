@@ -6,6 +6,7 @@ $installerDirectory = Join-Path $repositoryRoot 'dist\windows-installer'
 $testLogDirectory = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
 $installLog = Join-Path $testLogDirectory 'symbiote-msi-install.log'
 $uninstallLog = Join-Path $testLogDirectory 'symbiote-msi-uninstall.log'
+$serviceInstallLog = Join-Path $testLogDirectory 'symbiote-service-install.log'
 $installer = Get-ChildItem -LiteralPath $installerDirectory -Filter 'Symbiote-*-x64.msi' -File |
   Select-Object -First 1
 if (-not $installer) {
@@ -26,9 +27,8 @@ function Invoke-Msi([string[]]$Arguments, [string]$LogPath) {
     if (Test-Path -LiteralPath $LogPath) {
       Get-Content -LiteralPath $LogPath -Tail 100
     }
-    $serviceLog = Join-Path $dataDirectory 'logs\service-install.log'
-    if (Test-Path -LiteralPath $serviceLog) {
-      Get-Content -LiteralPath $serviceLog -Tail 100
+    if (Test-Path -LiteralPath $serviceInstallLog) {
+      Get-Content -LiteralPath $serviceInstallLog -Tail 100
     }
     throw "msiexec failed with exit code $exitCode. Full log: $LogPath"
   }
@@ -36,7 +36,7 @@ function Invoke-Msi([string[]]$Arguments, [string]$LogPath) {
 
 $installCompleted = $false
 try {
-  Invoke-Msi @('/i', $installer.FullName, '/qn', '/norestart') $installLog
+  Invoke-Msi @('/i', $installer.FullName, '/qn', '/norestart', "SYMBIOTE_TRANSCRIPT_PATH=$serviceInstallLog") $installLog
   $installCompleted = $true
 
   $service = Get-Service -Name $serviceName -ErrorAction Stop

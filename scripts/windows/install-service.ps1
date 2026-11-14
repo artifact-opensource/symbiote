@@ -5,6 +5,7 @@ param(
   [string]$NssmPath = '',
   [string]$NodePath = '',
   [string]$SeedDirectory = '',
+  [string]$TranscriptPath = '',
   [string]$ServiceName = 'SymbioteGateway'
 )
 
@@ -25,8 +26,14 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 
 $installLogDirectory = Join-Path $DataDir 'logs'
 New-Item -ItemType Directory -Path $installLogDirectory -Force | Out-Null
+$transcriptPath = if ($TranscriptPath) {
+  [IO.Path]::GetFullPath($TranscriptPath)
+}
+else {
+  Join-Path $installLogDirectory 'service-install.log'
+}
 $script:transcriptStarted = $false
-Start-Transcript -Path (Join-Path $installLogDirectory 'service-install.log') -Append | Out-Null
+Start-Transcript -Path $transcriptPath -Append | Out-Null
 $script:transcriptStarted = $true
 trap {
   if ($script:transcriptStarted) {

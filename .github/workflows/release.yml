@@ -89,7 +89,7 @@ jobs:
           foreach ($source in @(
             (Join-Path $env:RUNNER_TEMP 'symbiote-msi-install.log'),
             (Join-Path $env:RUNNER_TEMP 'symbiote-msi-uninstall.log'),
-            (Join-Path $env:ProgramData 'Symbiote\logs\service-install.log')
+            (Join-Path $env:RUNNER_TEMP 'symbiote-service-install.log')
           )) {
             if (Test-Path -LiteralPath $source) {
               Copy-Item -LiteralPath $source -Destination $destination -Force
