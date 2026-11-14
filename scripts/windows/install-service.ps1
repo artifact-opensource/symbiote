@@ -103,6 +103,10 @@ if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
     $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
     $config.workspace = '.\workspace'
     $config.sessionsDir = '.\workspace\.sessions'
+    if ($config.defaultProvider -eq 'openrouter' -and
+        [string]::IsNullOrWhiteSpace([string]$config.defaultModel)) {
+      $config.defaultModel = 'openrouter/free'
+    }
     $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
   }
   else {
@@ -114,6 +118,10 @@ if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
     $config = Get-Content -LiteralPath $examplePath -Raw | ConvertFrom-Json
     $config.workspace = '.\workspace'
     $config.sessionsDir = '.\workspace\.sessions'
+    if ($config.defaultProvider -eq 'openrouter' -and
+        [string]::IsNullOrWhiteSpace([string]$config.defaultModel)) {
+      $config.defaultModel = 'openrouter/free'
+    }
     $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $ConfigPath -Encoding UTF8
   }
 }
@@ -124,6 +132,8 @@ else {
   }
 }
 
+$configSummary = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+Write-Host "Config defaults: provider=$($configSummary.defaultProvider); model=$($configSummary.defaultModel)"
 $configDirectory = Split-Path -Parent $ConfigPath
 $environmentFile = Join-Path $configDirectory '.env'
 $seedEnvironment = if ($SeedDirectory) { Join-Path $SeedDirectory '.env' } else { '' }
