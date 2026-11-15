@@ -154,6 +154,10 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) {
   throw "Could not restrict permissions on service environment file: $environmentFile"
 }
+& $icacls $ConfigPath '/inheritance:r' '/grant:r' '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  throw "Could not restrict permissions on service config file: $ConfigPath"
+}
 
 $script:NssmPath = $NssmPath
 $serviceInstalled = $false
@@ -203,6 +207,8 @@ catch {
     $errorMessage += "`nNSSM status:`n$nssmStatus"
     $environmentAcl = & $icacls $environmentFile 2>&1 | Out-String
     $errorMessage += "`nEnvironment file ACL:`n$environmentAcl"
+    $configAcl = & $icacls $ConfigPath 2>&1 | Out-String
+    $errorMessage += "`nConfig file ACL:`n$configAcl"
     foreach ($logName in @('gateway.stdout.log', 'gateway.stderr.log')) {
       $gatewayLog = Join-Path $LogDir $logName
       if (Test-Path -LiteralPath $gatewayLog) {
