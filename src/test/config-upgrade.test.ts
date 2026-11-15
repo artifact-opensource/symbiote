@@ -101,6 +101,17 @@ test('config fallback does not choose a model outside symbiote.json', () => {
   assert.equal(loadConfig(missingConfig).defaultModel, '');
 });
 
+test('config loading reports errors for existing invalid files', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-invalid-config-'));
+  const configPath = path.join(dir, 'symbiote.json');
+  try {
+    fs.writeFileSync(configPath, '{');
+    assert.throws(() => loadConfig(configPath), /Failed to load configuration.*symbiote\.json/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('FreeAI key is loaded from the environment when its config key is unset', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'symbiote-freeai-config-'));
   const previousKey = process.env.FREEAI_API_KEY;

@@ -264,8 +264,11 @@ export function loadConfig(configPath?: string): SymbioteConfig {
       if (merged.workspace) merged.workspace = path.resolve(configDir, merged.workspace);
       if (merged.sessionsDir) merged.sessionsDir = path.resolve(configDir, merged.sessionsDir);
       return merged;
-    } catch {
-      continue;
+    } catch (error) {
+      if (fs.existsSync(p)) {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`Failed to load configuration from ${p}: ${detail}`);
+      }
     }
   }
 

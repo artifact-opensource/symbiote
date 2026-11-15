@@ -4209,7 +4209,7 @@ export async function startGateway(configPath?: string): Promise<SymbioteGateway
 
   // Load gateway config from symbiote config or env
   const config = loadConfig(configPath);
-  console.log(`[gateway] Config file ${configFile ? 'found' : 'not found'}; defaultModel=${config.defaultModel || '(unset)'}`);
+  console.log(`[gateway] Config file ${configFile ? path.resolve(configFile) : '(not found)'}; defaultModel=${config.defaultModel || '(unset)'}`);
   const workspace = path.resolve(config.workspace);
   const tailscaleSessionDirectory = path.join(workspace, '.sessions');
   const legacyTailscaleSettingsPath = path.join(workspace, '.session', 'tailscale-access.json');
